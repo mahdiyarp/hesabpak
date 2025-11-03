@@ -80,16 +80,46 @@ def create_full_backup(app, user="system", reason="manual"):
         z.writestr("metadata.json", json.dumps(meta, ensure_ascii=False, indent=2))
     return str(out)
 
-def list_backups(app):
+def list_backups(app, year_key: str | None = None):
+    """Return backup metadata for the requested fiscal year.
+
+    If ``year_key`` is provided the lookup is restricted to the matching
+    sub-directory inside the backup folder (``<backups>/<year_key>``). When the
+    key is missing or empty all top-level files plus the newest entry from each
+    known fiscal-year folder are returned. The helper keeps the previous public
+    contract (list of dict objects containing ``name``/``size``/``mtime``) while
+    also exposing the year folder via the ``year`` field so that callers can
+    label the origin when required.
+    """
+
     _, backup_dir, _, _ = ensure_dirs(app)
-    items = []
-    for p in sorted(backup_dir.glob("backup_*.zip"), reverse=True):
-        items.append({
-            "name": p.name,
-            "size": p.stat().st_size,
-            "mtime": datetime.datetime.fromtimestamp(p.stat().st_mtime).isoformat(timespec="seconds"),
-            "path": str(p)
-        })
+
+    def _collect(directory: Path, *, year: str | None):
+        rows = []
+        for p in sorted(directory.glob("backup_*.zip"), reverse=True):
+            rows.append({
+                "name": p.name,
+                "size": p.stat().st_size,
+                "mtime": datetime.datetime.fromtimestamp(p.stat().st_mtime).isoformat(timespec="seconds"),
+                "path": str(p),
+                "year": year,
+            })
+        return rows
+
+    items: list[dict] = []
+
+    if year_key:
+        target = backup_dir / year_key
+        if target.exists():
+            items.extend(_collect(target, year=year_key))
+        else:
+            # اگر پوشهٔ سال خواسته‌شده موجود نبود، لیست خالی برمی‌گردد
+            return []
+    else:
+        items.extend(_collect(backup_dir, year=None))
+        for sub in sorted([p for p in backup_dir.iterdir() if p.is_dir()], reverse=True):
+            items.extend(_collect(sub, year=sub.name))
+
     return items
 
 def restore_backup(app, zip_filename):

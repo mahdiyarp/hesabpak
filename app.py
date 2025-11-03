@@ -19,7 +19,9 @@ from utils.date_utils import (
     to_jdate_str,
     now_info as date_now_info,
     parse_gregorian_date,
+    parse_jalali_date,
     jalali_reference,
+    fa_digits,
 )
 
 # ----------------- Config -----------------
@@ -42,12 +44,89 @@ POS_DEVICE_CHOICES = [
     ("saman-s2100", "Saman S2100 (سپاس)"),
 ]
 
+THEME_CHOICES = [
+    ("light", "روشن"),
+    ("dark", "تاریک"),
+    ("slate", "طوسی مورب"),
+]
+
+SEARCH_SORT_CHOICES = [
+    ("recent", "جدیدترین"),
+    ("code", "بر اساس کد"),
+    ("name", "بر اساس نام"),
+    ("balance", "بر اساس مانده/موجودی"),
+]
+
+PRICE_DISPLAY_MODES = [
+    ("last", "آخرین قیمت"),
+    ("average", "میانگین قیمت"),
+]
+
+DASHBOARD_WIDGET_CHOICES = [
+    ("hero", "سربرگ"),
+    ("stats", "کارت‌های آماری"),
+    ("cash", "خلاصه صندوق"),
+    ("charts", "نمودارها"),
+    ("cheques", "چک‌های آتی"),
+]
+
 CASH_METHOD_LABELS = {
     "cash": "نقدی",
     "pos": "دستگاه پوز",
     "bank": "بانکی",
     "cheque": "چک",
 }
+
+PERMISSION_LABELS = {
+    "dashboard": "داشبورد",
+    "sales": "فروش",
+    "purchase": "خرید",
+    "receive": "دریافت وجه",
+    "payment": "پرداخت وجه",
+    "reports": "گزارشات",
+    "entities": "اشخاص و کالاها",
+    "developer": "ابزار فنی",
+    "admin": "مدیریت سیستم",
+}
+
+DEFAULT_PERMISSIONS = [
+    "dashboard",
+    "sales",
+    "purchase",
+    "receive",
+    "payment",
+    "reports",
+    "entities",
+]
+
+ADMIN_PERMISSIONS = sorted(set(DEFAULT_PERMISSIONS + ["developer", "admin"]))
+
+USER_ROLE_LABELS = {
+    "staff": "کاربر عادی",
+    "limited": "کاربر محدود",
+    "admin": "مدیر سیستم",
+}
+
+ASSIGNABLE_PERMISSIONS = [p for p in DEFAULT_PERMISSIONS]
+
+
+def _permissions_for_role(role: str, requested) -> list:
+    role = (role or "staff").strip().lower()
+    if role == "admin":
+        return ADMIN_PERMISSIONS
+    allowed = []
+    seen = set()
+    for p in requested or []:
+        if p in PERMISSION_LABELS and p in ASSIGNABLE_PERMISSIONS and p not in seen:
+            allowed.append(p)
+            seen.add(p)
+    if role == "staff":
+        base = sorted(allowed) if allowed else list(ASSIGNABLE_PERMISSIONS)
+    else:
+        base = sorted(allowed)
+    if "dashboard" not in base:
+        base.insert(0, "dashboard")
+    return base
 
 # ----------------- Flask & DB -----------------
 app = Flask(__name__, static_url_path=(URL_PREFIX + "/static") if URL_PREFIX else "/static")
@@ -144,6 +223,19 @@ class PriceHistory(db.Model):
     updated_at= db.Column(db.DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
     __table_args__ = (UniqueConstraint("person_id", "item_id", name="uq_price_person_item"),)
 
+class CashBox(db.Model):
+    __tablename__ = "cash_boxes"
+    id         = db.Column(db.Integer, primary_key=True)
+    name       = db.Column(db.String(128), nullable=False, unique=True)
+    kind       = db.Column(db.String(16), nullable=False, default="cash")  # cash | bank
+    bank_name  = db.Column(db.String(128), nullable=True)
+    account_no = db.Column(db.String(64), nullable=True)
+    iban       = db.Column(db.String(64), nullable=True)
+    description= db.Column(db.String(255), nullable=True)
+    is_active  = db.Column(db.Boolean, nullable=False, default=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.now)
+
+
 class CashDoc(db.Model):
     __tablename__ = "cash_docs"
     id        = db.Column(db.Integer, primary_key=True)
@@ -154,9 +246,17 @@ class CashDoc(db.Model):
     amount    = db.Column(db.Float, nullable=False, default=0.0)
     method    = db.Column(db.String(64), nullable=True)   # نقد، کارت، حواله...
     note      = db.Column(db.String(255), nullable=True)
+    cashbox_id= db.Column(db.Integer, db.ForeignKey("cash_boxes.id"), nullable=True)
+    cheque_number = db.Column(db.String(32), nullable=True, index=True)
+    cheque_bank   = db.Column(db.String(128), nullable=True)
+    cheque_branch = db.Column(db.String(128), nullable=True)
+    cheque_account= db.Column(db.String(64), nullable=True)
+    cheque_owner  = db.Column(db.String(128), nullable=True)
+    cheque_due_date = db.Column(db.Date, nullable=True)
     created_at= db.Column(db.DateTime, nullable=False, default=datetime.now)
 
     person    = db.relationship("Entity", lazy="joined")
+    cashbox   = db.relationship("CashBox", lazy="joined")
 
 class AuditEvent(db.Model):
     __tablename__ = "audit_events"
@@ -177,35 +277,162 @@ app.register_blueprint(backup_bp, url_prefix=f"{URL_PREFIX}/backup")
 # ----------------- Users bootstrap -----------------
 if not os.path.exists(USERS_FILE):
     with open(USERS_FILE, "w", encoding="utf-8") as f:
-        json.dump({"users":[{"username": ADMIN_USERNAME, "password": ADMIN_PASSWORD}]}, f, ensure_ascii=False, indent=2)
+        json.dump(
+            {
+                "users": [
+                    {
+                        "username": ADMIN_USERNAME,
+                        "password": ADMIN_PASSWORD,
+                        "role": "admin",
+                        "permissions": ADMIN_PERMISSIONS,
+                        "is_active": True,
+                    }
+                ]
+            },
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
 
-def load_users_dict():
+
+def _normalize_user_entry(username: str, data: dict) -> dict:
+    password = (data.get("password") or "").strip()
+    role = (data.get("role") or ("admin" if username == ADMIN_USERNAME else "staff")).strip()
+    perms_raw = data.get("permissions")
+    if not isinstance(perms_raw, (list, tuple, set)):
+        perms_raw = []
+    perms = _permissions_for_role(role, perms_raw)
+    is_active = bool(data.get("is_active", True))
+    return {
+        "username": username,
+        "password": password,
+        "role": role or "staff",
+        "permissions": perms,
+        "is_active": is_active,
+    }
+
+
+def load_users_catalog() -> dict:
     try:
         with open(USERS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return {u["username"]: {"password": u["password"]} for u in data.get("users", [])}
+            raw = json.load(f)
     except Exception:
-        return {ADMIN_USERNAME: {"password": ADMIN_PASSWORD}}
+        raw = {"users": []}
+
+    catalog = {}
+    for entry in raw.get("users", []):
+        username = (entry or {}).get("username")
+        if not username:
+            continue
+        catalog[username] = _normalize_user_entry(username, entry)
+
+    if ADMIN_USERNAME not in catalog:
+        catalog[ADMIN_USERNAME] = _normalize_user_entry(
+            ADMIN_USERNAME,
+            {
+                "password": ADMIN_PASSWORD,
+                "role": "admin",
+                "permissions": ADMIN_PERMISSIONS,
+                "is_active": True,
+            },
+        )
+    return catalog
+
+
+def save_users_catalog(catalog: dict) -> None:
+    payload = {
+        "users": [
+            {
+                "username": username,
+                "password": data.get("password", ""),
+                "role": data.get("role", "staff"),
+                "permissions": _permissions_for_role(data.get("role", "staff"), data.get("permissions", [])),
+                "is_active": bool(data.get("is_active", True)),
+            }
+            for username, data in sorted(catalog.items(), key=lambda kv: kv[0].lower())
+        ]
+    }
+    with open(USERS_FILE, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
 
 # ----------------- Auth -----------------
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
 
+
 class User(UserMixin):
-    def __init__(self, username: str):
+    def __init__(
+        self,
+        username: str,
+        *,
+        role: str = "staff",
+        permissions=None,
+        is_active: bool = True,
+    ):
         self.id = username
         self.username = username
+        self.role = role or "staff"
+        self.permissions = set(permissions or [])
+        self._active = bool(is_active)
+
+    def has_permission(self, perm: str) -> bool:
+        if self.role == "admin":
+            return True
+        return perm in self.permissions
+
+    @property
+    def is_active(self) -> bool:  # type: ignore[override]
+        return self._active
+
 
 @login_manager.user_loader
 def load_user(user_id):
-    return User(user_id)
+    catalog = load_users_catalog()
+    entry = catalog.get(user_id)
+    if not entry or not entry.get("is_active", True):
+        return None
+    return User(
+        user_id,
+        role=entry.get("role", "staff"),
+        permissions=entry.get("permissions", []),
+        is_active=entry.get("is_active", True),
+    )
+
 
 def is_admin() -> bool:
-    return current_user.is_authenticated and current_user.username == ADMIN_USERNAME
+    return current_user.is_authenticated and getattr(current_user, "role", "") == "admin"
+
 
 def admin_required():
     if not is_admin():
         abort(403)
+
+
+def user_permissions() -> set:
+    if not current_user.is_authenticated:
+        return set()
+    if is_admin():
+        return set(ADMIN_PERMISSIONS)
+    return set(getattr(current_user, "permissions", set()))
+
+
+def has_permission(perm: str) -> bool:
+    if is_admin():
+        return True
+    return perm in user_permissions()
+
+
+def ensure_permission(*perms: str) -> None:
+    if not perms:
+        return
+    if not current_user.is_authenticated:
+        abort(403)
+    if is_admin():
+        return
+    allowed = user_permissions()
+    if any(p in allowed for p in perms if p):
+        return
+    abort(403)
 
 def human_duration_from_login():
     try:
@@ -229,7 +456,19 @@ def inject_ctx():
         "logged_username": (current_user.username if current_user.is_authenticated else None),
         "login_duration": human_duration_from_login(),
         "is_admin": is_admin(),
+        "current_user_role": getattr(current_user, "role", None),
+        "user_permissions": sorted(user_permissions()),
+        "has_permission": has_permission,
         "now_info": date_now_info(),
+        "active_theme": _ui_theme_key(),
+        "theme_choices": THEME_CHOICES,
+        "search_sort_pref": _search_sort_key(),
+        "search_sort_choices": SEARCH_SORT_CHOICES,
+        "price_display_mode": _price_display_mode(),
+        "price_display_modes": PRICE_DISPLAY_MODES,
+        "dashboard_widgets": _dashboard_widgets(),
+        "dashboard_widget_choices": DASHBOARD_WIDGET_CHOICES,
+        "allow_negative_sales": _allow_negative_sales(),
     }
 
 # === فیلتر جینجا برای جداکننده هزارگان ===
@@ -242,6 +481,15 @@ def sep_filter(val):
         return f"{f:,.2f}"
     except Exception:
         return val
+
+
+@app.template_filter('fa_digits')
+def fa_digits_filter(val):
+    try:
+        return fa_digits(val)
+    except Exception:
+        return val
+
 
 @app.template_filter('jdate')
 def jdate_filter(val):
@@ -272,6 +520,45 @@ def _pos_device_config():
     key = Setting.get("pos_device", "none") or "none"
     label = dict(POS_DEVICE_CHOICES).get(key, POS_DEVICE_CHOICES[0][1])
     return key, label
+
+def _ui_theme_key():
+    key = (Setting.get("ui_theme", "light") or "light").strip().lower()
+    valid = {k for k, _ in THEME_CHOICES}
+    if key not in valid:
+        key = "light"
+    return key
+
+def _search_sort_key():
+    key = (Setting.get("search_sort", "recent") or "recent").strip().lower()
+    valid = {k for k, _ in SEARCH_SORT_CHOICES}
+    if key not in valid:
+        key = "recent"
+    return key
+
+def _price_display_mode():
+    key = (Setting.get("price_display_mode", "last") or "last").strip().lower()
+    valid = {k for k, _ in PRICE_DISPLAY_MODES}
+    if key not in valid:
+        key = "last"
+    return key
+
+def _dashboard_widgets():
+    raw = Setting.get("dashboard_widgets", "") or ""
+    valid = [k for k, _ in DASHBOARD_WIDGET_CHOICES]
+    try:
+        data = json.loads(raw) if raw else []
+        if not isinstance(data, list):
+            data = []
+    except Exception:
+        data = []
+    filtered = [k for k in data if k in valid]
+    if not filtered:
+        filtered = list(valid)
+    return filtered
+
+def _allow_negative_sales() -> bool:
+    val = (Setting.get("allow_negative_sales", "off") or "off").strip().lower()
+    return val in ("on", "true", "1", "yes")
 
 def _find_entity_by_code_or_id(kind: str, code_or_id: str):
     if not code_or_id: return None
@@ -349,6 +636,7 @@ def validate_entity_form(form, for_update_id=None):
 @app.route(URL_PREFIX + "/")
 @login_required
 def index():
+    ensure_permission("dashboard")
     now = _now_info()
     today = now["datetime"].date()
     horizon = today + timedelta(days=3)
@@ -405,14 +693,15 @@ def index():
             }
         )
 
+    due_date_expr = func.coalesce(CashDoc.cheque_due_date, CashDoc.date)
     upcoming_receive_cheques = (
         CashDoc.query.filter(
             CashDoc.doc_type == "receive",
             func.lower(func.coalesce(CashDoc.method, "")) == "cheque",
-            CashDoc.date >= today,
-            CashDoc.date <= horizon,
+            due_date_expr >= today,
+            due_date_expr <= horizon,
         )
-        .order_by(CashDoc.date.asc())
+        .order_by(due_date_expr.asc())
         .all()
     )
 
@@ -420,20 +709,22 @@ def index():
         CashDoc.query.filter(
             CashDoc.doc_type == "payment",
             func.lower(func.coalesce(CashDoc.method, "")) == "cheque",
-            CashDoc.date >= today,
-            CashDoc.date <= horizon,
+            due_date_expr >= today,
+            due_date_expr <= horizon,
         )
-        .order_by(CashDoc.date.asc())
+        .order_by(due_date_expr.asc())
         .all()
     )
 
     def cheque_to_dict(doc: CashDoc):
+        due_dt = doc.cheque_due_date or doc.date
         return {
             "id": doc.id,
             "number": doc.number,
             "person": doc.person.name if doc.person else "—",
             "amount": float(doc.amount or 0.0),
-            "date": to_jdate_str(doc.date),
+            "date": to_jdate_str(due_dt) if due_dt else "—",
+            "cheque_number": doc.cheque_number,
         }
 
     chart_days = [today - timedelta(days=i) for i in range(6, -1, -1)]
@@ -499,6 +790,7 @@ def index():
             "receivesTotals": chart_receives_totals,
             "paymentsTotals": chart_payments_totals,
         },
+        dashboard_widgets=_dashboard_widgets(),
     )
 
 @app.route(URL_PREFIX + "/login", methods=["GET", "POST"])
@@ -506,11 +798,22 @@ def login():
     if current_user.is_authenticated:
         return redirect(URL_PREFIX + "/")
     if request.method == "POST":
-        username = request.form.get("username","").strip()
-        password = request.form.get("password","")
-        users = load_users_dict()
-        if username in users and users[username]["password"] == password:
-            login_user(User(username))
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        catalog = load_users_catalog()
+        entry = catalog.get(username)
+        if entry and entry.get("password") == password:
+            if not entry.get("is_active", True):
+                flash("دسترسی این کاربر غیرفعال شده است.", "danger")
+                return redirect(URL_PREFIX + "/login")
+            login_user(
+                User(
+                    username,
+                    role=entry.get("role", "staff"),
+                    permissions=entry.get("permissions", []),
+                    is_active=entry.get("is_active", True),
+                )
+            )
             session["login_at_utc"] = datetime.utcnow().isoformat()
             flash("ورود موفق", "success")
             app.logger.info(f"LOGIN  USER={username}  IP={request.remote_addr}")
@@ -629,7 +932,7 @@ def _run_script_lines(lines:list[str]):
 @app.route(URL_PREFIX + "/developer", methods=["GET","POST"])
 @login_required
 def developer_console():
-    if not is_admin(): abort(403)
+    admin_required()
     if request.method == "POST":
         script = request.form.get("script","")
         msgs = _run_script_lines(script.splitlines())
@@ -642,8 +945,10 @@ def developer_console():
 @app.route(URL_PREFIX + "/sales", methods=["GET", "POST"])
 @login_required
 def sales():
+    ensure_permission("sales")
     now_info = _now_info()
     inv_number_generated = jalali_reference("INV", now_info["datetime"])
+    allow_negative = _allow_negative_sales()
 
     if request.method == "POST":
         number = (request.form.get("inv_number") or "").strip() or inv_number_generated
@@ -668,6 +973,7 @@ def sales():
 
         rows = []
         MAX_ROWS = 15
+        pending_stock = {}
         for i in range(min(len(item_ids), len(unit_prices), len(qtys))):
             iid = (item_ids[i] or "").strip()
             icode= (item_codes[i] or "").strip()
@@ -681,6 +987,15 @@ def sales():
                 item = Entity.query.filter_by(type="item", code=icode).first()
 
             if (item is not None) and item.type == "item" and q > 0 and up >= 0:
+                if not allow_negative:
+                    base_stock = float(pending_stock.get(item.id, item.stock_qty or 0.0))
+                    if base_stock - q < -1e-6:
+                        flash(f"موجودی کالا «{item.name}» برای فروش کافی نیست.", "danger")
+                        return redirect(URL_PREFIX + "/sales")
+                    pending_stock[item.id] = base_stock - q
+                else:
+                    current = float(pending_stock.get(item.id, item.stock_qty or 0.0))
+                    pending_stock[item.id] = current - q
                 rows.append({"item": item, "unit_price": up, "qty": q})
             if len(rows) >= MAX_ROWS:
                 break
@@ -753,6 +1068,7 @@ def sales():
 @app.route(URL_PREFIX + "/purchase", methods=["GET","POST"])
 @login_required
 def purchase_stub():
+    ensure_permission("purchase")
     now_info = _now_info()
     def _next_purchase_number():
         nums = []
@@ -861,6 +1177,7 @@ def purchase_stub():
 @app.route(URL_PREFIX + "/entities")
 @login_required
 def entities_list():
+    ensure_permission("entities")
     kind = (request.args.get("kind") or "item").strip()
     if kind not in ("person","item"):
         kind = "item"
@@ -882,6 +1199,7 @@ def entities_list():
 @app.route(URL_PREFIX + "/entities/new", methods=["GET", "POST"])
 @login_required
 def entities_new():
+    ensure_permission("entities")
     if request.method == "POST":
         errors, data = validate_entity_form(request.form)
         if errors:
@@ -937,6 +1255,7 @@ def entities_delete(eid):
 @app.route(URL_PREFIX + "/reports")
 @login_required
 def reports():
+    ensure_permission("reports")
     q     = (request.args.get("q") or "").strip()
     typ   = (request.args.get("type") or "all").strip().lower()
     dfrom = request.args.get("from")
@@ -964,7 +1283,7 @@ def reports():
                 "kind": "invoice",
                 "id": inv.id,
                 "number": inv.number,
-                "date": inv.date,
+                "date": to_jdate_str(inv.date),
                 "person": inv.person.name,
                 "amount": inv.total,
             })
@@ -978,6 +1297,7 @@ def reports():
                 CashDoc.number.ilike(f"%{q}%"),
                 Entity.name.ilike(f"%{q}%"),
                 Entity.code.ilike(f"%{q}%"),
+                CashDoc.cheque_number.ilike(f"%{q}%"),
             ))
         if df: cd_q = cd_q.filter(CashDoc.date >= df)
         if dt: cd_q = cd_q.filter(CashDoc.date <= dt)
@@ -987,9 +1307,13 @@ def reports():
                 "kind": d.doc_type,
                 "id": d.id,
                 "number": d.number,
-                "date": d.date,
+                "date": to_jdate_str(d.date),
                 "person": d.person.name,
                 "amount": d.amount,
+                "cheque_number": d.cheque_number,
+                "method": d.method,
+                "cashbox": d.cashbox.name if d.cashbox else None,
+                "cheque_due": to_jdate_str(d.cheque_due_date) if d.cheque_due_date else None,
             })
 
     rows.sort(key=lambda r: (r["date"], str(r["number"])), reverse=True)
@@ -1053,6 +1377,7 @@ def reports():
 @app.route(URL_PREFIX + "/invoice/<int:inv_id>")
 @login_required
 def invoice_view(inv_id):
+    ensure_permission("reports", "sales", "purchase")
     inv = Invoice.query.get_or_404(inv_id)
     lines = InvoiceLine.query.filter_by(invoice_id=inv.id).all()
     html = [
@@ -1068,21 +1393,59 @@ def invoice_view(inv_id):
 @app.route(URL_PREFIX + "/cash/<int:doc_id>")
 @login_required
 def cash_view(doc_id):
+    ensure_permission("reports", "receive", "payment")
     doc = CashDoc.query.get_or_404(doc_id)
     kind = "دریافت" if doc.doc_type == "receive" else "پرداخت"
-    html = f"<b>نوع:</b> {kind}<br><b>شماره:</b> {doc.number}<br><b>تاریخ (شمسی):</b> {to_jdate_str(doc.date)}<br><b>طرف حساب:</b> {doc.person.name}<br><b>مبلغ:</b> {int(doc.amount):,}"
+    cheque_meta = ""
+    if (doc.method or "").lower() == "cheque":
+        cheque_parts = []
+        if doc.cheque_number:
+            cheque_parts.append(f"شماره صیادی: <code>{doc.cheque_number}</code>")
+        if doc.cheque_bank:
+            cheque_parts.append(f"بانک: {doc.cheque_bank}")
+        if doc.cheque_branch:
+            cheque_parts.append(f"شعبه: {doc.cheque_branch}")
+        if doc.cheque_due_date:
+            cheque_parts.append(f"سررسید: {to_jdate_str(doc.cheque_due_date)}")
+        if doc.cheque_account:
+            cheque_parts.append(f"شماره حساب: {doc.cheque_account}")
+        if doc.cheque_owner:
+            cheque_parts.append(f"صاحب حساب: {doc.cheque_owner}")
+        if cheque_parts:
+            cheque_meta = "<br><b>جزئیات چک:</b> " + "<br>".join(cheque_parts)
+    cashbox_line = ""
+    if doc.cashbox:
+        box_label = doc.cashbox.name
+        if doc.cashbox.kind == "bank" and doc.cashbox.bank_name:
+            box_label += f" ({doc.cashbox.bank_name})"
+        cashbox_line = f"<br><b>صندوق/حساب:</b> {box_label}"
+    html = (
+        f"<b>نوع:</b> {kind}<br><b>شماره:</b> {doc.number}"
+        f"<br><b>تاریخ (شمسی):</b> {to_jdate_str(doc.date)}"
+        f"<br><b>طرف حساب:</b> {doc.person.name}"
+        f"<br><b>مبلغ:</b> {int(doc.amount):,}"
+        f"<br><b>روش:</b> {CASH_METHOD_LABELS.get(doc.method or '', doc.method or '—')}"
+        + cashbox_line
+        + cheque_meta
+    )
     return render_template("page.html", title="سند نقدی", content=Markup(html), prefix=URL_PREFIX)
 
 # ===================== دریافت وجه =====================
 @app.route(URL_PREFIX + "/receive", methods=["GET", "POST"])
 @login_required
 def receive():
+    ensure_permission("receive")
     now_info = _now_info()
     rec_number = jalali_reference("RCV", now_info["datetime"])
     pos_device_key, pos_device_label = _pos_device_config()
     prefill_amount = None
     prefill_note = None
     prefill_person = None
+    cashboxes = (
+        CashBox.query.filter_by(is_active=True)
+        .order_by(CashBox.kind.desc(), CashBox.name.asc())
+        .all()
+    )
     if request.method == "GET":
         invoice_id = (request.args.get("invoice_id") or "").strip()
         if invoice_id.isdigit():
@@ -1126,6 +1489,50 @@ def receive():
             method = "cash"
         note = (request.form.get("note") or "").strip() or None
 
+        cashbox = None
+        cashbox_raw = (request.form.get("cashbox_id") or "").strip()
+        if cashbox_raw.isdigit():
+            cashbox = CashBox.query.get(int(cashbox_raw))
+            if cashbox and not cashbox.is_active:
+                cashbox = None
+
+        cheque_number = "".join(ch for ch in (request.form.get("cheque_number") or "") if ch.isdigit())
+        cheque_bank = (request.form.get("cheque_bank") or "").strip() or None
+        cheque_branch = (request.form.get("cheque_branch") or "").strip() or None
+        cheque_account = (request.form.get("cheque_account") or "").strip() or None
+        cheque_owner = (request.form.get("cheque_owner") or "").strip() or None
+        cheque_due_date = parse_gregorian_date(
+            request.form.get("cheque_due_date"), allow_none=True
+        )
+        if cheque_due_date is None:
+            cheque_due_date = parse_jalali_date(
+                request.form.get("cheque_due_date_fa"), allow_none=True
+            )
+        if cheque_due_date is None:
+            cheque_due_date = parse_jalali_date(
+                request.form.get("cheque_due_date_fa"), allow_none=True
+            )
+
+        if method in ("cash", "bank"):
+            required_kind = "cash" if method == "cash" else "bank"
+            if not cashbox or cashbox.kind != required_kind:
+                flash("لطفاً صندوق/حساب متناسب با روش دریافت را انتخاب کنید.", "danger")
+                return redirect(URL_PREFIX + "/receive")
+        if method == "cheque":
+            if not cashbox or cashbox.kind != "bank":
+                flash("برای ثبت چک، یک حساب بانکی فعال انتخاب کنید.", "danger")
+                return redirect(URL_PREFIX + "/receive")
+            if len(cheque_number) != 16:
+                flash("شماره صیادی چک باید ۱۶ رقم باشد.", "danger")
+                return redirect(URL_PREFIX + "/receive")
+        else:
+            cheque_number = None
+            cheque_bank = None
+            cheque_branch = None
+            cheque_account = None
+            cheque_owner = None
+            cheque_due_date = None
+
         doc = CashDoc(
             doc_type="receive",
             number=number,
@@ -1133,7 +1540,14 @@ def receive():
             person_id=person.id,
             amount=amount,
             method=method,
-            note=note
+            note=note,
+            cashbox_id=cashbox.id if cashbox else None,
+            cheque_number=cheque_number or None,
+            cheque_bank=cheque_bank,
+            cheque_branch=cheque_branch,
+            cheque_account=cheque_account,
+            cheque_owner=cheque_owner,
+            cheque_due_date=cheque_due_date,
         )
         db.session.add(doc)
 
@@ -1160,13 +1574,14 @@ def receive():
         prefill_amount=prefill_amount,
         prefill_person=prefill_person,
         prefill_note=prefill_note,
+        cashboxes=cashboxes,
     )
 
 # ===================== ویرایش سند نقدی =====================
 @app.route(URL_PREFIX + "/cash/<int:doc_id>/edit", methods=["GET","POST"])
 @login_required
 def cash_edit(doc_id):
-    if not is_admin(): abort(403)
+    admin_required()
     doc = CashDoc.query.get_or_404(doc_id)
     if request.method == "POST":
         try:
@@ -1203,12 +1618,18 @@ def cash_edit(doc_id):
 @app.route(URL_PREFIX + "/payment", methods=["GET", "POST"])
 @login_required
 def payment():
+    ensure_permission("payment")
     now_info = _now_info()
     pay_number = jalali_reference("PAY", now_info["datetime"])
     pos_device_key, pos_device_label = _pos_device_config()
     prefill_amount = None
     prefill_note = None
     prefill_person = None
+    cashboxes = (
+        CashBox.query.filter_by(is_active=True)
+        .order_by(CashBox.kind.desc(), CashBox.name.asc())
+        .all()
+    )
     if request.method == "GET":
         invoice_id = (request.args.get("invoice_id") or "").strip()
         if invoice_id.isdigit():
@@ -1257,6 +1678,42 @@ def payment():
         method = (request.form.get("method") or "").strip().lower() or None
         note   = (request.form.get("note") or "").strip() or None
 
+        cashbox = None
+        cashbox_raw = (request.form.get("cashbox_id") or "").strip()
+        if cashbox_raw.isdigit():
+            cashbox = CashBox.query.get(int(cashbox_raw))
+            if cashbox and not cashbox.is_active:
+                cashbox = None
+
+        cheque_number = "".join(ch for ch in (request.form.get("cheque_number") or "") if ch.isdigit())
+        cheque_bank = (request.form.get("cheque_bank") or "").strip() or None
+        cheque_branch = (request.form.get("cheque_branch") or "").strip() or None
+        cheque_account = (request.form.get("cheque_account") or "").strip() or None
+        cheque_owner = (request.form.get("cheque_owner") or "").strip() or None
+        cheque_due_date = parse_gregorian_date(
+            request.form.get("cheque_due_date"), allow_none=True
+        )
+
+        if method in ("cash", "bank"):
+            required_kind = "cash" if method == "cash" else "bank"
+            if not cashbox or cashbox.kind != required_kind:
+                flash("لطفاً حساب متناسب با روش پرداخت را انتخاب کنید.", "danger")
+                return redirect(URL_PREFIX + "/payment")
+        if method == "cheque":
+            if not cashbox or cashbox.kind != "bank":
+                flash("برای صدور چک، حساب بانکی معتبر انتخاب کنید.", "danger")
+                return redirect(URL_PREFIX + "/payment")
+            if len(cheque_number) != 16:
+                flash("شماره صیادی چک باید ۱۶ رقم باشد.", "danger")
+                return redirect(URL_PREFIX + "/payment")
+        else:
+            cheque_number = None
+            cheque_bank = None
+            cheque_branch = None
+            cheque_account = None
+            cheque_owner = None
+            cheque_due_date = None
+
         doc = CashDoc(
             doc_type="payment",
             number=number,
@@ -1264,7 +1721,14 @@ def payment():
             person_id=person.id,
             amount=amount,
             method=method,
-            note=note
+            note=note,
+            cashbox_id=cashbox.id if cashbox else None,
+            cheque_number=cheque_number or None,
+            cheque_bank=cheque_bank,
+            cheque_branch=cheque_branch,
+            cheque_account=cheque_account,
+            cheque_owner=cheque_owner,
+            cheque_due_date=cheque_due_date,
         )
         db.session.add(doc)
 
@@ -1291,34 +1755,262 @@ def payment():
         prefill_amount=prefill_amount,
         prefill_person=prefill_person,
         prefill_note=prefill_note,
+        cashboxes=cashboxes,
     )
 
 # ----------------- Settings/Admin stubs -----------------
 @app.route(URL_PREFIX + "/settings", methods=["GET", "POST"])
 @login_required
 def settings_stub():
+    admin_required()
     current_key, current_label = _pos_device_config()
     if request.method == "POST":
-        key = (request.form.get("pos_device") or "none").strip()
-        if key not in dict(POS_DEVICE_CHOICES):
-            flash("دستگاه انتخاب‌شده نامعتبر است.", "danger")
-            return redirect(URL_PREFIX + "/settings")
-        Setting.set("pos_device", key)
-        db.session.commit()
-        flash("تنظیمات ذخیره شد.", "success")
+        form_id = (request.form.get("form_id") or "pos").strip().lower()
+        if form_id == "pos":
+            key = (request.form.get("pos_device") or "none").strip()
+            if key not in dict(POS_DEVICE_CHOICES):
+                flash("دستگاه انتخاب‌شده نامعتبر است.", "danger")
+                return redirect(URL_PREFIX + "/settings")
+            Setting.set("pos_device", key)
+            db.session.commit()
+            flash("تنظیمات ذخیره شد.", "success")
+        elif form_id == "ui":
+            theme = (request.form.get("ui_theme") or "light").strip().lower()
+            sort_key = (request.form.get("search_sort") or _search_sort_key()).strip().lower()
+            price_mode = (request.form.get("price_display_mode") or _price_display_mode()).strip().lower()
+            allow_negative = request.form.get("allow_negative_sales") == "on"
+            widget_keys = request.form.getlist("dashboard_widgets")
+
+            valid_themes = {k for k, _ in THEME_CHOICES}
+            if theme not in valid_themes:
+                theme = _ui_theme_key()
+
+            valid_sorts = {k for k, _ in SEARCH_SORT_CHOICES}
+            if sort_key not in valid_sorts:
+                sort_key = _search_sort_key()
+
+            valid_price = {k for k, _ in PRICE_DISPLAY_MODES}
+            if price_mode not in valid_price:
+                price_mode = _price_display_mode()
+
+            valid_widgets = {k for k, _ in DASHBOARD_WIDGET_CHOICES}
+            widgets_payload = [w for w in widget_keys if w in valid_widgets]
+            if not widgets_payload:
+                widgets_payload = list(valid_widgets)
+
+            Setting.set("ui_theme", theme)
+            Setting.set("search_sort", sort_key)
+            Setting.set("price_display_mode", price_mode)
+            Setting.set("allow_negative_sales", "on" if allow_negative else "off")
+            Setting.set("dashboard_widgets", json.dumps(widgets_payload, ensure_ascii=False))
+            db.session.commit()
+            flash("تنظیمات ظاهری و جستجو ذخیره شد.", "success")
         return redirect(URL_PREFIX + "/settings")
     return render_template(
         "settings.html",
         prefix=URL_PREFIX,
         pos_choices=POS_DEVICE_CHOICES,
         selected_pos=current_key,
+        selected_theme=_ui_theme_key(),
+        search_sort_selected=_search_sort_key(),
+        price_mode_selected=_price_display_mode(),
+        dashboard_widgets_selected=_dashboard_widgets(),
+        allow_negative_selected=_allow_negative_sales(),
     )
 
 @app.route(URL_PREFIX + "/admin", methods=["GET"])
 @login_required
 def admin_stub():
-    admin_html = "<p>مدیریت/بکاپ (در حال توسعه)</p>"
-    return render_template("page.html", title="مدیریت", content=Markup(admin_html), prefix=URL_PREFIX)
+    admin_required()
+    return render_template("admin/dashboard.html", prefix=URL_PREFIX)
+
+
+@app.route(URL_PREFIX + "/admin/users", methods=["GET", "POST"])
+@login_required
+def admin_users():
+    admin_required()
+    catalog = load_users_catalog()
+
+    if request.method == "POST":
+        action = (request.form.get("action") or "").strip().lower()
+        username = (request.form.get("username") or "").strip()
+
+        if action == "delete":
+            if not username:
+                flash("نام کاربری ارسال نشده است.", "danger")
+            elif username == ADMIN_USERNAME:
+                flash("کاربر مدیر اصلی قابل حذف نیست.", "warning")
+            elif username not in catalog:
+                flash("کاربر یافت نشد.", "danger")
+            else:
+                catalog.pop(username, None)
+                save_users_catalog(catalog)
+                flash(f"کاربر «{username}» حذف شد.", "success")
+            return redirect(URL_PREFIX + "/admin/users")
+
+        role = (request.form.get("role") or "staff").strip().lower()
+        if role not in USER_ROLE_LABELS:
+            role = "staff"
+        requested_perms = request.form.getlist("permissions")
+        is_active = request.form.get("is_active") == "on"
+
+        if action == "update":
+            if not username or username not in catalog:
+                flash("کاربر مورد نظر یافت نشد.", "danger")
+                return redirect(URL_PREFIX + "/admin/users")
+
+            entry = catalog[username]
+            if username == ADMIN_USERNAME:
+                role = "admin"
+                is_active = True
+            entry["role"] = role
+            entry["permissions"] = _permissions_for_role(role, requested_perms)
+            entry["is_active"] = is_active
+
+            new_password = (request.form.get("password") or "").strip()
+            if new_password:
+                entry["password"] = new_password
+
+            save_users_catalog(catalog)
+            flash("تغییرات ذخیره شد.", "success")
+            return redirect(URL_PREFIX + "/admin/users")
+
+        # default: create
+        password = (request.form.get("password") or "").strip()
+        confirm = (request.form.get("password_confirm") or "").strip()
+
+        if not username:
+            flash("نام کاربری را وارد کنید.", "danger")
+            return redirect(URL_PREFIX + "/admin/users")
+        if username in catalog:
+            flash("کاربری با این نام از قبل وجود دارد.", "warning")
+            return redirect(URL_PREFIX + "/admin/users")
+        if not password:
+            flash("رمز عبور را وارد کنید.", "danger")
+            return redirect(URL_PREFIX + "/admin/users")
+        if password != confirm:
+            flash("تکرار رمز عبور با مقدار اولیه یکسان نیست.", "danger")
+            return redirect(URL_PREFIX + "/admin/users")
+
+        entry = _normalize_user_entry(
+            username,
+            {
+                "password": password,
+                "role": role,
+                "permissions": requested_perms,
+                "is_active": is_active,
+            },
+        )
+        catalog[username] = entry
+        save_users_catalog(catalog)
+        flash(f"کاربر «{username}» ایجاد شد.", "success")
+        return redirect(URL_PREFIX + "/admin/users")
+
+    users = sorted(
+        catalog.values(),
+        key=lambda u: (0 if u["username"] == ADMIN_USERNAME else 1, u["username"].lower()),
+    )
+    return render_template(
+        "admin/users.html",
+        prefix=URL_PREFIX,
+        users=users,
+        role_labels=USER_ROLE_LABELS,
+        permission_labels=PERMISSION_LABELS,
+        assignable_permissions=ASSIGNABLE_PERMISSIONS,
+        admin_username=ADMIN_USERNAME,
+    )
+
+
+@app.route(URL_PREFIX + "/admin/cashboxes", methods=["GET", "POST"])
+@login_required
+def admin_cashboxes():
+    admin_required()
+    if request.method == "POST":
+        name = (request.form.get("name") or "").strip()
+        kind = (request.form.get("kind") or "cash").strip().lower()
+        bank_name = (request.form.get("bank_name") or "").strip() or None
+        account_no = (request.form.get("account_no") or "").strip() or None
+        iban = (request.form.get("iban") or "").strip() or None
+        description = (request.form.get("description") or "").strip() or None
+
+        if kind not in ("cash", "bank"):
+            kind = "cash"
+
+        if not name:
+            flash("نام صندوق/حساب را وارد کنید.", "danger")
+        else:
+            exists = CashBox.query.filter(func.lower(CashBox.name) == name.lower()).first()
+            if exists:
+                flash("صندوقی با این نام از قبل ثبت شده است.", "warning")
+            else:
+                box = CashBox(
+                    name=name,
+                    kind=kind,
+                    bank_name=bank_name if kind == "bank" else None,
+                    account_no=account_no if kind == "bank" else None,
+                    iban=iban if kind == "bank" else None,
+                    description=description,
+                    is_active=True,
+                )
+                db.session.add(box)
+                db.session.commit()
+                flash("صندوق جدید ثبت شد.", "success")
+        return redirect(URL_PREFIX + "/admin/cashboxes")
+
+    boxes = (
+        CashBox.query.order_by(CashBox.kind.desc(), CashBox.is_active.desc(), CashBox.name.asc())
+        .all()
+    )
+    totals_rows = (
+        db.session.query(
+            CashDoc.cashbox_id,
+            CashDoc.doc_type,
+            func.coalesce(func.sum(CashDoc.amount), 0.0),
+        )
+        .filter(CashDoc.cashbox_id.isnot(None))
+        .group_by(CashDoc.cashbox_id, CashDoc.doc_type)
+        .all()
+    )
+    totals_map = {}
+    for box_id, doc_type, total in totals_rows:
+        if box_id not in totals_map:
+            totals_map[box_id] = {"receive": 0.0, "payment": 0.0}
+        totals_map[box_id][doc_type] = float(total or 0.0)
+    grand_net = 0.0
+    for box in boxes:
+        meta = totals_map.get(box.id, {"receive": 0.0, "payment": 0.0})
+        net = meta.get("receive", 0.0) - meta.get("payment", 0.0)
+        if box.is_active:
+            grand_net += net
+    grand_net = float(grand_net)
+    return render_template(
+        "admin/cashboxes.html",
+        prefix=URL_PREFIX,
+        boxes=boxes,
+        cash_totals=totals_map,
+        cash_grand_total=grand_net,
+    )
+
+
+@app.route(URL_PREFIX + "/admin/cashboxes/<int:box_id>/delete", methods=["POST"])
+@login_required
+def admin_cashboxes_delete(box_id):
+    admin_required()
+    box = CashBox.query.get_or_404(box_id)
+    usage_exists = (
+        db.session.query(CashDoc.id)
+        .filter(CashDoc.cashbox_id == box.id)
+        .limit(1)
+        .first()
+    )
+    if usage_exists:
+        box.is_active = False
+        flash("به دلیل استفاده در اسناد، صندوق غیرفعال شد.", "warning")
+    else:
+        db.session.delete(box)
+        flash("صندوق حذف شد.", "success")
+    db.session.commit()
+    return redirect(URL_PREFIX + "/admin/cashboxes")
 
 # ----------------- Utility APIs -----------------
 @app.route(URL_PREFIX + "/api/num2words", methods=["GET"])
@@ -1393,6 +2085,11 @@ def api_now():
 def api_search():
     q_raw = (request.args.get("q") or "").strip()
     kind = (request.args.get("kind") or "").strip().lower()
+    sort_key = (request.args.get("sort") or _search_sort_key()).strip().lower()
+    valid_sort_keys = {k for k, _ in SEARCH_SORT_CHOICES}
+    if sort_key not in valid_sort_keys:
+        sort_key = _search_sort_key()
+    price_mode = _price_display_mode()
 
     try:
         limit = int(request.args.get("limit", 10))
@@ -1413,10 +2110,16 @@ def api_search():
         try:
             f = float(val)
             if abs(f - int(f)) < 1e-6:
-                return f"{int(f):,}"
-            return f"{f:,.2f}".rstrip("0").rstrip(".")
+                return fa_digits(f"{int(f):,}")
+            return fa_digits(f"{f:,.2f}".rstrip("0").rstrip("."))
         except Exception:
             return str(val)
+
+    def fmt_jalali(val):
+        try:
+            return fa_digits(to_jdate_str(val)) if val else "—"
+        except Exception:
+            return "—"
 
     q_number = try_float(q_raw)
     term = f"%{q_raw}%" if q_raw else None
@@ -1446,6 +2149,9 @@ def api_search():
 
     default_targets = {"item", "person", "invoice", "receive", "payment"}
     targets = alias_map.get(kind, default_targets if not kind else {kind})
+    cheque_only = kind in {"cheque", "check", "chak", "cek"}
+    if cheque_only:
+        targets = {"receive", "payment"}
     # اگر مقدار ناشناس بود، به صورت عمومی جستجو کن
     if not targets.intersection(default_targets):
         targets = default_targets
@@ -1457,6 +2163,7 @@ def api_search():
     def limit_left() -> int:
         return max(0, limit - len(results))
 
+    item_rows = []
     if "item" in ordered_targets:
         remaining = limit_left()
         if remaining:
@@ -1469,12 +2176,40 @@ def api_search():
                         Entity.serial_no.ilike(term),
                     )
                 )
-            rows = (
-                query.order_by(Entity.level.asc(), Entity.code.asc())
-                .limit(remaining)
-                .all()
-            )
-            for e in rows:
+            if sort_key == "code":
+                query = query.order_by(Entity.code.asc())
+            elif sort_key == "name":
+                query = query.order_by(Entity.name.asc())
+            elif sort_key == "balance":
+                query = query.order_by(Entity.stock_qty.desc(), Entity.name.asc())
+            else:  # recent
+                query = query.order_by(Entity.updated_at.desc(), Entity.id.desc())
+
+            item_rows = query.limit(remaining).all()
+
+            price_map = {}
+            if item_rows:
+                item_ids = [it.id for it in item_rows]
+                if price_mode == "average":
+                    avg_rows = (
+                        db.session.query(InvoiceLine.item_id, func.avg(InvoiceLine.unit_price))
+                        .filter(InvoiceLine.item_id.in_(item_ids))
+                        .group_by(InvoiceLine.item_id)
+                        .all()
+                    )
+                    price_map = {iid: float(avg or 0.0) for iid, avg in avg_rows}
+                else:
+                    ph_rows = (
+                        db.session.query(PriceHistory)
+                        .filter(PriceHistory.item_id.in_(item_ids))
+                        .order_by(PriceHistory.item_id.asc(), PriceHistory.updated_at.desc())
+                        .all()
+                    )
+                    for ph in ph_rows:
+                        if ph.item_id not in price_map:
+                            price_map[ph.item_id] = float(ph.last_price or 0.0)
+
+            for e in item_rows:
                 meta_parts = []
                 if e.unit:
                     meta_parts.append(e.unit)
@@ -1482,13 +2217,16 @@ def api_search():
                     meta_parts.append(f"موجودی: {fmt_number(e.stock_qty)}")
                 if e.serial_no:
                     meta_parts.append(e.serial_no)
+                if price_map.get(e.id):
+                    price_label = "میانگین" if price_mode == "average" else "آخرین"
+                    meta_parts.append(f"{price_label} قیمت: {fmt_number(price_map[e.id])}")
                 results.append({
                     "id": e.id,
                     "type": "item",
                     "code": e.code or "",
                     "name": e.name or "",
-                    "stock": float(e.stock_qty or 0.0) if e.stock_qty is not None else None,
-                    "price": None,
+                    "stock": fmt_number(e.stock_qty) if e.stock_qty is not None else None,
+                    "price": fmt_number(price_map.get(e.id)) if price_map.get(e.id) is not None else None,
                     "extra": e.unit or "",
                     "meta": " • ".join(meta_parts) if meta_parts else "",
                 })
@@ -1506,11 +2244,16 @@ def api_search():
                     Entity.unit.ilike(term),
                 )
             )
-        rows = (
-            query.order_by(Entity.level.asc(), Entity.code.asc())
-            .limit(remaining)
-            .all()
-        )
+        if sort_key == "name":
+            query = query.order_by(Entity.name.asc())
+        elif sort_key == "code":
+            query = query.order_by(Entity.code.asc())
+        elif sort_key == "balance":
+            query = query.order_by(Entity.balance.desc(), Entity.name.asc())
+        else:
+            query = query.order_by(Entity.updated_at.desc(), Entity.id.desc())
+
+        rows = query.limit(remaining).all()
         for e in rows:
             meta_parts = []
             if e.unit:
@@ -1521,7 +2264,7 @@ def api_search():
                 "type": "person",
                 "code": e.code or "",
                 "name": e.name or "",
-                "balance": float(e.balance or 0.0),
+                "balance": fmt_number(e.balance or 0.0),
                 "extra": e.unit or "",
                 "meta": " • ".join(meta_parts),
             })
@@ -1539,15 +2282,18 @@ def api_search():
             conds.append(Invoice.total == q_number)
         if conds:
             query = query.filter(or_(*conds))
-        rows = (
-            query.order_by(Invoice.date.desc(), Invoice.number.desc())
-            .limit(remaining)
-            .all()
-        )
+        if sort_key == "code":
+            query = query.order_by(Invoice.number.asc())
+        elif sort_key == "name":
+            query = query.join(Entity, Invoice.person_id == Entity.id).order_by(Entity.name.asc())
+        else:
+            query = query.order_by(Invoice.date.desc(), Invoice.number.desc())
+
+        rows = query.limit(remaining).all()
         for inv in rows:
             meta_parts = []
             if inv.date:
-                meta_parts.append(inv.date.strftime("%Y-%m-%d"))
+                meta_parts.append(fmt_jalali(inv.date))
             if inv.total is not None:
                 meta_parts.append(f"مبلغ: {fmt_number(inv.total)}")
             results.append({
@@ -1568,6 +2314,7 @@ def api_search():
         if term:
             conds.append(CashDoc.number.ilike(term))
             conds.append(CashDoc.person.has(Entity.name.ilike(term)))
+            conds.append(CashDoc.cheque_number.ilike(term))
         if q_number is not None:
             conds.append(CashDoc.amount == q_number)
         if conds:
@@ -1582,19 +2329,32 @@ def api_search():
             query = query.filter(CashDoc.doc_type == "receive")
         elif "payment" in targets and "receive" not in targets:
             query = query.filter(CashDoc.doc_type == "payment")
+        if cheque_only:
+            query = query.filter(func.lower(func.coalesce(CashDoc.method, "")) == "cheque")
 
-        rows = (
-            query.order_by(CashDoc.date.desc(), CashDoc.number.desc())
-            .limit(remaining)
-            .all()
-        )
+        if sort_key == "code":
+            query = query.order_by(CashDoc.number.asc())
+        elif sort_key == "name":
+            query = query.join(Entity, CashDoc.person_id == Entity.id).order_by(Entity.name.asc())
+        elif sort_key == "balance":
+            query = query.order_by(CashDoc.amount.desc(), CashDoc.date.desc())
+        else:
+            query = query.order_by(CashDoc.date.desc(), CashDoc.number.desc())
+
+        rows = query.limit(remaining).all()
         for doc in rows:
             if doc.doc_type not in targets and len(targets) != len(default_targets):
                 continue
             meta_parts = []
             if doc.date:
-                meta_parts.append(doc.date.strftime("%Y-%m-%d"))
+                meta_parts.append(fmt_jalali(doc.date))
             meta_parts.append(f"مبلغ: {fmt_number(doc.amount)}")
+            if doc.cheque_number:
+                meta_parts.append(f"چک: {fa_digits(doc.cheque_number)}")
+            if doc.cheque_due_date:
+                meta_parts.append(f"سررسید: {fmt_jalali(doc.cheque_due_date)}")
+            if doc.cashbox:
+                meta_parts.append(f"صندوق: {doc.cashbox.name}")
             results.append({
                 "id": doc.id,
                 "type": doc.doc_type,
@@ -1624,6 +2384,13 @@ with app.app_context():
     db.create_all()
     _ensure_column_sqlite("entities", "stock_qty", "REAL", "0")
     _ensure_column_sqlite("entities", "balance",   "REAL", "0")
+    _ensure_column_sqlite("cash_docs", "cashbox_id", "INTEGER", "NULL")
+    _ensure_column_sqlite("cash_docs", "cheque_number", "TEXT", "NULL")
+    _ensure_column_sqlite("cash_docs", "cheque_bank", "TEXT", "NULL")
+    _ensure_column_sqlite("cash_docs", "cheque_branch", "TEXT", "NULL")
+    _ensure_column_sqlite("cash_docs", "cheque_account", "TEXT", "NULL")
+    _ensure_column_sqlite("cash_docs", "cheque_owner", "TEXT", "NULL")
+    _ensure_column_sqlite("cash_docs", "cheque_due_date", "TEXT", "NULL")
 
 if __name__ == "__main__":
     if URL_PREFIX:

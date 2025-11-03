@@ -4,7 +4,7 @@
 <h2>گزارشات</h2>
 
 <form method="get" action="" class="filters">
-  <input class="inp" name="q" value="{{ q or '' }}" placeholder="شماره فاکتور/سند، نام یا کد طرف حساب" style="max-width:240px">
+  <input class="inp" name="q" value="{{ q or '' }}" placeholder="شماره فاکتور/سند، نام یا کد طرف حساب یا شماره چک" style="max-width:260px">
   <select class="inp" name="type" style="max-width:160px">
     <option value="all"     {{ 'selected' if (typ or 'all')=='all' }}>همه</option>
     <option value="invoice" {{ 'selected' if typ=='invoice' }}>فاکتور فروش</option>
@@ -36,10 +36,18 @@
         {% set edit  = view ~ '/edit' %}
         <tr>
           <td>{{ label }}</td>
-          <td><code>{{ r.number }}</code></td>
-          <td>{{ r.date }}</td>
-          <td>{{ r.person }}</td>
-          <td>{{ r.amount|sep }}</td>
+          <td>
+            <code>{{ r.number|fa_digits }}</code>
+            {% if r.cheque_number or r.cashbox %}
+              <div class="muted" style="font-size:12px;margin-top:2px;">
+                {% if r.cheque_number %}چک: <code>{{ r.cheque_number|fa_digits }}</code>{% if r.cheque_due %} — سررسید {{ r.cheque_due|fa_digits }}{% endif %}{% endif %}
+                {% if r.cashbox %}{% if r.cheque_number %} | {% endif %}صندوق: {{ r.cashbox }}{% endif %}
+              </div>
+            {% endif %}
+          </td>
+        <td>{{ r.date|fa_digits }}</td>
+        <td>{{ r.person }}</td>
+        <td>{{ r.amount|sep }}</td>
           <td class="center">
             <div class="ops">
               <a href="{{ view }}">مشاهده</a>

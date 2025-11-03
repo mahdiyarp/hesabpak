@@ -15,6 +15,7 @@
 
   <div class="card">
     <h3>بکاپ کامل</h3>
+    <p class="muted">فایل‌ها در پوشهٔ {% if current_year_key %}<code>{{ current_year_key }}</code>{% else %}<code>backups</code>{% endif %} ذخیره می‌شوند.</p>
     <form method="post" action="{{ url_for('backup.create') }}">
       <input type="text" name="reason" placeholder="توضیح (اختیاری)" class="input">
       <button class="btn btn-primary">ساخت بکاپ</button>
@@ -23,57 +24,145 @@
 
   <div class="card">
     <h3>سال مالی</h3>
-    <p>شروع فعلی: <b>{{ fiscal_year_start }}</b></p>
+    <p>سال فعال: <b>{{ fiscal_year_start }}</b></p>
 
     {% if fiscal_years %}
-      <form method="post" action="{{ url_for('backup.switch_year') }}">
-        <label for="fiscal-year-select">انتخاب سال مالی:</label>
+      <form method="post" action="{{ url_for('backup.switch_year') }}" class="stack-form">
+        <label for="fiscal-year-select">تغییر سال مالی:</label>
         <select id="fiscal-year-select" name="year" class="input">
           {% for year in fiscal_years %}
-            <option value="{{ year.start }}" {% if year.start == fiscal_year_start %}selected{% endif %}>{{ year.label }}</option>
+            <option value="{{ year.start }}" {% if year.start == current_year_value %}selected{% endif %}>{{ year.label }}</option>
           {% endfor %}
         </select>
         <button class="btn">اعمال</button>
       </form>
+      <details class="case-hints">
+        <summary>پرونده‌های ذخیره شده</summary>
+        <ul>
+          {% for year in fiscal_years %}
+            {% set info = case_info.get(year.start) %}
+            <li>
+              <span>{{ year.label }}</span>
+              {% if info and info.snapshot %}
+                <span class="tag tag-ok">پرونده ثبت شده</span>
+              {% else %}
+                <span class="tag tag-warn">فاقد پرونده</span>
+              {% endif %}
+              {% if info %}
+                <code class="path">{{ info.folder }}</code>
+              {% endif %}
+            </li>
+          {% endfor %}
+        </ul>
+      </details>
     {% else %}
       <p class="muted">هنوز سال مالی ثبت نشده است.</p>
     {% endif %}
 
     <hr>
 
-    <form method="post" action="{{ url_for('backup.new_year') }}" onsubmit="return confirm('بکاپ گرفته می‌شود و سال مالی جدید اعمال می‌گردد. ادامه؟');">
-      <label for="fiscal-year-start">شروع سال مالی جدید:</label>
-      <input type="date" id="fiscal-year-start" name="start_date" required class="input">
-      <button class="btn">شروع سال مالی جدید</button>
+    <form method="post" action="{{ url_for('backup.new_year') }}" class="new-year-form" onsubmit="return confirm('بکاپ گرفته می‌شود و تنظیمات سال مالی جدید اعمال می‌گردد. ادامه؟');">
+      <h4>شروع سال مالی جدید</h4>
+      <label for="fiscal-year-start-fa">تاریخ شمسی</label>
+      <div class="jalali-group">
+        <input type="text" id="fiscal-year-start-fa" name="start_date_fa" class="input" data-jalali-input data-jalali-target="fiscal-year-start-greg" placeholder="۱۴۰۳-۰۱-۰۱" autocomplete="off">
+        <input type="hidden" id="fiscal-year-start-greg" name="start_date">
+      </div>
+
+      <fieldset class="mode-options">
+        <legend>وضعیت داده‌ها</legend>
+        <label><input type="radio" name="mode" value="reset" checked> شروع پاک (ریست کامل)</label>
+        <label><input type="radio" name="mode" value="carry"> انتقال از پروندهٔ موجود</label>
+      </fieldset>
+
+      <div id="carry-config" class="carry-config" hidden>
+        <label for="carry-from">انتخاب سال مرجع:</label>
+        <select id="carry-from" name="carry_from" class="input">
+          <option value="">-- انتخاب کنید --</option>
+          {% for year in fiscal_years %}
+            {% set info = case_info.get(year.start) %}
+            {% if info and info.snapshot %}
+              <option value="{{ year.start }}">{{ year.label }}</option>
+            {% endif %}
+          {% endfor %}
+        </select>
+        <p class="muted">فقط پرونده‌هایی که قبلاً ذخیره شده‌اند قابل انتخاب هستند.</p>
+        <div class="carry-grid">
+          <label><input type="checkbox" name="carry_options" value="accounts" checked> سرفصل‌های حساب</label>
+          <label><input type="checkbox" name="carry_options" value="entities" checked> اشخاص و کالاها</label>
+          <label><input type="checkbox" name="carry_options" value="balances"> مانده موجودی و بدهی</label>
+          <label><input type="checkbox" name="carry_options" value="cashboxes" checked> صندوق‌ها و حساب‌های بانکی</label>
+          <label><input type="checkbox" name="carry_options" value="prices"> سوابق قیمت‌گذاری</label>
+        </div>
+      </div>
+
+      <button class="btn btn-primary">شروع سال مالی جدید</button>
     </form>
   </div>
 
   <div class="card">
     <h3>فهرست بکاپ‌ها</h3>
     <table class="table">
-      <thead><tr><th>نام فایل</th><th>حجم</th><th>تاریخ</th><th class="center">اقدامات</th></tr></thead>
+      <thead><tr><th>نام فایل</th><th>سال</th><th>حجم</th><th>تاریخ</th><th class="center">اقدامات</th></tr></thead>
       <tbody>
         {% for b in backups %}
         <tr>
           <td>{{ b.name }}</td>
+          <td>{% if b.year %}{{ b.year }}{% else %}<span class="muted">عمومی</span>{% endif %}</td>
           <td>{{ "{:,}".format(b.size) }} bytes</td>
           <td>{{ b.mtime }}</td>
           <td class="center">
             <div class="ops">
-              <a class="btn btn-small" href="{{ url_for('backup.download', name=b.name) }}">دانلود</a>
+              <a class="btn btn-small" href="{{ url_for('backup.download', name=b.name, year=b.year) }}">دانلود</a>
               <form method="post" action="{{ url_for('backup.restore') }}"
                     onsubmit="return confirm('ری‌استور این فایل انجام شود؟ (پس از آن ری‌استارت سرویس لازم است)');">
                 <input type="hidden" name="name" value="{{ b.name }}">
+                <input type="hidden" name="year" value="{{ b.year }}">
                 <button class="btn btn-small btn-danger" type="submit">ری‌استور</button>
               </form>
             </div>
           </td>
         </tr>
         {% else %}
-        <tr><td colspan="4">هیچ بکاپی یافت نشد.</td></tr>
+        <tr><td colspan="5">هیچ بکاپی یافت نشد.</td></tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
 </div>
+
+<style>
+  .case-hints { margin-top: 12px; }
+  .case-hints summary { cursor: pointer; }
+  .case-hints ul { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+  .case-hints li { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; border-radius: 8px; background: var(--c-surface-soft); }
+  .case-hints .path { font-size: 11px; direction: ltr; }
+  .tag { font-size: 11px; padding: 2px 6px; border-radius: 999px; }
+  .tag-ok { background: var(--c-success-soft); color: var(--c-success); }
+  .tag-warn { background: var(--c-warn-soft); color: var(--c-warn); }
+  .new-year-form { display: flex; flex-direction: column; gap: 12px; }
+  .jalali-group { display: flex; gap: 8px; align-items: center; }
+  .jalali-group input[type="text"] { flex: 1; }
+  .mode-options { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }
+  .mode-options label { display: flex; align-items: center; gap: 6px; }
+  .carry-config { border: 1px dashed var(--c-border); padding: 12px; border-radius: 8px; background: var(--c-surface-soft); }
+  .carry-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; margin-top: 8px; }
+  .stack-form { display: flex; flex-direction: column; gap: 8px; }
+</style>
+<script>
+(function(){
+  const radios = document.querySelectorAll('input[name="mode"]');
+  const config = document.getElementById('carry-config');
+  const toggle = () => {
+    const mode = document.querySelector('input[name="mode"]:checked');
+    if(mode && mode.value === 'carry'){
+      config.hidden = false;
+    } else {
+      config.hidden = true;
+    }
+  };
+  radios.forEach(r => r.addEventListener('change', toggle));
+  toggle();
+})();
+</script>
 {% endblock %}

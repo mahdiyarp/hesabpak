@@ -4,6 +4,7 @@
   <h2>⚙️ تنظیمات سامانه</h2>
 
   <form method="post" class="card" style="padding:16px; margin-bottom:16px;">
+    <input type="hidden" name="form_id" value="pos">
     <h3 style="margin-top:0;">انتخاب دستگاه کارتخوان</h3>
     <p class="muted" style="margin-top:4px;">
       دستگاه‌های زیر از پرکاربردترین پایانه‌های فروش سه سال اخیر در ایران هستند. با انتخاب دستگاه، مبلغ اسناد دریافت/پرداخت به‌صورت
@@ -26,12 +27,70 @@
     </div>
   </form>
 
+  <form method="post" class="card" style="padding:16px; margin-bottom:16px; display:grid; gap:18px;">
+    <input type="hidden" name="form_id" value="ui">
+    <div>
+      <h3 style="margin-top:0;">🎨 شخصی‌سازی ظاهر</h3>
+      <p class="muted">تم رابط کاربری و ترتیب نمایش کارت‌ها در داشبورد را انتخاب کنید.</p>
+      <div class="theme-options">
+        {% for value,label in theme_choices %}
+        <label class="theme-option">
+          <input type="radio" name="ui_theme" value="{{ value }}" {% if value == selected_theme %}checked{% endif %}>
+          <span class="theme-chip theme-{{ value }}">{{ label }}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div>
+        <label class="lbl" for="search_sort">نحوه مرتب‌سازی نتایج جستجو</label>
+        <select class="inp" id="search_sort" name="search_sort">
+          {% for value,label in search_sort_choices %}
+          <option value="{{ value }}" {% if value == search_sort_selected %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="lbl" for="price_display_mode">نمایش قیمت کالا در نتایج</label>
+        <select class="inp" id="price_display_mode" name="price_display_mode">
+          {% for value,label in price_display_modes %}
+          <option value="{{ value }}" {% if value == price_mode_selected %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <div class="card muted" style="background:transparent; border:1px dashed var(--border-color); padding:12px;">
+      <label style="display:flex; align-items:center; gap:10px;">
+        <input type="checkbox" name="allow_negative_sales" {% if allow_negative_selected %}checked{% endif %}>
+        امکان ثبت فروش با موجودی منفی (برای پیش‌فروش یا رزرو)
+      </label>
+    </div>
+
+    <div>
+      <h4 style="margin:0 0 8px 0;">بخش‌های قابل نمایش در داشبورد</h4>
+      <div class="widget-grid">
+        {% for value,label in dashboard_widget_choices %}
+        <label class="widget-option">
+          <input type="checkbox" name="dashboard_widgets" value="{{ value }}" {% if value in dashboard_widgets_selected %}checked{% endif %}>
+          <span>{{ label }}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div>
+      <button type="submit" class="btn-primary">ذخیره تنظیمات ظاهری</button>
+    </div>
+  </form>
+
   <div class="card" style="padding:16px;">
     <h3 style="margin-top:0;">راهنما</h3>
     <ul class="muted" style="margin-top:8px; line-height:1.8;">
-      <li>پس از انتخاب دستگاه، در صفحات دریافت و پرداخت وضعیت ارسال مبلغ نمایش داده می‌شود.</li>
-      <li>اتصال فیزیکی به کارتخوان باید توسط تیم پشتیبانی شما انجام شود؛ این تنظیم تنها ارسال مبلغ را فعال می‌کند.</li>
-      <li>در صورت نیاز به مدل دیگر، لطفاً با تیم توسعه تماس بگیرید.</li>
+      <li>تم «طوسی مورب» مشابه تصویر پیش‌نمایش بوده و ناوبری مورب و کارت‌های با سایه نرم ارائه می‌دهد.</li>
+      <li>مرتب‌سازی جستجو برای تمام فرم‌های انتخاب کالا، مشتری و چک اعمال می‌شود.</li>
+      <li>اگر فروش منفی را فعال کنید کاهش موجودی از حد صفر عبور می‌کند و در گزارش موجودی نمایش داده می‌شود.</li>
     </ul>
   </div>
 </div>
