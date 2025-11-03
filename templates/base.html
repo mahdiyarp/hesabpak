@@ -103,6 +103,9 @@
   {% if 'reports' in perms %}
   <a class="menu-item" href="{{ prefix }}/reports"><span class="icon">📊</span><span class="label">گزارشات</span><span class="chev">›</span></a>
   {% endif %}
+  {% if 'assistant' in perms %}
+  <a class="menu-item" href="{{ prefix }}/assistant"><span class="icon">🤖</span><span class="label">دستیار هوشمند</span><span class="chev">›</span></a>
+  {% endif %}
   {% if 'entities' in perms %}
   <a class="menu-item" href="{{ prefix }}/entities?kind=item"><span class="icon">➕</span><span class="label">ثبت شخص یا کالا جدید</span><span class="chev">›</span></a>
   {% endif %}

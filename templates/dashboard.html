@@ -39,6 +39,20 @@
   </div>
   {% endif %}
 
+  {% if 'assistant' in user_permissions %}
+  <div class="card assistant-callout">
+    <div class="assistant-icon">🤖</div>
+    <div class="assistant-body">
+      <h3>دستیار هوشمند حساب‌پاک</h3>
+      <p>بارگذاری تصویر یا متن فاکتور و ثبت خودکار فروش یا خرید با کمک هوش مصنوعی.</p>
+      <div class="assistant-actions">
+        <a class="btn-primary" href="{{ prefix }}/assistant">شروع گفت‌وگو</a>
+        <span class="assistant-hint">مدل فعال: {{ assistant_model_label }}</span>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
   {% if 'cash' in dashboard_widgets %}
   <div class="balances-card card">
     <h2>موجودی صندوق‌ها</h2>

@@ -85,6 +85,46 @@
     </div>
   </form>
 
+  <form method="post" class="card" style="padding:16px; margin-bottom:16px; display:grid; gap:16px;">
+    <input type="hidden" name="form_id" value="ai">
+    <div>
+      <h3 style="margin-top:0;">🤖 اتصال دستیار هوشمند</h3>
+      <p class="muted">کلید API سرویس OpenAI را وارد کنید تا بتوانید از ماژول هوش مصنوعی برای خواندن فاکتورها استفاده کنید.</p>
+    </div>
+
+    <div class="grid-2">
+      <div>
+        <label class="lbl" for="openai_api_key">کلید API</label>
+        <input class="inp" type="password" id="openai_api_key" name="openai_api_key" placeholder="sk-..." autocomplete="off">
+        {% if assistant_api_has %}
+        <div class="hint">کلید فعلی: {{ assistant_api_mask }}</div>
+        {% else %}
+        <div class="hint">برای فعال‌شدن دستیار لازم است یک کلید معتبر ثبت شود.</div>
+        {% endif %}
+      </div>
+      <div>
+        <label class="lbl" for="openai_model">مدل پیش‌فرض</label>
+        <select class="inp" id="openai_model" name="openai_model">
+          {% for value,label in assistant_model_choices %}
+          <option value="{{ value }}" {% if value == assistant_model_selected %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <div class="hint">مدل‌های چندحالته قادر به پردازش متن و تصویر هستند.</div>
+      </div>
+    </div>
+
+    <div class="card muted" style="background:transparent; border:1px dashed var(--border-color); padding:12px;">
+      <ul style="margin:0; padding-right:18px; line-height:1.8;">
+        <li>کلید در پایگاه داده به‌صورت رمز نشده نگهداری می‌شود؛ از دسترسی کاربران غیرمجاز جلوگیری کنید.</li>
+        <li>برای حذف کلید، فیلد را خالی گذاشته و ذخیره کنید.</li>
+      </ul>
+    </div>
+
+    <div>
+      <button type="submit" class="btn-primary">ذخیره تنظیمات دستیار</button>
+    </div>
+  </form>
+
   <div class="card" style="padding:16px;">
     <h3 style="margin-top:0;">راهنما</h3>
     <ul class="muted" style="margin-top:8px; line-height:1.8;">

@@ -1,13 +1,19 @@
 # -*- coding: utf-8 -*-
-import os, json, logging
+import os, json, logging, secrets, base64
 from pathlib import Path
 from datetime import datetime, timedelta, date
+from typing import Any, Dict, List, Optional
 
 from flask import Flask, render_template, redirect, request, flash, session, jsonify, abort, current_app
 from flask_login import LoginManager, login_user, logout_user, login_required, UserMixin, current_user
 from dotenv import load_dotenv
 from markupsafe import Markup
 from sqlalchemy import func, or_, UniqueConstraint   # <- مهم
+
+try:
+    from openai import OpenAI
+except Exception:
+    OpenAI = None
 
 from extensions import db
 from utils.backup_utils import ensure_dirs, autosave_record
@@ -70,6 +76,12 @@ DASHBOARD_WIDGET_CHOICES = [
     ("cheques", "چک‌های آتی"),
 ]
 
+ASSISTANT_MODEL_CHOICES = [
+    ("gpt-4o-mini", "GPT-4o mini"),
+    ("gpt-4.1-mini", "GPT-4.1 mini"),
+    ("o4-mini", "o4 mini (چندحالته)"),
+]
+
 CASH_METHOD_LABELS = {
     "cash": "نقدی",
     "pos": "دستگاه پوز",
@@ -87,6 +99,7 @@ PERMISSION_LABELS = {
     "entities": "اشخاص و کالاها",
     "developer": "ابزار فنی",
     "admin": "مدیریت سیستم",
+    "assistant": "دستیار هوشمند",
 }
 
 DEFAULT_PERMISSIONS = [
@@ -97,6 +110,7 @@ DEFAULT_PERMISSIONS = [
     "payment",
     "reports",
     "entities",
+    "assistant",
 ]
 
 ADMIN_PERMISSIONS = sorted(set(DEFAULT_PERMISSIONS + ["developer", "admin"]))
@@ -560,6 +574,452 @@ def _allow_negative_sales() -> bool:
     val = (Setting.get("allow_negative_sales", "off") or "off").strip().lower()
     return val in ("on", "true", "1", "yes")
 
+def _assistant_model() -> str:
+    key = (Setting.get("openai_model", ASSISTANT_MODEL_CHOICES[0][0]) or ASSISTANT_MODEL_CHOICES[0][0]).strip()
+    valid = {k for k, _ in ASSISTANT_MODEL_CHOICES}
+    if key not in valid:
+        key = ASSISTANT_MODEL_CHOICES[0][0]
+    return key
+
+def _openai_api_key() -> str:
+    key = (Setting.get("openai_api_key", "") or "").strip()
+    if not key:
+        key = (os.environ.get("OPENAI_API_KEY") or "").strip()
+    return key
+
+def _mask_secret(value: str) -> str:
+    value = (value or "").strip()
+    if not value:
+        return ""
+    if len(value) <= 6:
+        return "*" * len(value)
+    return f"{value[:3]}{'*' * (len(value) - 6)}{value[-3:]}"
+
+AI_PENDING_TASKS: Dict[str, Dict[str, Any]] = {}
+
+AI_RESPONSE_SCHEMA = {
+    "name": "hesabpak_assistant_response",
+    "schema": {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": {
+            "reply": {"type": "string", "description": "متن پاسخ به کاربر به زبان فارسی"},
+            "needs_confirmation": {"type": "boolean"},
+            "follow_up": {"type": ["string", "null"]},
+            "uncertain_fields": {
+                "type": "array",
+                "items": {"type": "string"},
+                "default": [],
+            },
+            "invoice": {
+                "type": ["null", "object"],
+                "properties": {
+                    "kind": {"type": "string", "enum": ["sales", "purchase", "unknown"], "default": "sales"},
+                    "number": {"type": ["string", "null"]},
+                    "date": {"type": ["string", "null"]},
+                    "partner": {
+                        "type": "object",
+                        "additionalProperties": False,
+                        "properties": {
+                            "name": {"type": "string"},
+                            "code": {"type": ["string", "null"]},
+                            "phone": {"type": ["string", "null"]},
+                            "role": {"type": ["string", "null"], "description": "buyer | seller"},
+                        },
+                        "required": ["name"],
+                    },
+                    "items": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "additionalProperties": False,
+                            "properties": {
+                                "name": {"type": "string"},
+                                "code": {"type": ["string", "null"]},
+                                "qty": {"type": "number"},
+                                "unit": {"type": ["string", "null"]},
+                                "unit_price": {"type": ["number", "null"]},
+                                "total": {"type": ["number", "null"]},
+                            },
+                            "required": ["name", "qty"],
+                        },
+                    },
+                    "notes": {"type": ["string", "null"]},
+                },
+                "required": ["kind", "partner", "items"],
+            },
+        },
+        "required": ["reply", "needs_confirmation"],
+    },
+}
+
+def _cleanup_ai_tasks():
+    expired = []
+    now = datetime.utcnow()
+    for token, data in AI_PENDING_TASKS.items():
+        if data.get("expires_at") and data["expires_at"] < now:
+            expired.append(token)
+    for token in expired:
+        AI_PENDING_TASKS.pop(token, None)
+
+def _register_ai_task(username: str, payload: Dict[str, Any]) -> str:
+    _cleanup_ai_tasks()
+    token = secrets.token_hex(16)
+    AI_PENDING_TASKS[token] = {
+        "username": username,
+        "payload": payload,
+        "created_at": datetime.utcnow(),
+        "expires_at": datetime.utcnow() + timedelta(minutes=15),
+    }
+    return token
+
+def _pop_ai_task(username: str, token: str) -> Optional[Dict[str, Any]]:
+    _cleanup_ai_tasks()
+    data = AI_PENDING_TASKS.get(token)
+    if not data:
+        return None
+    if data.get("username") != username:
+        return None
+    AI_PENDING_TASKS.pop(token, None)
+    return data.get("payload")
+
+def _build_openai_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    prepared: List[Dict[str, Any]] = []
+    for msg in messages:
+        role = (msg.get("role") or "").strip().lower()
+        if role not in ("user", "assistant"):
+            continue
+        text = (msg.get("text") or "").strip()
+        attachments = msg.get("attachments") or []
+        content: List[Dict[str, Any]] = []
+        if text:
+            content.append({"type": "text", "text": text})
+        for att in attachments:
+            atype = (att.get("type") or "").strip().lower()
+            if atype != "image":
+                continue
+            data = (att.get("data") or "").strip()
+            mime = (att.get("mime_type") or "image/png").strip() or "image/png"
+            if not data:
+                continue
+            # Validate base64 to avoid invalid payloads
+            try:
+                base64.b64decode(data, validate=True)
+            except Exception:
+                continue
+            content.append({"type": "input_image", "image_base64": data, "mime_type": mime})
+        if not content and not text:
+            continue
+        prepared.append({"role": role, "content": content or [{"type": "text", "text": text or ""}]})
+    return prepared
+
+def _call_openai_assistant(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
+    api_key = _openai_api_key()
+    if not api_key:
+        raise RuntimeError("کلید API تنظیم نشده است.")
+    if OpenAI is None:
+        raise RuntimeError("کتابخانه openai نصب نشده است.")
+
+    client = OpenAI(api_key=api_key)
+    system_prompt = (
+        "شما دستیار هوشمند حساب‌پاک هستید. وظیفه شما استخراج اطلاعات فاکتورهای خرید و فروش"
+        " از متن یا تصویر و هدایت کاربر برای ثبت آن‌ها در سیستم است. همواره پاسخ نهایی را"
+        " به زبان فارسی بدهید و در صورت ابهام، مواردی که نیاز به تأیید دارند را مشخص کنید."
+        " اگر تصویر فاکتور دریافت کردید مقادیر تاریخ، شماره فاکتور، نام خریدار/فروشنده و"
+        " اقلام را با قیمت و تعداد استخراج کنید. در صورت نبود قیمت، مقدار null قرار دهید."
+    )
+
+    request_messages = [
+        {"role": "system", "content": [{"type": "text", "text": system_prompt}]}
+    ] + _build_openai_messages(messages)
+
+    response = client.responses.create(
+        model=_assistant_model(),
+        input=request_messages,
+        max_output_tokens=800,
+        response_format={"type": "json_schema", "json_schema": AI_RESPONSE_SCHEMA},
+    )
+
+    try:
+        content = response.output[0].content[0].text  # type: ignore[attr-defined]
+    except Exception as exc:
+        raise RuntimeError(f"ساختار پاسخ نامعتبر است: {exc}")
+
+    try:
+        return json.loads(content)
+    except Exception as exc:
+        raise RuntimeError(f"امکان خواندن پاسخ وجود ندارد: {exc}")
+
+def _parse_invoice_date(raw: Optional[str]) -> Optional[date]:
+    if not raw:
+        return None
+    raw = str(raw).strip()
+    if not raw:
+        return None
+    parsed = parse_gregorian_date(raw, allow_none=True)
+    if parsed:
+        return parsed
+    parsed = parse_jalali_date(raw, allow_none=True)
+    return parsed
+
+def _entity_level_from_code(code: str) -> int:
+    return _level_by_code(code)
+
+def _generate_entity_code(kind: str, preferred: Optional[str] = None) -> str:
+    kind = (kind or "item").strip()
+    if preferred and preferred.isdigit() and len(preferred) in (3, 6, 9):
+        exists = Entity.query.filter_by(type=kind, code=preferred).first()
+        if not exists:
+            return preferred
+
+    target_level = 1 if kind == "person" else 3
+    prefix = ""
+    if preferred and preferred.isdigit() and len(preferred) > 3:
+        prefix = preferred[: len(preferred) - 3]
+        target_level = len(preferred) // 3
+
+    target_length = {1: 3, 2: 6, 3: 9}.get(target_level, 9)
+    base_query = db.session.query(Entity.code).filter(Entity.type == kind)
+    if prefix:
+        base_query = base_query.filter(Entity.code.like(f"{prefix}%"))
+    base_query = base_query.filter(func.length(Entity.code) == target_length)
+
+    existing = set()
+    for (code,) in base_query.all():
+        try:
+            suffix = code[len(prefix):len(prefix) + 3]
+            existing.add(int(suffix))
+        except Exception:
+            continue
+
+    candidate = 100
+    while candidate in existing:
+        candidate += 1
+    code = f"{prefix}{candidate:03d}"
+    while len(code) < target_length:
+        code += "000"
+    return code[:target_length]
+
+def _resolve_entity(kind: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+    name = (payload.get("name") or "").strip()
+    code = (payload.get("code") or "").strip()
+    entity = None
+    if code and code.isdigit():
+        entity = Entity.query.filter_by(type=kind, code=code).first()
+    if not entity and name:
+        entity = Entity.query.filter(Entity.type == kind, Entity.name.ilike(name)).first()
+    info = {
+        "name": name,
+        "code": code if code and code.isdigit() else "",
+        "entity": entity,
+    }
+    return info
+
+def _prepare_invoice_plan(invoice_data: Dict[str, Any]) -> Dict[str, Any]:
+    kind = (invoice_data.get("kind") or "sales").strip().lower()
+    if kind not in ("sales", "purchase"):
+        kind = "sales"
+
+    partner_payload = invoice_data.get("partner") or {}
+    partner_info = _resolve_entity("person", partner_payload)
+
+    parsed_date = _parse_invoice_date(invoice_data.get("date"))
+    number = (invoice_data.get("number") or "").strip()
+
+    items_preview = []
+    missing_items = []
+    total = 0.0
+    for row in invoice_data.get("items") or []:
+        name = (row.get("name") or "").strip()
+        if not name:
+            continue
+        qty = _to_float(row.get("qty"), 0.0)
+        unit_price = _to_float(row.get("unit_price"), 0.0)
+        unit = (row.get("unit") or "عدد").strip() or "عدد"
+        code = (row.get("code") or "").strip()
+
+        item_info = _resolve_entity("item", {"name": name, "code": code})
+        line_total = qty * unit_price if unit_price else 0.0
+        total += line_total
+
+        preview_entry = {
+            "name": name,
+            "qty": qty,
+            "unit_price": unit_price,
+            "unit": unit,
+            "code": code if code and code.isdigit() else "",
+            "line_total": line_total,
+            "entity_id": item_info["entity"].id if item_info["entity"] else None,
+            "exists": bool(item_info["entity"]),
+        }
+        items_preview.append(preview_entry)
+
+        if not item_info["entity"]:
+            missing_items.append({
+                "name": name,
+                "unit": unit,
+                "code": preview_entry["code"] or None,
+                "qty": qty,
+                "unit_price": unit_price,
+            })
+
+    plan = {
+        "kind": kind,
+        "number": number,
+        "date": parsed_date.isoformat() if parsed_date else None,
+        "partner": {
+            "name": partner_info["name"],
+            "code": partner_info["code"],
+            "entity_id": partner_info["entity"].id if partner_info["entity"] else None,
+            "exists": bool(partner_info["entity"]),
+        },
+        "items": items_preview,
+        "missing_items": missing_items,
+        "total": total,
+    }
+
+    if not partner_info["entity"]:
+        plan["missing_partner"] = {
+            "name": partner_info["name"],
+            "code": partner_info["code"] or None,
+        }
+
+    return plan
+
+def _ensure_entity(kind: str, data: Dict[str, Any]) -> Entity:
+    name = (data.get("name") or "").strip()
+    code = (data.get("code") or "").strip()
+    unit = (data.get("unit") or ("عدد" if kind == "item" else "شرکت")).strip()
+    if not name:
+        raise ValueError("نام موجودیت مشخص نشده است.")
+
+    existing = None
+    if code and code.isdigit():
+        existing = Entity.query.filter_by(type=kind, code=code).first()
+    if not existing:
+        existing = Entity.query.filter(Entity.type == kind, Entity.name == name).first()
+    if existing:
+        return existing
+
+    final_code = _generate_entity_code(kind, code if code and code.isdigit() else None)
+    level = _entity_level_from_code(final_code)
+    parent_id = None
+    if level == 2:
+        parent = Entity.query.filter_by(type=kind, code=final_code[:3]).first()
+        parent_id = parent.id if parent else None
+    elif level == 3:
+        parent = Entity.query.filter_by(type=kind, code=final_code[:6]).first()
+        parent_id = parent.id if parent else None
+
+    ent = Entity(type=kind, code=final_code, name=name, unit=unit, level=level, parent_id=parent_id)
+    db.session.add(ent)
+    db.session.flush()
+    return ent
+
+def _apply_invoice_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
+    kind = plan.get("kind", "sales")
+    partner_payload = plan.get("partner") or {}
+    partner_entity = None
+    if partner_payload.get("entity_id"):
+        partner_entity = Entity.query.get(int(partner_payload["entity_id"]))
+    if not partner_entity:
+        partner_entity = _ensure_entity("person", partner_payload)
+
+    number = (plan.get("number") or "").strip()
+    if not number:
+        number = generate_invoice_number()
+    if Invoice.query.filter_by(number=number).first():
+        number = generate_invoice_number()
+
+    inv_date = _parse_invoice_date(plan.get("date")) or datetime.utcnow().date()
+
+    allow_negative = _allow_negative_sales()
+    items_payload = []
+    created_items = []
+    for row in plan.get("items") or []:
+        qty = _to_float(row.get("qty"), 0.0)
+        if qty <= 0:
+            continue
+        unit_price = _to_float(row.get("unit_price"), 0.0)
+        unit = (row.get("unit") or "عدد").strip() or "عدد"
+        item_entity = None
+        if row.get("entity_id"):
+            item_entity = Entity.query.get(int(row["entity_id"]))
+        if not item_entity:
+            item_entity = _ensure_entity("item", row)
+            created_items.append(item_entity)
+
+        current_stock = float(item_entity.stock_qty or 0.0)
+        if kind == "sales" and not allow_negative and current_stock - qty < -1e-6:
+            raise ValueError(f"موجودی کالا «{item_entity.name}» کافی نیست.")
+
+        items_payload.append({
+            "entity": item_entity,
+            "qty": qty,
+            "unit_price": unit_price,
+            "unit": unit,
+        })
+
+    if not items_payload:
+        raise ValueError("هیچ ردیف کالایی معتبر نیست.")
+
+    inv = Invoice(number=number, date=inv_date, person_id=partner_entity.id, discount=0.0, tax=0.0, total=0.0)
+    db.session.add(inv)
+    db.session.flush()
+
+    total = 0.0
+    for payload in items_payload:
+        item = payload["entity"]
+        qty = float(payload["qty"])
+        unit_price = float(payload["unit_price"])
+        line_total = qty * unit_price
+        total += line_total
+
+        db.session.add(
+            InvoiceLine(
+                invoice_id=inv.id,
+                item_id=item.id,
+                qty=qty,
+                unit_price=unit_price,
+                line_total=line_total,
+            )
+        )
+
+        if kind == "sales":
+            try:
+                item.stock_qty = float(item.stock_qty or 0.0) - qty
+            except Exception:
+                item.stock_qty = 0.0 - qty
+            ph = PriceHistory.query.filter_by(person_id=partner_entity.id, item_id=item.id).first()
+            if not ph:
+                db.session.add(PriceHistory(person_id=partner_entity.id, item_id=item.id, last_price=unit_price))
+            else:
+                ph.last_price = unit_price
+        else:
+            try:
+                item.stock_qty = float(item.stock_qty or 0.0) + qty
+            except Exception:
+                item.stock_qty = 0.0 + qty
+
+    inv.total = total
+
+    try:
+        if kind == "sales":
+            partner_entity.balance = float(partner_entity.balance or 0.0) + float(total)
+        else:
+            partner_entity.balance = float(partner_entity.balance or 0.0) - float(total)
+    except Exception:
+        partner_entity.balance = float(total) if kind == "sales" else -float(total)
+
+    db.session.commit()
+
+    return {
+        "invoice": inv,
+        "partner": partner_entity,
+        "created_items": created_items,
+    }
+
+
 def _find_entity_by_code_or_id(kind: str, code_or_id: str):
     if not code_or_id: return None
     q = Entity.query.filter(Entity.type == kind)
@@ -791,6 +1251,7 @@ def index():
             "paymentsTotals": chart_payments_totals,
         },
         dashboard_widgets=_dashboard_widgets(),
+        assistant_model_label=dict(ASSISTANT_MODEL_CHOICES).get(_assistant_model(), _assistant_model()),
     )
 
 @app.route(URL_PREFIX + "/login", methods=["GET", "POST"])
@@ -1805,6 +2266,19 @@ def settings_stub():
             Setting.set("dashboard_widgets", json.dumps(widgets_payload, ensure_ascii=False))
             db.session.commit()
             flash("تنظیمات ظاهری و جستجو ذخیره شد.", "success")
+        elif form_id == "ai":
+            api_key = (request.form.get("openai_api_key") or "").strip()
+            model = (request.form.get("openai_model") or _assistant_model()).strip()
+            valid_models = {k for k, _ in ASSISTANT_MODEL_CHOICES}
+            if model not in valid_models:
+                model = _assistant_model()
+            Setting.set("openai_api_key", api_key)
+            Setting.set("openai_model", model)
+            db.session.commit()
+            if api_key:
+                flash("کلید و تنظیمات دستیار هوشمند ذخیره شد.", "success")
+            else:
+                flash("کلید دستیار پاک شد.", "info")
         return redirect(URL_PREFIX + "/settings")
     return render_template(
         "settings.html",
@@ -1816,7 +2290,123 @@ def settings_stub():
         price_mode_selected=_price_display_mode(),
         dashboard_widgets_selected=_dashboard_widgets(),
         allow_negative_selected=_allow_negative_sales(),
+        assistant_model_selected=_assistant_model(),
+        assistant_model_choices=ASSISTANT_MODEL_CHOICES,
+        assistant_api_mask=_mask_secret(_openai_api_key()),
+        assistant_api_has=bool(_openai_api_key()),
     )
+
+@app.route(URL_PREFIX + "/assistant")
+@login_required
+def assistant_home():
+    ensure_permission("assistant")
+    api_ready = bool(_openai_api_key()) and OpenAI is not None
+    return render_template(
+        "assistant.html",
+        prefix=URL_PREFIX,
+        api_ready=api_ready,
+        assistant_model_label=dict(ASSISTANT_MODEL_CHOICES).get(_assistant_model(), _assistant_model()),
+    )
+
+@app.route(URL_PREFIX + "/assistant/api/chat", methods=["POST"])
+@login_required
+def assistant_chat():
+    ensure_permission("assistant")
+    if not _openai_api_key():
+        return jsonify({"status": "error", "message": "ابتدا کلید API را در تنظیمات ثبت کنید."}), 400
+    if OpenAI is None:
+        return jsonify({"status": "error", "message": "کتابخانه openai در محیط نصب نشده است."}), 500
+
+    payload = request.get_json(silent=True) or {}
+    messages = payload.get("messages")
+    if not isinstance(messages, list) or not messages:
+        return jsonify({"status": "error", "message": "ساختار پیام نامعتبر است."}), 400
+
+    try:
+        result = _call_openai_assistant(messages)
+    except Exception as exc:
+        db.session.rollback()
+        return jsonify({"status": "error", "message": str(exc)}), 500
+
+    reply_text = result.get("reply", "")
+    needs_confirmation = bool(result.get("needs_confirmation"))
+    invoice_preview = None
+    ticket = None
+    applied = False
+    applied_invoice_number = None
+    apply_error = None
+
+    invoice_payload = result.get("invoice") if isinstance(result.get("invoice"), dict) else None
+    if invoice_payload:
+        plan = _prepare_invoice_plan(invoice_payload)
+        invoice_preview = plan
+        missing_partner = plan.get("missing_partner")
+        missing_items = plan.get("missing_items")
+        if missing_partner or missing_items:
+            needs_confirmation = True
+
+        if not needs_confirmation:
+            try:
+                outcome = _apply_invoice_plan(plan)
+                applied = True
+                applied_invoice_number = outcome["invoice"].number
+                reply_text = (reply_text or "") + f"\nفاکتور «{applied_invoice_number}» با موفقیت ثبت شد."
+            except Exception as exc:
+                db.session.rollback()
+                apply_error = str(exc)
+                needs_confirmation = True
+
+        if needs_confirmation:
+            ticket = _register_ai_task(
+                current_user.username,
+                {
+                    "plan": plan,
+                    "reply": reply_text,
+                    "apply_error": apply_error,
+                },
+            )
+
+    response = {
+        "status": "ok",
+        "reply": reply_text,
+        "needs_confirmation": needs_confirmation,
+        "invoice_preview": invoice_preview,
+        "ticket": ticket,
+        "applied": applied,
+        "invoice_number": applied_invoice_number,
+        "uncertain_fields": result.get("uncertain_fields", []),
+        "follow_up": result.get("follow_up"),
+        "apply_error": apply_error,
+    }
+    return jsonify(response)
+
+@app.route(URL_PREFIX + "/assistant/api/apply", methods=["POST"])
+@login_required
+def assistant_apply():
+    ensure_permission("assistant")
+    payload = request.get_json(silent=True) or {}
+    token = (payload.get("ticket") or "").strip()
+    if not token:
+        return jsonify({"status": "error", "message": "توکن یافت نشد."}), 400
+    task = _pop_ai_task(current_user.username, token)
+    if not task:
+        return jsonify({"status": "error", "message": "توکن منقضی یا نامعتبر است."}), 400
+    plan = task.get("plan")
+    if not plan:
+        return jsonify({"status": "error", "message": "اطلاعات فاکتور موجود نیست."}), 400
+
+    try:
+        outcome = _apply_invoice_plan(plan)
+    except Exception as exc:
+        db.session.rollback()
+        return jsonify({"status": "error", "message": str(exc)}), 400
+
+    invoice = outcome["invoice"]
+    return jsonify({
+        "status": "ok",
+        "invoice_number": invoice.number,
+        "invoice_id": invoice.id,
+    })
 
 @app.route(URL_PREFIX + "/admin", methods=["GET"])
 @login_required

@@ -1,0 +1,83 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="module-wrap assistant-module">
+  <div class="assistant-header">
+    <div>
+      <h2>🤖 دستیار هوشمند</h2>
+      <p class="muted">گفت‌وگوی تعاملی برای خواندن فاکتورهای کاغذی یا دیجیتال، استخراج اقلام و ثبت خودکار در سیستم.</p>
+    </div>
+    <div class="assistant-status {{ 'ready' if api_ready else 'missing' }}">
+      {% if api_ready %}
+      <span class="dot"></span> فعال — اتصال برقرار است
+      {% else %}
+      <span class="dot"></span> غیرفعال — ابتدا کلید API را در تنظیمات ثبت کنید
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="assistant-layout">
+    <section class="assistant-chat card">
+      <div id="assistant-messages" class="assistant-messages" data-empty-text="پیام خود را بنویسید یا تصویر فاکتور را آپلود کنید."></div>
+      <form id="assistant-form" class="assistant-form" autocomplete="off">
+        <textarea id="assistant-input" class="assistant-input" rows="3" placeholder="سوال یا توضیح خود را بنویسید..." {% if not api_ready %}disabled{% endif %}></textarea>
+        <div class="assistant-actions">
+          <label class="file-btn">
+            📄 آپلود فاکتور
+            <input type="file" id="assistant-file" accept="image/*" {% if not api_ready %}disabled{% endif %}>
+          </label>
+          <button type="submit" class="btn-primary" {% if not api_ready %}disabled{% endif %}>ارسال</button>
+        </div>
+        <div class="assistant-hints">
+          <span>راهنما: می‌توانید بگویید «این فاکتور فروش را ثبت کن» یا «از موجودی اطمینان داری؟»</span>
+        </div>
+      </form>
+    </section>
+
+    <aside class="assistant-sidebar">
+      <div id="assistant-preview" class="assistant-preview card" hidden>
+        <h3>پیش‌نمایش فاکتور</h3>
+        <div class="preview-meta">
+          <div><span>نوع:</span> <strong data-field="kind">—</strong></div>
+          <div><span>مشتری/تأمین‌کننده:</span> <strong data-field="partner">—</strong></div>
+          <div><span>تاریخ:</span> <strong data-field="date">—</strong></div>
+          <div><span>شماره:</span> <strong data-field="number">—</strong></div>
+        </div>
+        <div class="preview-items">
+          <table>
+            <thead>
+              <tr>
+                <th>کالا</th>
+                <th>تعداد</th>
+                <th>قیمت واحد</th>
+                <th>جمع</th>
+                <th>وضعیت</th>
+              </tr>
+            </thead>
+            <tbody></tbody>
+          </table>
+        </div>
+        <div class="preview-total">مبلغ کل: <strong data-field="total">۰</strong> تومان</div>
+        <div id="assistant-missing" class="assistant-missing" hidden></div>
+        <div id="assistant-error" class="assistant-error" hidden></div>
+        <div class="preview-actions">
+          <button type="button" id="assistant-confirm" class="btn-primary">تأیید و ثبت در سیستم</button>
+          <button type="button" id="assistant-cancel" class="btn-secondary">انصراف</button>
+        </div>
+      </div>
+
+      <div class="assistant-tips card">
+        <h3>نکات استفاده</h3>
+        <ul>
+          <li>تصاویر واضح و خوانا با حداکثر حجم ۲ مگابایت نتیجه بهتری خواهند داشت.</li>
+          <li>اگر نام مشتری یا کالا را نمی‌شناسیم، دستیار برای ایجاد رکورد جدید از شما اجازه می‌گیرد.</li>
+          <li>تاریخ‌های شمسی به‌صورت خودکار به میلادی تبدیل و ذخیره می‌شوند.</li>
+        </ul>
+      </div>
+    </aside>
+  </div>
+</div>
+{% endblock %}
+
+{% block body_scripts %}
+<script src="{{ prefix }}/static/assistant.js"></script>
+{% endblock %}
