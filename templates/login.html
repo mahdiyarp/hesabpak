@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ورود | hesab pak</title>
+  <link rel="stylesheet" href="{{ prefix }}/static/style.css">
+</head>
+<body class="login">
+  <div class="login-wrap">
+    <div class="login-card">
+      <div class="brand">حساب‌پَک</div>
+      <h1 class="login-title">ورود</h1>
+      <form method="post" class="login-form" autocomplete="on">
+        <label class="lbl">نام کاربری</label>
+        <input class="inp" name="username" placeholder="نام کاربری" required autofocus>
+
+        <label class="lbl">رمز عبور</label>
+        <input class="inp" name="password" type="password" placeholder="رمز عبور" required>
+
+        <button class="btn-primary" type="submit">ورود</button>
+      </form>
+
+      {% with messages = get_flashed_messages(with_categories=true) %}
+        {% if messages %}
+          <div class="msg-area">
+            {% for cat,msg in messages %}
+              <div class="msg {{cat}}">{{ msg }}</div>
+            {% endfor %}
+          </div>
+        {% endif %}
+      {% endwith %}
+    </div>
+  </div>
+</body>
+</html>

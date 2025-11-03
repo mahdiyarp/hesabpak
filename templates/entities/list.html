@@ -1,0 +1,55 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>فهرست {{ 'اشخاص' if kind=='person' else 'کالاها' }}</h2>
+
+<form method="get" action="{{ prefix }}/entities" class="filters">
+  <input type="hidden" name="kind" value="{{ kind }}">
+  <input name="q" value="{{ q or '' }}" placeholder="جستجو بر اساس نام یا کد" class="inp" style="max-width:320px">
+  <button class="btn-primary" style="width:auto; padding:0 16px">جستجو</button>
+
+  <div style="margin-right:auto"></div>
+
+  <a class="card" href="{{ prefix }}/entities?kind=item" style="padding:8px 12px; {{ 'background:var(--c-accent-soft);border-color:rgba(128,74,157,0.35);color:var(--c-accent);' if kind=='item' else '' }}">کالاها</a>
+  <a class="card" href="{{ prefix }}/entities?kind=person" style="padding:8px 12px; {{ 'background:var(--c-accent-soft);border-color:rgba(128,74,157,0.35);color:var(--c-accent);' if kind=='person' else '' }}">اشخاص</a>
+
+  <a href="{{ prefix }}/entities/new" class="card" style="padding:8px 12px">+ ثبت جدید</a>
+</form>
+
+<div class="table-responsive">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>کد</th>
+        <th>نام</th>
+        <th>{{ 'نوع شخص' if kind=='person' else 'واحد' }}</th>
+        <th>سریال</th>
+        <th>سطح</th>
+        <th>والد</th>
+        {% if is_admin %}<th class="center">عملیات</th>{% endif %}
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td><code>{{ r.code }}</code></td>
+        <td>{{ r.name }}</td>
+        <td>{{ r.unit or '-' }}</td>
+        <td>{{ r.serial_no or '-' }}</td>
+        <td>{{ r.level }}</td>
+        <td>{{ r.parent.code if r.parent else '-' }}</td>
+        {% if is_admin %}
+        <td class="center">
+          <div class="ops">
+            <a href="{{ prefix }}/entities/{{ r.id }}/edit">ویرایش</a>
+            <form method="post" action="{{ prefix }}/entities/{{ r.id }}/delete" onsubmit="return confirm('حذف شود؟')">
+              <button class="link-danger" type="submit">حذف</button>
+            </form>
+          </div>
+        </td>
+        {% endif %}
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

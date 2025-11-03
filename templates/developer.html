@@ -1,0 +1,13 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>دولوپر کنسول</h2>
+<form method="post" class="login-form" style="max-width:720px;">
+  <label class="lbl">اسکریپت (دستورات مجاز: ADD_ITEM, ADD_PERSON, RENAME, DELETE, SEED_ITEMS, SEED_ACCOUNTS)</label>
+  <textarea name="script" class="inp" style="min-height:220px" placeholder='مثال:
+ADD_ITEM 101001001 "HP 650"
+ADD_PERSON 200 "شرکت الف"
+SEED_ACCOUNTS 990 "هزینه‌ها"
+'></textarea>
+  <button class="btn-primary" type="submit">اجرا</button>
+</form>
+{% endblock %}

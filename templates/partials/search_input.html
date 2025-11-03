@@ -1,0 +1,10 @@
+<div class="search-wrap" data-type="{{ type|default('item') }}">
+  <label class="form-label">{{ label|default('جستجو') }}</label>
+  <div class="search-box">
+    <input type="text" class="form-control search-input"
+           placeholder="{{ placeholder|default('نام/کد/بارکد ...') }}"
+           autocomplete="off">
+    <div class="search-results" hidden></div>
+  </div>
+  <input type="hidden" class="search-selected-id" name="{{ name|default('item_id') }}">
+</div>

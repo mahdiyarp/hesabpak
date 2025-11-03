@@ -1,0 +1,417 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="module-wrap">
+  <h2>🧾 فاکتور خرید</h2>
+
+  <form method="post" action="{{ prefix }}/purchase" id="purchase-form" novalidate>
+    <!-- سربرگ فاکتور -->
+    <div class="card header-box">
+      <div class="header-grid">
+        <div>
+          <label class="lbl">شماره فاکتور</label>
+          <input class="inp" name="inv_number" id="inv_number" value="{{ inv_number }}" readonly>
+        </div>
+
+        <div>
+          <label class="lbl">تاریخ (شمسی)</label>
+          <input class="inp" id="inv_date_fa" readonly value="{{ current_jdate }}" data-greg="{{ current_gdate }}">
+          <input type="hidden" name="inv_date_greg" id="inv_date_greg" value="{{ current_gdate }}">
+        </div>
+
+        <div>
+          <label class="lbl">تأمین‌کننده</label>
+          <input class="inp" id="person_search" placeholder="نام یا کد تأمین‌کننده..." autocomplete="off">
+          <div id="person_results" class="search-results" hidden></div>
+          <input type="hidden" name="person_token" id="person_token">
+          <div id="person_hint" class="hint"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- جدول کالا -->
+    <div class="card table-box">
+      <table class="table sale-table">
+        <colgroup>
+          <col style="width: var(--col-item);">
+          <col style="width: var(--col-unit);">
+          <col style="width: var(--col-qty);">
+          <col style="width: var(--col-line);">
+          <col style="width: var(--col-x);">
+        </colgroup>
+        <thead>
+          <tr>
+            <th>کالا</th>
+            <th>قیمت واحد</th>
+            <th>تعداد</th>
+            <th>جمع خط</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="lines_tbody"></tbody>
+      </table>
+    </div>
+
+    <div class="actions-row">
+      <div class="sum-box">
+        <label>جمع کل (تومان)</label>
+        <input class="inp" id="grand_total" readonly>
+        <div id="sum_words" class="sum-words">—</div>
+      </div>
+      <div class="submit-box">
+        <button type="submit" class="btn-primary">ثبت فاکتور خرید</button>
+        <input type="hidden" id="rows" name="rows" value="0">
+      </div>
+    </div>
+  </form>
+</div>
+
+<style>
+  :root{
+    --col-item: 48%;
+    --col-unit: 18%;
+    --col-qty : 14%;
+    --col-line: 16%;
+    --col-x   : 4%;
+    --hdr-col-min: 220px;
+    --results-maxh: 180px;
+    --btn-mini: 30px;
+  }
+  .header-box{ margin-bottom: 12px; }
+  .header-grid{
+    display:grid; grid-template-columns: repeat(auto-fit, minmax(var(--hdr-col-min), 1fr));
+    gap: 12px;
+  }
+  .search-wrapper{ position:relative; z-index:9000; }
+  .search-results{
+    position:absolute;
+    top:calc(100% + 6px);
+    left:0; right:0;
+    background:var(--c-white);
+    border:1px solid var(--c-border);
+    border-radius:10px;
+    box-shadow:0 18px 36px rgba(45,48,50,0.22);
+    max-height: var(--results-maxh);
+    overflow-y:auto;
+    z-index:2147483647;
+  }
+  .sale-table{ width:100%; }
+  .sale-table thead th{ font-size:13px; text-align:right; }
+  .sale-table td{ font-size:14px; padding:8px 10px; }
+  .inp{ width:100%; height:44px; padding:8px 10px; }
+  .hint{ font-size:12px; color:var(--c-muted); padding-top:4px; }
+  .hint.selected{ color:var(--c-accent); font-weight:600; }
+  .res-item{ padding:8px 12px; cursor:pointer; }
+  .res-item + .res-item{ border-top:1px solid rgba(210,211,211,0.6); }
+  .res-title{ font-weight:600; color:var(--c-text); }
+  .res-sub{ font-size:12px; color:var(--c-muted); margin-top:2px; }
+  .res-item:hover{ background:var(--c-accent-soft); color:var(--c-accent); }
+  .btn-mini{
+    width:var(--btn-mini); height:var(--btn-mini);
+    border:1px solid var(--c-border); border-radius:10px; background:var(--c-white);
+    color:var(--c-mid); cursor:pointer; transition:background .2s ease, color .2s ease;
+  }
+  .btn-mini:hover{ background:var(--c-accent-soft); color:var(--c-accent); }
+  .actions-row{ margin-top:12px; display:flex; gap:12px; align-items:flex-start; flex-wrap:wrap;}
+  .sum-box{ min-width:240px; }
+  .sum-words{ font-size:12px; color:var(--c-mid); margin-top:4px; background:var(--c-accent-soft); border-radius:8px; padding:6px 10px; }
+</style>
+
+<template id="row_tpl">
+  <tr>
+    <td>
+      <input class="inp item_search" placeholder="جستجوی کالا..." autocomplete="off">
+      <div class="search-results" hidden></div>
+      <input type="hidden" class="item_id" name="item_id[]">
+      <input type="hidden" class="item_code" name="item_code[]">
+    </td>
+    <td><input class="inp unit_price" name="unit_price[]" placeholder="0"></td>
+    <td><input class="inp qty" name="qty[]" placeholder="1"></td>
+    <td><input class="inp line_total" readonly placeholder="0"></td>
+    <td><button type="button" class="btn-mini del">✖</button></td>
+  </tr>
+</template>
+
+<script>
+const MAX_ROWS = 15;
+const SEARCH_DELAY = 150;
+
+(function(){
+  let p = (typeof window.APP_PREFIX === "string" ? window.APP_PREFIX : (typeof window.prefix === "string" ? window.prefix : ""));
+  if(!p || p === "undefined" || p === "/undefined") p = "";
+  if(p.endsWith("/")) p = p.replace(/\/+$/, "");
+  window.prefix = p;
+
+  function auditLog(action, payload){
+    try{
+      const body = JSON.stringify({
+        context: 'purchase',
+        action,
+        payload: payload || {},
+        ts: new Date().toISOString()
+      });
+      const url = `${window.prefix}/api/audit/log`;
+      if(navigator.sendBeacon){
+        const blob = new Blob([body], {type:'application/json'});
+        navigator.sendBeacon(url, blob);
+      }else{
+        fetch(url, {method:'POST', headers:{'Content-Type':'application/json'}, credentials:'same-origin', body: body}).catch(()=>{});
+      }
+    }catch(err){
+      console.warn('audit log failed', err);
+    }
+  }
+
+  function doubleConfirm(msg1, msg2){
+    if(!window.confirm(msg1)) return false;
+    return window.confirm(msg2);
+  }
+
+  const invDateFa = document.getElementById('inv_date_fa');
+  const invDateGreg = document.getElementById('inv_date_greg');
+  if(invDateFa && invDateGreg && invDateFa.dataset.greg){
+    invDateGreg.value = invDateFa.dataset.greg;
+  }
+
+  const personSearch = document.getElementById('person_search');
+  const personBox = document.getElementById('person_results');
+  const personToken = document.getElementById('person_token');
+  const personHint = document.getElementById('person_hint');
+  let supplierLocked = false;
+  let supplierDisplay = '';
+  let tSupplier = null;
+
+  function show(el){ if(!el) return; el.style.display='block'; el.hidden=false; }
+  function hide(el){ if(!el) return; el.style.display='none'; el.hidden=true; }
+
+  function searchSupplier(q){
+    fetch(`${window.prefix}/api/search?q=${encodeURIComponent(q)}&kind=person&limit=10`, {credentials:'same-origin'})
+      .then(r => r.ok ? r.json() : [])
+      .then(data => {
+        if(!Array.isArray(data) || data.length === 0){ hide(personBox); personBox.innerHTML=''; return; }
+        personBox.innerHTML = data.map(m => `<a class="res" href="#" data-id="${m.id}" data-code="${m.code}" data-name="${m.name}">${m.code} — ${m.name}</a>`).join('');
+        show(personBox);
+      })
+      .catch(()=>{ hide(personBox); personBox.innerHTML=''; });
+  }
+
+  if(personSearch){
+    personSearch.addEventListener('input', e => {
+      const v = (personSearch.value || '').trim();
+      if(supplierLocked && v !== supplierDisplay){
+        if(!doubleConfirm('تغییر تأمین‌کننده انجام شود؟', 'برای تغییر تأمین‌کننده باید دوبار تایید کنید.')){
+          personSearch.value = supplierDisplay;
+          return;
+        }
+        auditLog('vendor-unlocked', { vendor_id: personToken.value || null });
+        supplierLocked = false;
+        personToken.value = '';
+        personHint.textContent = 'تأمین‌کننده انتخاب نشده است';
+        personHint.classList.remove('selected');
+      }
+      clearTimeout(tSupplier);
+      if(!v){ hide(personBox); personBox.innerHTML=''; return; }
+      tSupplier = setTimeout(()=>searchSupplier(v), SEARCH_DELAY);
+    });
+  }
+
+  if(personBox){
+    personBox.addEventListener('click', e => {
+      const a = e.target.closest('a.res');
+      if(!a) return;
+      e.preventDefault();
+      const data = { id:a.dataset.id, code:a.dataset.code, name:a.dataset.name };
+      personToken.value = data.id;
+      supplierDisplay = `${data.code} — ${data.name}`;
+      personSearch.value = supplierDisplay;
+      supplierLocked = true;
+      personHint.textContent = `${data.name} انتخاب شد`;
+      personHint.classList.add('selected');
+      hide(personBox);
+      auditLog('vendor-selected', data);
+    });
+  }
+
+  document.addEventListener('click', e => {
+    if(personBox && !personBox.contains(e.target) && e.target !== personSearch){ hide(personBox); }
+  });
+
+  const tbody = document.getElementById('lines_tbody');
+  const tpl = document.getElementById('row_tpl');
+  const rowsInp = document.getElementById('rows');
+
+  function fmt3(v){
+    const s = v == null ? '' : String(v).replace(/,/g, '');
+    if(!s) return '';
+    const num = parseFloat(s);
+    if(Number.isNaN(num)) return '';
+    return num.toLocaleString('en-US', {maximumFractionDigits: 2, useGrouping: true});
+  }
+  function toNum(v){
+    if(v == null) return 0;
+    const num = parseFloat(String(v).replace(/,/g,''));
+    return Number.isNaN(num) ? 0 : num;
+  }
+
+  function calcGrand(){
+    let sum = 0;
+    tbody.querySelectorAll('tr').forEach(tr => {
+      const lt = tr.querySelector('.line_total');
+      sum += toNum(lt?.value);
+    });
+    const grand = document.getElementById('grand_total');
+    if(grand) grand.value = fmt3(sum);
+    const words = document.getElementById('sum_words');
+    if(sum > 0){
+      fetch(`${window.prefix}/api/num2words?amount=${encodeURIComponent(sum.toFixed(0))}`, {credentials:'same-origin'})
+        .then(r => r.ok ? r.json() : null)
+        .then(res => { words.textContent = (res && res.ok) ? res.text : '—'; })
+        .catch(()=>{ words.textContent = '—'; });
+    }else{
+      words.textContent = '—';
+    }
+  }
+
+  function ensureNextRow(focus){
+    const current = tbody.querySelectorAll('tr').length;
+    if(current >= MAX_ROWS) return;
+    if(current > 0){
+      const last = tbody.querySelectorAll('tr')[current - 1];
+      const tok = last.querySelector('.item_id');
+      const qty = last.querySelector('.qty');
+      if(!(tok && tok.value && toNum(qty?.value) > 0)) return;
+    }
+    addRow(focus);
+  }
+
+  function bindRow(tr){
+    const searchBox = tr.querySelector('.item_search');
+    const results = tr.querySelector('.search-results');
+    const itemId = tr.querySelector('.item_id');
+    const itemCode = tr.querySelector('.item_code');
+    const unit = tr.querySelector('.unit_price');
+    const qty = tr.querySelector('.qty');
+    const lineTotal = tr.querySelector('.line_total');
+    const del = tr.querySelector('.del');
+    let timer = null;
+
+    function renderItems(rows){
+      if(!Array.isArray(rows) || rows.length === 0){ hide(results); results.innerHTML=''; return; }
+      results.innerHTML = rows.map(m => `<a class="res" href="#" data-id="${m.id}" data-code="${m.code}" data-name="${m.name}">${m.code} — ${m.name}</a>`).join('');
+      show(results);
+    }
+
+    function searchItem(v){
+      fetch(`${window.prefix}/api/search?q=${encodeURIComponent(v)}&kind=item&limit=15`, {credentials:'same-origin'})
+        .then(r => r.ok ? r.json() : [])
+        .then(renderItems)
+        .catch(()=>{ hide(results); results.innerHTML=''; });
+    }
+
+    if(searchBox){
+      searchBox.addEventListener('input', () => {
+        const v = (searchBox.value || '').trim();
+        clearTimeout(timer);
+        if(!v){ hide(results); results.innerHTML=''; return; }
+        timer = setTimeout(()=>searchItem(v), SEARCH_DELAY);
+      });
+    }
+
+    if(results){
+      results.addEventListener('click', ev => {
+        const a = ev.target.closest('a.res');
+        if(!a) return;
+        ev.preventDefault();
+        itemId.value = a.dataset.id;
+        itemCode.value = a.dataset.code;
+        searchBox.value = `${a.dataset.code}`;
+        hide(results);
+        auditLog('line-item-selected', { row: tr.dataset.rowIndex, item_id: a.dataset.id, code: a.dataset.code });
+        if(!toNum(qty?.value)){ qty.value = '1'; }
+        calcLine();
+        qty.focus();
+      });
+    }
+
+    document.addEventListener('click', ev => {
+      if(results && !results.contains(ev.target) && ev.target !== searchBox){ hide(results); }
+    });
+
+    function calcLine(){
+      const subtotal = toNum(unit?.value) * toNum(qty?.value);
+      if(lineTotal){ lineTotal.value = fmt3(subtotal); }
+      calcGrand();
+      auditLog('line-updated', {
+        row: tr.dataset.rowIndex,
+        item_id: itemId.value || null,
+        qty: toNum(qty?.value),
+        unit_price: toNum(unit?.value),
+        subtotal
+      });
+      if(itemId.value && toNum(qty?.value) > 0){ ensureNextRow(false); }
+    }
+
+    if(unit){
+      unit.addEventListener('input', () => {
+        unit.value = fmt3(unit.value);
+        calcLine();
+      });
+    }
+
+    if(qty){
+      qty.addEventListener('input', () => {
+        qty.value = fmt3(qty.value);
+        calcLine();
+      });
+      qty.addEventListener('keydown', ev => {
+        if(ev.key === 'Enter'){
+          ev.preventDefault();
+          if(itemId.value && toNum(qty.value) > 0){ ensureNextRow(true); }
+        }
+      });
+    }
+
+    if(del){
+      del.addEventListener('click', () => {
+        const hasData = itemId.value || toNum(unit?.value) > 0 || toNum(qty?.value) > 0;
+        if(hasData){
+          if(!doubleConfirm('حذف این ردیف انجام شود؟', 'برای حذف ردیف باید دوباره تایید کنید.')){
+            return;
+          }
+        }
+        auditLog('line-cleared', { row: tr.dataset.rowIndex, item_id: itemId.value || null });
+        tr.remove();
+        rowsInp.value = tbody.querySelectorAll('tr').length;
+        calcGrand();
+      });
+    }
+  }
+
+  function addRow(focus){
+    const node = tpl.content.firstElementChild.cloneNode(true);
+    node.dataset.rowIndex = tbody.querySelectorAll('tr').length + 1;
+    tbody.appendChild(node);
+    rowsInp.value = tbody.querySelectorAll('tr').length;
+    bindRow(node);
+    if(focus){
+      const searchBox = node.querySelector('.item_search');
+      if(searchBox) searchBox.focus();
+    }
+  }
+
+  if(tbody && tpl){
+    addRow(false);
+  }
+
+  const form = document.getElementById('purchase-form');
+  if(form){
+    form.addEventListener('submit', () => {
+      auditLog('invoice-submit', {
+        vendor_id: personToken.value || null,
+        row_count: tbody.querySelectorAll('tr').length,
+        total: toNum(document.getElementById('grand_total')?.value)
+      });
+    });
+  }
+})();
+</script>
+{% endblock %}

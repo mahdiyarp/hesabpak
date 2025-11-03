@@ -1,0 +1,11 @@
+
+{% extends 'base.html' %}
+{% block content %}
+<h1>خوش آمدید به hesab pak</h1>
+<p>لینک‌ها (برای دسترسی سریع):</p>
+<div class="links">
+  {% for l in links %}
+    <a class="card" href="{{ l.url }}">{{ l.title }}</a>
+  {% endfor %}
+</div>
+{% endblock %}

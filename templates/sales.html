@@ -1,0 +1,107 @@
+{% extends "base.html" %}
+{% block head_extra %}
+<link rel="stylesheet" href="{{ prefix }}/static/sales.css">
+{% endblock %}
+{% block content %}
+<div class="module-wrap sales-module">
+  <div class="overlay-shield" aria-hidden="true"></div>
+  <h2>🧾 فاکتور فروش</h2>
+
+  <form method="post" action="{{ prefix }}/sales" id="sale-form" novalidate>
+    <input type="hidden" name="person_token" id="person_token">
+    <input type="hidden" name="rows" id="rows" value="0">
+
+    <div class="card header-card">
+      <div class="header-grid">
+        <div>
+          <label class="lbl" for="inv_number">شماره فاکتور</label>
+          <input class="inp" name="inv_number" id="inv_number" value="{{ inv_number }}" readonly>
+        </div>
+        <div>
+          <label class="lbl" for="inv_date_fa">تاریخ (شمسی)</label>
+          <input class="inp" id="inv_date_fa" readonly value="{{ current_jdate }}" data-greg="{{ current_gdate }}">
+          <input type="hidden" name="inv_date_greg" id="inv_date_greg" value="{{ current_gdate }}">
+        </div>
+        <div>
+          <label class="lbl" for="person_search">مشتری</label>
+          <div class="customer-lock">
+            <div class="search-wrapper">
+              <input class="inp" id="person_search" placeholder="جستجو و انتخاب مشتری..." autocomplete="off">
+              <div id="person_results" class="search-results" hidden></div>
+            </div>
+            <button type="button" id="person_unlock" hidden>تغییر مشتری</button>
+            <span class="lock-indicator"></span>
+          </div>
+          <div id="person_hint" class="hint">مشتری انتخاب نشده است</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card table-card">
+      <table class="table sale-table">
+        <colgroup>
+          <col style="width: var(--sales-col-item);">
+          <col style="width: var(--sales-col-unit);">
+          <col style="width: var(--sales-col-qty);">
+          <col style="width: var(--sales-col-line);">
+          <col style="width: var(--sales-col-x);">
+        </colgroup>
+        <thead>
+          <tr>
+            <th scope="col">کالا</th>
+            <th scope="col">قیمت واحد</th>
+            <th scope="col">تعداد</th>
+            <th scope="col">جمع خط</th>
+            <th scope="col"></th>
+          </tr>
+        </thead>
+        <tbody id="lines_tbody"></tbody>
+      </table>
+    </div>
+
+    <div class="actions-row">
+      <div class="card total-box">
+        <div class="total-grid">
+          <div>
+            <label class="lbl" for="grand_total">جمع کل (تومان)</label>
+            <input class="inp ta-num" id="grand_total" readonly>
+          </div>
+          <div>
+            <label class="lbl">به حروف</label>
+            <div id="grand_total_words" class="total-text">—</div>
+          </div>
+        </div>
+      </div>
+      <button class="btn-primary submit-btn" type="submit">💾 ثبت فاکتور</button>
+    </div>
+  </form>
+</div>
+
+<template id="row_tpl">
+  <tr>
+    <td>
+      <div class="search-wrapper">
+        <input class="inp item_search" name="item_code[]" placeholder="کد یا نام کالا..." autocomplete="off">
+        <div class="search-results item_results" hidden></div>
+      </div>
+      <div class="line-meta"></div>
+      <input type="hidden" class="item_id" name="item_id[]">
+    </td>
+    <td>
+      <input class="inp ta-num unit_price" name="unit_price[]" inputmode="decimal" placeholder="0">
+    </td>
+    <td>
+      <input class="inp ta-num qty" name="qty[]" inputmode="decimal" placeholder="0">
+    </td>
+    <td>
+      <input class="inp ta-num line_total" readonly>
+    </td>
+    <td>
+      <button type="button" class="btn-mini btn_clear" title="حذف ردیف">✖</button>
+    </td>
+  </tr>
+</template>
+{% endblock %}
+{% block body_scripts %}
+<script src="{{ prefix }}/static/sales.js"></script>
+{% endblock %}

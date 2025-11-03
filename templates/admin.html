@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>حساب پاک | hesab pak</title>
+<link rel="stylesheet" href="{{ prefix }}/static/style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">حساب پاک<span class="en"> | hesab pak</span></div>
+
+  <!-- راست: شمسی | وسط: ساعت | چپ: میلادی + نام روز -->
+  <div class="clock clock-compact">
+    <span id="dt-jalali">----/--/--</span>
+    <span class="sep">|</span>
+    <span id="dt-time" class="big">--:--</span>
+    <span class="sep">|</span>
+    <span id="dt-greg-fa">----/--/-- — شنبه میلادی</span>
+  </div>
+
+  {% if current_user.is_authenticated %}
+  <div class="who">
+    <span>کاربر: <b>{{ logged_username }}</b></span>
+    <span class="sep">•</span>
+    <span>مدت ورود: <b>{{ login_duration }}</b></span>
+    <a class="logout" href="{{ prefix }}/logout" title="خروج">خروج</a>
+  </div>
+  {% endif %}
+</header>
+
+{% if current_user.is_authenticated %}
+<div class="search-wrap global-search">
+  <input id="global-search" class="search-inp" placeholder="جستجو (کالا/شخص/کد)..." autocomplete="off">
+  <div id="global-results" class="search-results" hidden></div>
+  <div id="global-actions" class="search-actions" hidden></div>
+</div>
+{% endif %}
+
+<main class="container">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for cat,msg in messages %}
+        <div class="flash {{cat}}">{{ msg }}</div>
+      {% endfor %}
+    {% endif %}
+  {% endwith %}
+
+  <section class="module-wrap">
+    {% block content %}{% endblock %}
+  </section>
+
+  {% if current_user.is_authenticated %}
+  <nav class="mobile-menu">
+    <a class="menu-item" href="{{ prefix }}/sales"><span class="icon">🧾</span><span class="label">فروش</span><span class="chev">›</span></a>
+    <a class="menu-item" href="{{ prefix }}/receive"><span class="icon">💳</span><span class="label">دریافت</span><span class="chev">›</span></a>
+    <a class="menu-item" href="{{ prefix }}/purchase"><span class="icon">🛒</span><span class="label">خرید</span><span class="chev">›</span></a>
+    <a class="menu-item" href="{{ prefix }}/payment"><span class="icon">💸</span><span class="label">پرداخت</span><span class="chev">›</span></a>
+    <a class="menu-item" href="{{ prefix }}/reports"><span class="icon">📊</span><span class="label">گزارشات</span><span class="chev">›</span></a>
+    <a class="menu-item" href="{{ prefix }}/entities/new"><span class="icon">➕</span><span class="label">ثبت شخص یا کالا جدید</span><span class="chev">›</span></a>
+    <a class="menu-item" href="{{ prefix }}/entities"><span class="icon">📚</span><span class="label">لیست اشخاص/کالاها</span><span class="chev">›</span></a>
+    <a class="menu-item" href="{{ prefix }}/settings"><span class="icon">⚙️</span><span class="label">تنظیمات</span><span class="chev">›</span></a>
+  {% if is_admin %}
+  <a class="menu-item" href="{{ prefix }}/admin"><span class="icon">🛠️</span><span class="label">ادمین/دولوپر</span><span class="chev">›</span></a>
+{% endif %}
+
+  </nav>
+  {% endif %}
+</main>
+
+<footer class="footer">© 2025 حساب پاک | hesab pak</footer>
+
+<script src="{{ prefix }}/static/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,174 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="module-wrap">
+  <h2>💳 پرداخت وجه</h2>
+
+  <form method="post" action="{{ prefix }}/payment" id="payment-form" novalidate>
+    <!-- سربرگ -->
+    <div class="card header-box">
+      <div class="header-grid">
+        <div>
+          <label class="lbl">شماره سند</label>
+          <input class="inp" name="pay_number" id="pay_number" value="{{ pay_number }}" readonly>
+        </div>
+
+        <div>
+          <label class="lbl">تاریخ (شمسی)</label>
+          <input class="inp" id="pay_date_fa" readonly value="{{ current_jdate }}" data-greg="{{ current_gdate }}">
+          <input type="hidden" name="pay_date_greg" id="pay_date_greg" value="{{ current_gdate }}">
+        </div>
+
+        <div>
+          <label class="lbl">طرف حساب (شخص)</label>
+          <input type="hidden" name="person_token" id="person_token" value="{{ prefill_person.id if prefill_person else '' }}">
+          <div class="search-wrapper">
+            <input class="inp" id="person_search" placeholder="جستجو و انتخاب شخص..." value="{% if prefill_person %}{{ prefill_person.code }} — {{ prefill_person.name }}{% endif %}">
+            <div id="person_results" class="search-results"></div>
+          </div>
+          <div id="person_hint" class="hint">{% if prefill_person %}{{ prefill_person.name }} انتخاب شده است{% else %}نام یا کد شخص را بنویسید و از لیست انتخاب کنید.{% endif %}</div>
+        </div>
+
+        <div>
+          <label class="lbl">مبلغ (تومان)</label>
+          <input class="inp" name="amount" id="amount" placeholder="مثلاً 2,500,000" value="{% if prefill_amount is not none %}{{ prefill_amount|sep }}{% endif %}">
+          <div class="amt-meta">
+            <div id="amount_words" class="sum-words">—</div>
+            <div id="pos_status" class="pos-status" data-device="{{ pos_device_key }}" data-label="{{ pos_device_label }}"></div>
+          </div>
+        </div>
+
+        <div>
+          <label class="lbl">روش پرداخت</label>
+          <select class="inp" name="method" id="method">
+            <option value="cash">نقدی</option>
+            <option value="pos">دستگاه پوز</option>
+            <option value="bank">بانکی (کارت به کارت/واریز)</option>
+            <option value="cheque">چک</option>
+          </select>
+        </div>
+      </div>
+    </div>
+
+    <!-- توضیح -->
+    <div class="card">
+      <label class="lbl">توضیح</label>
+      <input class="inp" name="note" id="note" placeholder="اختیاری" value="{{ prefill_note if prefill_note else '' }}">
+    </div>
+
+    <!-- دکمه‌ها -->
+    <div class="actions">
+      <button class="btn btn-primary" type="submit">ثبت پرداخت</button>
+      <a class="btn" href="{{ prefix }}/">بازگشت</a>
+    </div>
+  </form>
+</div>
+
+<style>
+  .amt-meta{ margin-top:6px; display:flex; flex-direction:column; gap:4px; }
+  .sum-words{ font-size:12px; background:var(--c-accent-soft); color:var(--c-mid); padding:6px 10px; border-radius:8px; }
+  .pos-status{ font-size:12px; color:var(--c-accent); }
+  .hint.selected{ color:var(--c-accent); font-weight:600; }
+</style>
+<script>
+(function(){
+  const fa = document.getElementById('pay_date_fa');
+  const ge = document.getElementById('pay_date_greg');
+  if(fa && ge && fa.dataset.greg){
+    ge.value = fa.dataset.greg;
+  }
+
+  const personToken = document.getElementById('person_token');
+  const personSearch= document.getElementById('person_search');
+  const personBox   = document.getElementById('person_results');
+  const personHint  = document.getElementById('person_hint');
+  const methodSel   = document.getElementById('method');
+
+  function show(el){ if(!el) return; el.hidden=false; el.style.display='block'; }
+  function hide(el){ if(!el) return; el.hidden=true; el.style.display='none'; }
+
+  let tmr=null;
+  function searchPerson(q){
+    fetch(window.prefix+'/api/search?q='+encodeURIComponent(q)+'&kind=person&limit=10',{credentials:'same-origin'})
+      .then(r=>r.ok?r.json():[])
+      .then(list=>{
+        if(!Array.isArray(list) || list.length===0){ personBox.innerHTML='<div class="empty">یافت نشد</div>'; show(personBox); return; }
+        personBox.innerHTML=list.map(m=>`<a href="#" data-id="${m.id}" data-code="${m.code}">${m.name} — <code>${m.code}</code></a>`).join('');
+        show(personBox);
+      })
+      .catch(()=>{ personBox.innerHTML='<div class="empty">خطا در جستجو</div>'; show(personBox); });
+  }
+
+  personSearch.addEventListener('input', function(){
+    const q=(this.value||'').trim();
+    clearTimeout(tmr);
+    if(!q){ hide(personBox); return; }
+    tmr=setTimeout(()=>searchPerson(q), 250);
+  });
+
+  personBox.addEventListener('click', function(ev){
+    const a=ev.target.closest('a'); if(!a) return;
+    ev.preventDefault();
+    personToken.value=a.dataset.id;
+    personSearch.value=a.textContent.trim();
+    personHint.textContent=a.textContent.trim();
+    personHint.classList.add('selected');
+    hide(personBox);
+  });
+
+  document.addEventListener('click', function(ev){
+    if(ev.target.closest('.search-wrapper')) return;
+    hide(personBox);
+  });
+
+  if(personToken && personToken.value){
+    personHint.classList.add('selected');
+  }
+
+  const amountInp=document.getElementById('amount');
+  const amountWords=document.getElementById('amount_words');
+  const posStatus=document.getElementById('pos_status');
+  const posDevice=posStatus ? (posStatus.dataset.device||'none') : 'none';
+  const posLabel=posStatus ? (posStatus.dataset.label||'') : '';
+
+  function fmtAmount(val){
+    if(val==null) return '';
+    const s=String(val).replace(/[^0-9]/g,'');
+    if(!s) return '';
+    return s.replace(/\B(?=(\d{3})+(?!\d))/g,',');
+  }
+
+  let amtTimer=null;
+  function updateAmountMeta(){
+    if(!amountInp) return;
+    const raw=amountInp.value.replace(/,/g,'');
+    const num=parseFloat(raw||'0');
+    amountWords.textContent='—';
+    if(posStatus){ posStatus.textContent=''; }
+    if(!raw){ return; }
+    if(amtTimer) clearTimeout(amtTimer);
+    amtTimer=setTimeout(()=>{
+      fetch(window.prefix+'/api/num2words?amount='+encodeURIComponent(raw),{credentials:'same-origin'})
+        .then(r=>r.ok?r.json():{})
+        .then(j=>{ if(j && j.ok){ amountWords.textContent=j.text; } })
+        .catch(()=>{ amountWords.textContent='—'; });
+      if(posStatus && posDevice && posDevice!=='none' && num>0){
+        posStatus.textContent=`ارسال خودکار مبلغ ${fmtAmount(raw)} تومان به ${posLabel}`;
+        if(methodSel && methodSel.value==='cash'){ methodSel.value='pos'; }
+      }
+    }, 220);
+  }
+
+  amountInp && amountInp.addEventListener('input', function(){
+    const raw=this.value;
+    const formatted=fmtAmount(raw);
+    this.value=formatted;
+    updateAmountMeta();
+    this.setSelectionRange(formatted.length, formatted.length);
+  });
+
+  if(amountInp && amountInp.value){
+    updateAmountMeta();
+  }
+})();
+</script>
+{% endblock %}

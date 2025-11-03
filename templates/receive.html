@@ -1,0 +1,194 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="module-wrap">
+  <h2>💰 دریافت وجه</h2>
+
+  <form method="post" action="{{ prefix }}/receive" id="receive-form" novalidate>
+    <!-- سربرگ -->
+    <div class="card header-box">
+      <div class="header-grid">
+        <div>
+          <label class="lbl">شماره سند</label>
+          <input class="inp" name="rec_number" id="rec_number" value="{{ rec_number }}" readonly>
+        </div>
+
+        <div>
+          <label class="lbl">تاریخ (شمسی)</label>
+          <input class="inp" id="rec_date_fa" readonly value="{{ current_jdate }}" data-greg="{{ current_gdate }}">
+          <input type="hidden" name="rec_date_greg" id="rec_date_greg" value="{{ current_gdate }}">
+        </div>
+
+        <div>
+          <label class="lbl">طرف حساب (شخص)</label>
+          <input type="hidden" name="person_token" id="person_token" value="{{ prefill_person.id if prefill_person else '' }}">
+          <div class="search-wrapper">
+            <input class="inp" id="person_search" placeholder="جستجو و انتخاب شخص..." value="{% if prefill_person %}{{ prefill_person.code }} — {{ prefill_person.name }}{% endif %}">
+            <div id="person_results" class="search-results"></div>
+          </div>
+          <div id="person_hint" class="hint">{% if prefill_person %}{{ prefill_person.name }} انتخاب شده است{% else %}شخص انتخاب نشده است{% endif %}</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- مبلغ و روش -->
+    <div class="card" style="padding:10px">
+      <div class="grid" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px">
+        <div>
+          <label class="lbl">مبلغ (تومان)</label>
+          <input class="inp" name="amount" id="amount" placeholder="مثلاً 2500000" value="{% if prefill_amount is not none %}{{ prefill_amount|sep }}{% endif %}">
+          <div class="amt-meta">
+            <div id="amount_words" class="sum-words">—</div>
+            <div id="pos_status" class="pos-status" data-device="{{ pos_device_key }}" data-label="{{ pos_device_label }}"></div>
+          </div>
+        </div>
+        <div>
+          <label class="lbl">روش دریافت</label>
+          <div class="radios" style="display:flex;gap:12px;align-items:center;">
+            <label><input type="radio" name="method" value="pos" checked> دستگاه پوز</label>
+            <label><input type="radio" name="method" value="cash"> نقدی</label>
+            <label><input type="radio" name="method" value="bank"> بانک</label>
+            <label><input type="radio" name="method" value="cheque"> چک</label>
+          </div>
+        </div>
+        <div>
+          <label class="lbl">یادداشت (اختیاری)</label>
+          <input class="inp" name="note" id="note" placeholder="توضیحات..." value="{{ prefill_note if prefill_note else '' }}">
+        </div>
+      </div>
+
+      <div style="margin-top:12px">
+        <button class="btn" type="submit">ثبت دریافت</button>
+        <a class="btn ghost" href="{{ prefix }}/reports">گزارشات</a>
+      </div>
+    </div>
+  </form>
+</div>
+
+<style>
+  .search-wrapper{ position:relative }
+  .search-results{
+    position:absolute; inset-inline:0; top:calc(100% + 4px);
+    background:#fff; border:1px solid var(--c-border); border-radius:10px;
+    max-height:var(--results-maxh,180px); overflow:auto; display:none; z-index:10;
+  }
+  .search-results a{
+    display:block; padding:8px 10px; text-decoration:none; color:var(--c-text);
+    border-bottom:1px solid #f3f3f3;
+  }
+  .search-results a:hover{ background: #faf6ff; }
+  .hint{ color:var(--c-muted); font-size:12px; margin-top:4px }
+  .hint.selected{ color:var(--c-accent); font-weight:600; }
+  .amt-meta{ margin-top:6px; display:flex; flex-direction:column; gap:4px; }
+  .sum-words{ font-size:12px; background:var(--c-accent-soft); color:var(--c-mid); padding:6px 10px; border-radius:8px; }
+  .pos-status{ font-size:12px; color:var(--c-accent); }
+</style>
+
+<script>
+(function(){
+  // prefix امن
+  var p = (typeof window.APP_PREFIX==="string"?window.APP_PREFIX:(typeof window.prefix==="string"?window.prefix:""));
+  if(!p || p==="undefined"||p==="/undefined") p="";
+  if(p.endsWith("/")) p=p.replace(/\/+$/,"");
+  window.prefix=p;
+
+  const recDateFa=document.getElementById('rec_date_fa');
+  const recDateGreg=document.getElementById('rec_date_greg');
+  if(recDateFa && recDateGreg && recDateFa.dataset.greg){
+    recDateGreg.value = recDateFa.dataset.greg;
+  }
+
+  // جستجوی شخص
+  const personSearch=document.getElementById('person_search');
+  const personBox=document.getElementById('person_results');
+  const personToken=document.getElementById('person_token');
+  const personHint=document.getElementById('person_hint');
+  function show(el){el&&(el.style.display='block',el.hidden=false);}
+  function hide(el){el&&(el.style.display='none',el.hidden=true);}
+
+  let tmr=null;
+  function searchPerson(q){
+    fetch(window.prefix+'/api/search?q='+encodeURIComponent(q)+'&kind=person&limit=10',{credentials:'same-origin'})
+    .then(r=>r.ok?r.json():[])
+    .then(list=>{
+      if(!Array.isArray(list) || list.length===0){ personBox.innerHTML='<div class="empty">یافت نشد</div>'; show(personBox); return; }
+      personBox.innerHTML=list.map(m=>`<a href="#" data-id="${m.id}" data-code="${m.code}">${m.name} — <code>${m.code}</code></a>`).join('');
+      show(personBox);
+    })
+    .catch(()=>{ personBox.innerHTML='<div class="empty">خطا در جستجو</div>'; show(personBox); });
+  }
+
+  personSearch.addEventListener('input', function(){
+    const q=this.value.trim();
+    clearTimeout(tmr);
+    if(!q){ hide(personBox); return; }
+    tmr=setTimeout(()=>searchPerson(q), 300);
+  });
+
+  personBox.addEventListener('click', function(ev){
+    const a=ev.target.closest('a'); if(!a) return;
+    ev.preventDefault();
+    personToken.value=a.dataset.id;
+    personSearch.value=a.textContent.trim();
+    personHint.textContent=a.textContent.trim();
+    personHint.classList.add('selected');
+    hide(personBox);
+  });
+
+  document.addEventListener('click', function(ev){
+    if(ev.target.closest('.search-wrapper')) return;
+    hide(personBox);
+  });
+
+  if(personToken && personToken.value){
+    personHint.classList.add('selected');
+  }
+
+  const amountInp=document.getElementById('amount');
+  const amountWords=document.getElementById('amount_words');
+  const posStatus=document.getElementById('pos_status');
+  const posDevice=posStatus ? (posStatus.dataset.device||'none') : 'none';
+  const posLabel=posStatus ? (posStatus.dataset.label||'') : '';
+
+  function fmtAmount(val){
+    if(val==null) return '';
+    const s=String(val).replace(/[^0-9]/g,'');
+    if(!s) return '';
+    return s.replace(/\B(?=(\d{3})+(?!\d))/g,',');
+  }
+
+  let amtTimer=null;
+  function updateAmountMeta(){
+    if(!amountInp) return;
+    const raw=amountInp.value.replace(/,/g,'');
+    const num=parseFloat(raw||'0');
+    amountWords.textContent='—';
+    if(posStatus){ posStatus.textContent=''; }
+    if(!raw){ return; }
+    if(amtTimer) clearTimeout(amtTimer);
+    amtTimer=setTimeout(()=>{
+      fetch(window.prefix+'/api/num2words?amount='+encodeURIComponent(raw),{credentials:'same-origin'})
+        .then(r=>r.ok?r.json():{})
+        .then(j=>{
+          if(j && j.ok){ amountWords.textContent=j.text; }
+        }).catch(()=>{ amountWords.textContent='—'; });
+      if(posStatus && posDevice && posDevice!=='none' && num>0){
+        posStatus.textContent=`ارسال خودکار مبلغ ${fmtAmount(raw)} تومان به ${posLabel}`;
+      }
+    }, 200);
+  }
+
+  amountInp && amountInp.addEventListener('input', function(){
+    const caret=this.selectionStart;
+    const raw=this.value;
+    const formatted=fmtAmount(raw);
+    this.value=formatted;
+    updateAmountMeta();
+    if(caret){ this.setSelectionRange(formatted.length, formatted.length); }
+  });
+
+  if(amountInp && amountInp.value){
+    updateAmountMeta();
+  }
+})();
+</script>
+{% endblock %}

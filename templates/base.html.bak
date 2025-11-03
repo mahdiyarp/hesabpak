@@ -1,0 +1,90 @@
+<!doctype html>
+<html lang="fa" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{ title or "hesab pak" }}</title>
+  <link rel="stylesheet" href="{{ prefix }}/static/style.css">
+  <!-- مقدار prefix را امن به JS بده؛ اگر تهی بود "" -->
+  <script>
+    (function(){
+      var p = {{ (prefix or "")|tojson }};
+      // هر حالت خراب را خنثی کن
+      if(!p || p === "undefined" || p === "/undefined") p = "";
+      // نگذاریم اسلش اضافه/کم بیفتد
+      if(p.endsWith("/")) p = p.replace(/\/+$/,"");
+      window.APP_PREFIX = p;
+    })();
+  </script>
+  <script>
+  window.IS_ADMIN = {{ 'true' if is_admin else 'false' }};
+</script>
+
+</head>
+<body>
+<header class="topbar">
+  <div class="brand">حساب پاک <span class="en">hesab pak</span></div>
+  <div class="who">
+    {% if current_user.is_authenticated %}
+      <span>کاربر: {{ logged_username }}</span>
+      <span class="sep">|</span>
+      <span>مدت فعالیت: {{ login_duration }}</span>
+      <span class="sep">|</span>
+      <a class="logout" href="{{ prefix }}/logout">خروج</a>
+    {% endif %}
+  </div>
+</header>
+
+<!-- نوار جست‌وجوی سراسری -->
+<!-- نوار جست‌وجوی سراسری -->
+<div class="search-wrap">
+  <div style="display:flex; gap:8px; align-items:center;">
+    <input id="global-search" class="search-inp" type="text" placeholder="جستجو بر اساس کد یا نام...">
+    <select id="global-kind" class="search-inp" style="max-width:140px;height:44px;">
+      <option value="">همه</option>
+      <option value="item">کالا</option>
+      <option value="person">شخص</option>
+    </select>
+  </div>
+
+  <!-- نتیجهٔ فعلی شما محفوظ -->
+  <div id="search-results" class="search-results" style="display:none;"></div>
+
+  <!-- این دو تا صرفاً برای سازگاری با app.js اضافه می‌شوند (پنهان‌اند) -->
+  <div id="search-results" class="search-results" hidden></div>
+<div id="global-results" class="search-results" hidden></div>
+<div id="global-actions" class="search-actions" hidden></div>
+
+</div>
+
+
+<!-- اول: محتوای ماژول صفحه -->
+<main class="container">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% if messages %}
+      {% for cat,msg in messages %}<div class="flash {{cat}}">{{ msg }}</div>{% endfor %}
+    {% endif %}
+  {% endwith %}
+  {% block content %}{% endblock %}
+</main>
+
+<!-- بعد: منوهای عمودی موبایلی -->
+<nav class="mobile-menu" style="padding:0 12px;">
+  <a class="menu-item" href="{{ prefix }}/sales"><span class="icon">🧾</span><span class="label">فروش</span><span class="chev">›</span></a>
+  <a class="menu-item" href="{{ prefix }}/receive"><span class="icon">➕</span><span class="label">دریافت</span><span class="chev">›</span></a>
+  <a class="menu-item" href="{{ prefix }}/purchase"><span class="icon">🛒</span><span class="label">خرید</span><span class="chev">›</span></a>
+  <a class="menu-item" href="{{ prefix }}/payment"><span class="icon">➖</span><span class="label">پرداخت</span><span class="chev">›</span></a>
+  <a class="menu-item" href="{{ prefix }}/reports"><span class="icon">📊</span><span class="label">گزارشات</span><span class="chev">›</span></a>
+  <a class="menu-item" href="{{ prefix }}/entities?kind=item"><span class="icon">➕</span><span class="label">ثبت شخص یا کالا جدید</span><span class="chev">›</span></a>
+  <a class="menu-item" href="{{ prefix }}/settings"><span class="icon">⚙️</span><span class="label">تنظیمات</span><span class="chev">›</span></a>
+  {% if is_admin %}
+  <a class="menu-item" href="{{ prefix }}/developer"><span class="icon">🧑‍💻</span><span class="label">Developer</span><span class="chev">›</span></a>
+  <a class="menu-item" href="{{ prefix }}/admin"><span class="icon">🗄️</span><span class="label">مدیریت/بکاپ</span><span class="chev">›</span></a>
+  {% endif %}
+</nav>
+
+<footer class="footer">© 2025 hesab pak</footer>
+
+<script src="{{ prefix }}/static/app.js"></script>
+</body>
+</html>

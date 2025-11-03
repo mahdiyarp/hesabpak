@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="module-wrap">
+  <h2>⚙️ تنظیمات سامانه</h2>
+
+  <form method="post" class="card" style="padding:16px; margin-bottom:16px;">
+    <h3 style="margin-top:0;">انتخاب دستگاه کارتخوان</h3>
+    <p class="muted" style="margin-top:4px;">
+      دستگاه‌های زیر از پرکاربردترین پایانه‌های فروش سه سال اخیر در ایران هستند. با انتخاب دستگاه، مبلغ اسناد دریافت/پرداخت به‌صورت
+      خودکار برای دستگاه ارسال می‌شود.
+    </p>
+
+    <label class="lbl" for="pos_device">مدل دستگاه</label>
+    <select class="inp" name="pos_device" id="pos_device" style="max-width:360px;">
+      {% for value,label in pos_choices %}
+        <option value="{{ value }}" {% if value == selected_pos %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+
+    <div class="hint" style="margin-top:12px;">
+      در صورت انتخاب گزینه «بدون اتصال خودکار» ارسال مبلغ به دستگاه کارتخوان انجام نخواهد شد.
+    </div>
+
+    <div style="margin-top:16px;">
+      <button type="submit" class="btn-primary">ذخیره تنظیمات</button>
+    </div>
+  </form>
+
+  <div class="card" style="padding:16px;">
+    <h3 style="margin-top:0;">راهنما</h3>
+    <ul class="muted" style="margin-top:8px; line-height:1.8;">
+      <li>پس از انتخاب دستگاه، در صفحات دریافت و پرداخت وضعیت ارسال مبلغ نمایش داده می‌شود.</li>
+      <li>اتصال فیزیکی به کارتخوان باید توسط تیم پشتیبانی شما انجام شود؛ این تنظیم تنها ارسال مبلغ را فعال می‌کند.</li>
+      <li>در صورت نیاز به مدل دیگر، لطفاً با تیم توسعه تماس بگیرید.</li>
+    </ul>
+  </div>
+</div>
+{% endblock %}

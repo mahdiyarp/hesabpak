@@ -1,0 +1,50 @@
+{% extends 'base.html' %}
+{% block content %}
+<h2>ثبت شخص یا کالا</h2>
+
+<form method="post" action="{{ prefix }}/entities/new" class="login-form" style="max-width:640px">
+  <div class="lbl">انتخاب نوع</div>
+  <label class="pill"><input type="radio" name="type" value="person" required> شخص</label>
+  <label class="pill"><input type="radio" name="type" value="item" required> کالا</label>
+
+  <label class="lbl">کد (۳/۶/۹ رقمی)</label>
+  <input class="inp" id="code" name="code" inputmode="numeric"
+         pattern="^[0-9]{3}([0-9]{3}){0,2}$"
+         placeholder="مثال: 101 | 101001 | 101001001" required>
+
+  <label class="lbl">نام</label>
+  <input class="inp" name="name" id="name" required>
+
+  <label class="lbl" id="unit-label">واحد</label>
+  <select class="inp" name="unit" id="unit">
+    <option value="">— انتخاب کنید —</option>
+    <option>عدد</option><option>متر</option><option>کیلو</option>
+    <option>لیتر</option><option>بسته</option><option>جعبه</option>
+  </select>
+
+  <label class="lbl">سریال</label>
+  <input class="inp" name="serial_no" id="serial_no" placeholder="اگر خالی باشد = کد">
+  <button class="btn-primary" type="submit">ثبت</button>
+</form>
+
+<script>
+const codeEl = document.getElementById('code');
+const serialEl = document.getElementById('serial_no');
+codeEl.addEventListener('input', ()=>{ if(!serialEl.value) serialEl.value = codeEl.value; });
+
+const unit = document.getElementById('unit');
+const unitLabel = document.getElementById('unit-label');
+document.querySelectorAll('input[name="type"]').forEach(r=>{
+  r.addEventListener('change', ()=>{
+    if(r.value==='person' && r.checked){
+      unitLabel.textContent = 'نوع شخص';
+      unit.innerHTML = '<option value=\"\">— انتخاب کنید —</option><option>خانم</option><option>آقا</option><option>فروشگاه</option><option>شرکت</option><option>سازمان</option>';
+    }else if(r.value==='item' && r.checked){
+      unitLabel.textContent = 'واحد';
+      unit.innerHTML = '<option value=\"\">— انتخاب کنید —</option><option>عدد</option><option>متر</option><option>کیلو</option><option>لیتر</option><option>بسته</option><option>جعبه</option>';
+    }
+  });
+});
+</script>
+
+{% endblock %}

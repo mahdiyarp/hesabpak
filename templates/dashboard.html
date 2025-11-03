@@ -1,0 +1,249 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="dashboard">
+  <div class="dashboard-hero">
+    <div class="hero-info">
+      <h1>داشبورد مدیریتی</h1>
+      <p>نمای کلی عملکرد امروز فروشگاه.</p>
+      <div class="hero-clock" data-live-clock data-jalali="{{ now_info['jalali_date'] }}">
+        <span class="hero-date" data-role="date">{{ now_info['jalali_date'] }}</span>
+        <span class="hero-time" data-role="time">--:--:--</span>
+      </div>
+    </div>
+    <div class="hero-stat">
+      <div class="hero-value">{{ today_stats.invoice_count|int }}</div>
+      <div class="hero-label">تعداد فاکتور فروش امروز</div>
+    </div>
+  </div>
+
+  <div class="stats-grid">
+    <div class="stat-card">
+      <span class="stat-title">مبلغ فروش امروز</span>
+      <span class="stat-value">{{ today_stats.invoice_total|sep }} <span class="unit">تومان</span></span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-title">جمع دریافتی امروز</span>
+      <span class="stat-value">{{ today_stats.receives_total|sep }} <span class="unit">تومان</span></span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-title">جمع پرداختی امروز</span>
+      <span class="stat-value">{{ today_stats.payments_total|sep }} <span class="unit">تومان</span></span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-title">خالص ورود وجه امروز</span>
+      <span class="stat-value">{{ today_stats.net_cash|sep }} <span class="unit">تومان</span></span>
+    </div>
+  </div>
+
+  <div class="balances-card card">
+    <h2>موجودی صندوق‌ها</h2>
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr>
+            <th>صندوق</th>
+            <th>دریافتی</th>
+            <th>پرداختی</th>
+            <th>خالص</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in cash_balances %}
+          <tr>
+            <td>{{ row.label }}</td>
+            <td>{{ row.receive|sep }}</td>
+            <td>{{ row.payment|sep }}</td>
+            <td class="{{ 'pos' if row.balance >= 0 else 'neg' }}">{{ row.balance|sep }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <div class="charts-grid">
+    <div class="card chart-card">
+      <div class="chart-header">
+        <h3>روند فروش ۷ روز اخیر</h3>
+        <span class="chart-sub">مبالغ به تومان و تعداد فاکتور</span>
+      </div>
+      <canvas id="salesChart" height="220"></canvas>
+    </div>
+    <div class="card chart-card">
+      <div class="chart-header">
+        <h3>دریافتی و پرداختی ۷ روز اخیر</h3>
+        <span class="chart-sub">مقایسه ورود و خروج وجه</span>
+      </div>
+      <canvas id="cashChart" height="220"></canvas>
+    </div>
+  </div>
+
+  <div class="lists-grid">
+    <div class="card list-card">
+      <h3>چک‌های دریافتی سه روز آینده</h3>
+      {% if incoming_cheques %}
+      <ul>
+        {% for doc in incoming_cheques %}
+        <li>
+          <div class="row-main">
+            <strong>{{ doc.person }}</strong>
+            <span class="amount">{{ doc.amount|sep }} تومان</span>
+          </div>
+          <div class="row-meta">{{ doc.date }} | شماره سند {{ doc.number }}</div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <div class="empty-state">چکی برای این بازه ثبت نشده است.</div>
+      {% endif %}
+    </div>
+    <div class="card list-card">
+      <h3>چک‌های پرداختی سه روز آینده</h3>
+      {% if outgoing_cheques %}
+      <ul>
+        {% for doc in outgoing_cheques %}
+        <li>
+          <div class="row-main">
+            <strong>{{ doc.person }}</strong>
+            <span class="amount">{{ doc.amount|sep }} تومان</span>
+          </div>
+          <div class="row-meta">{{ doc.date }} | شماره سند {{ doc.number }}</div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <div class="empty-state">چکی برای این بازه ثبت نشده است.</div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+(function(){
+  const chartData = {{ chart_data|tojson }};
+  const numberFormatter = new Intl.NumberFormat('fa-IR');
+
+  function setupSalesChart(){
+    const ctx = document.getElementById('salesChart');
+    if(!ctx || !window.Chart) return;
+    new Chart(ctx, {
+      type: 'line',
+      data: {
+        labels: chartData.labels,
+        datasets: [
+          {
+            type: 'line',
+            label: 'مبلغ فروش',
+            data: chartData.salesTotals,
+            borderColor: '#804A9D',
+            backgroundColor: 'rgba(128,74,157,0.12)',
+            borderWidth: 3,
+            tension: 0.35,
+            yAxisID: 'y',
+            fill: true,
+          },
+          {
+            type: 'bar',
+            label: 'تعداد فاکتور',
+            data: chartData.invoiceCounts,
+            backgroundColor: 'rgba(0,123,167,0.35)',
+            borderRadius: 8,
+            yAxisID: 'y1',
+          }
+        ],
+      },
+      options: {
+        responsive: true,
+        interaction: { mode: 'index', intersect: false },
+        scales: {
+          y: {
+            position: 'right',
+            ticks: {
+              callback: (value) => numberFormatter.format(value)
+            },
+            grid: { color: 'rgba(0,0,0,0.05)' }
+          },
+          y1: {
+            position: 'left',
+            grid: { drawOnChartArea: false },
+            ticks: {
+              stepSize: 1,
+            }
+          }
+        },
+        plugins: {
+          legend: {
+            labels: { font: { family: 'Yekan', size: 12 } }
+          },
+          tooltip: {
+            callbacks: {
+              label: function(ctx){
+                const val = ctx.parsed.y;
+                const formatted = numberFormatter.format(val);
+                return ctx.dataset.label + ': ' + formatted;
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  function setupCashChart(){
+    const ctx = document.getElementById('cashChart');
+    if(!ctx || !window.Chart) return;
+    new Chart(ctx, {
+      type: 'bar',
+      data: {
+        labels: chartData.labels,
+        datasets: [
+          {
+            label: 'دریافتی',
+            data: chartData.receivesTotals,
+            backgroundColor: 'rgba(6, 150, 85, 0.65)',
+            borderRadius: 6,
+          },
+          {
+            label: 'پرداختی',
+            data: chartData.paymentsTotals,
+            backgroundColor: 'rgba(227, 105, 19, 0.55)',
+            borderRadius: 6,
+          }
+        ]
+      },
+      options: {
+        responsive: true,
+        interaction: { mode: 'index', intersect: false },
+        scales: {
+          y: {
+            beginAtZero: true,
+            ticks: {
+              callback: (value) => numberFormatter.format(value)
+            },
+            grid: { color: 'rgba(0,0,0,0.05)' }
+          }
+        },
+        plugins: {
+          legend: {
+            labels: { font: { family: 'Yekan', size: 12 } }
+          },
+          tooltip: {
+            callbacks: {
+              label: function(ctx){
+                const val = ctx.parsed.y;
+                const formatted = numberFormatter.format(val);
+                return ctx.dataset.label + ': ' + formatted + ' تومان';
+              }
+            }
+          }
+        }
+      }
+    });
+  }
+
+  setupSalesChart();
+  setupCashChart();
+})();
+</script>
+{% endblock %}

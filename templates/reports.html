@@ -1,0 +1,58 @@
+{% extends "base.html" %}
+{% block content %}
+
+<h2>گزارشات</h2>
+
+<form method="get" action="" class="filters">
+  <input class="inp" name="q" value="{{ q or '' }}" placeholder="شماره فاکتور/سند، نام یا کد طرف حساب" style="max-width:240px">
+  <select class="inp" name="type" style="max-width:160px">
+    <option value="all"     {{ 'selected' if (typ or 'all')=='all' }}>همه</option>
+    <option value="invoice" {{ 'selected' if typ=='invoice' }}>فاکتور فروش</option>
+    <option value="receive" {{ 'selected' if typ=='receive' }}>دریافت</option>
+    <option value="payment" {{ 'selected' if typ=='payment' }}>پرداخت</option>
+  </select>
+  <input class="inp" type="date" name="from" value="{{ dfrom or '' }}" style="max-width:160px">
+  <input class="inp" type="date" name="to"   value="{{ dto   or '' }}" style="max-width:160px">
+  <button class="btn-primary" style="width:auto;padding:0 16px">جستجو</button>
+</form>
+
+{% if rows and rows|length %}
+<div class="table-responsive">
+  <table class="table">
+    <thead>
+      <tr>
+        <th>نوع</th>
+        <th>شماره</th>
+        <th>تاریخ</th>
+        <th>طرف حساب</th>
+        <th>مبلغ/جمع</th>
+        <th class="center">عملیات</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+        {% set label = 'فاکتور' if r.kind=='invoice' else ('دریافت' if r.kind=='receive' else ('پرداخت' if r.kind=='payment' else r.kind)) %}
+        {% set view  = prefix ~ '/invoice/' ~ r.id if r.kind=='invoice' else prefix ~ '/cash/' ~ r.id %}
+        {% set edit  = view ~ '/edit' %}
+        <tr>
+          <td>{{ label }}</td>
+          <td><code>{{ r.number }}</code></td>
+          <td>{{ r.date }}</td>
+          <td>{{ r.person }}</td>
+          <td>{{ r.amount|sep }}</td>
+          <td class="center">
+            <div class="ops">
+              <a href="{{ view }}">مشاهده</a>
+              {% if is_admin %}<a href="{{ edit }}">ویرایش</a>{% endif %}
+            </div>
+          </td>
+        </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% else %}
+  <div class="card">موردی یافت نشد.</div>
+{% endif %}
+
+{% endblock %}
