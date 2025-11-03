@@ -1,0 +1,130 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="module-wrap admin-users">
+  <h2>👥 مدیریت کاربران</h2>
+  <p class="muted" style="margin-bottom:18px;">
+    در این صفحه می‌توانید کاربران جدید بسازید، رمز عبور یا نقش آنان را تغییر دهید و دسترسی به بخش‌های مختلف برنامه را کنترل کنید.
+  </p>
+
+  <div class="card" style="margin-bottom:24px;">
+    <h3 style="margin-top:0;">کاربران ثبت‌شده</h3>
+    {% if users %}
+    <div class="table-wrapper">
+      <table class="admin-users-table">
+        <thead>
+          <tr>
+            <th>نام کاربری</th>
+            <th>نقش</th>
+            <th>مجوزها</th>
+            <th>فعال؟</th>
+            <th>رمز جدید</th>
+            <th>اقدامات</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for user in users %}
+          <tr>
+            <form method="post" class="user-row-form" style="display: contents;">
+              <input type="hidden" name="username" value="{{ user.username }}">
+              <input type="hidden" name="action" value="update">
+              <td data-title="نام کاربری">
+                <strong>{{ user.username }}</strong>
+                {% if user.username == logged_username %}
+                <span class="tag">شما</span>
+                {% endif %}
+              </td>
+              <td data-title="نقش">
+                <select class="inp" name="role" {% if user.username == admin_username %}disabled{% endif %}>
+                  {% for role_key, role_label in role_labels.items() %}
+                  <option value="{{ role_key }}" {% if role_key == user.role %}selected{% endif %} {% if user.username == admin_username and role_key != 'admin' %}disabled{% endif %}>{{ role_label }}</option>
+                  {% endfor %}
+                </select>
+              </td>
+              <td data-title="مجوزها">
+                <div class="perm-grid">
+                  {% for perm in assignable_permissions %}
+                  <label class="perm-item">
+                    <input type="checkbox" name="permissions" value="{{ perm }}" {% if perm in user.permissions %}checked{% endif %} {% if user.username == admin_username %}disabled{% endif %}>
+                    <span>{{ permission_labels[perm] }}</span>
+                  </label>
+                  {% endfor %}
+                  {% if user.username != admin_username and 'admin' in user.permissions %}
+                  <input type="hidden" name="permissions" value="admin">
+                  {% endif %}
+                </div>
+              </td>
+              <td data-title="وضعیت">
+                <label class="switch">
+                  <input type="checkbox" name="is_active" value="1" {% if user.is_active %}checked{% endif %} {% if user.username == admin_username %}disabled{% endif %}>
+                  <span class="slider"></span>
+                </label>
+              </td>
+              <td data-title="رمز جدید">
+                <input class="inp" type="password" name="password" placeholder="اختیاری">
+              </td>
+              <td class="actions" data-title="اقدامات">
+                <div class="btn-group">
+                  <button class="btn btn-primary" type="submit">ذخیره</button>
+                  {% if user.username != admin_username %}
+                  <button class="btn btn-danger" type="submit" name="action" value="delete" onclick="return confirm('کاربر {{ user.username }} حذف شود؟');">حذف</button>
+                  {% endif %}
+                </div>
+              </td>
+            </form>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+    <div class="empty-state">کاربری ثبت نشده است.</div>
+    {% endif %}
+  </div>
+
+  <div class="card">
+    <h3 style="margin-top:0;">افزودن کاربر جدید</h3>
+    <form method="post" class="create-user-form">
+      <input type="hidden" name="action" value="create">
+      <div class="form-grid">
+        <label>
+          <span>نام کاربری</span>
+          <input class="inp" type="text" name="username" required>
+        </label>
+        <label>
+          <span>رمز عبور</span>
+          <input class="inp" type="password" name="password" required>
+        </label>
+        <label>
+          <span>تکرار رمز عبور</span>
+          <input class="inp" type="password" name="password_confirm" required>
+        </label>
+        <label>
+          <span>نقش</span>
+          <select class="inp" name="role">
+            {% for role_key, role_label in role_labels.items() %}
+            <option value="{{ role_key }}" {% if role_key == 'staff' %}selected{% endif %}>{{ role_label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="toggle">
+          <input type="checkbox" name="is_active" value="1" checked>
+          <span>فعال باشد</span>
+        </label>
+      </div>
+
+      <div class="perm-grid" style="margin-top:16px;">
+        {% for perm in assignable_permissions %}
+        <label class="perm-item">
+          <input type="checkbox" name="permissions" value="{{ perm }}" checked>
+          <span>{{ permission_labels[perm] }}</span>
+        </label>
+        {% endfor %}
+      </div>
+
+      <div class="form-actions">
+        <button class="btn btn-primary" type="submit">ذخیره کاربر</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

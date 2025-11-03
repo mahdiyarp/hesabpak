@@ -19,7 +19,9 @@ from utils.date_utils import (
     to_jdate_str,
     now_info as date_now_info,
     parse_gregorian_date,
+    parse_jalali_date,
     jalali_reference,
+    fa_digits,
 )
 
 # ----------------- Config -----------------
@@ -48,6 +50,57 @@ CASH_METHOD_LABELS = {
     "bank": "بانکی",
     "cheque": "چک",
 }
+
+PERMISSION_LABELS = {
+    "dashboard": "داشبورد",
+    "sales": "فروش",
+    "purchase": "خرید",
+    "receive": "دریافت وجه",
+    "payment": "پرداخت وجه",
+    "reports": "گزارشات",
+    "entities": "اشخاص و کالاها",
+    "developer": "ابزار فنی",
+    "admin": "مدیریت سیستم",
+}
+
+DEFAULT_PERMISSIONS = [
+    "dashboard",
+    "sales",
+    "purchase",
+    "receive",
+    "payment",
+    "reports",
+    "entities",
+]
+
+ADMIN_PERMISSIONS = sorted(set(DEFAULT_PERMISSIONS + ["developer", "admin"]))
+
+USER_ROLE_LABELS = {
+    "staff": "کاربر عادی",
+    "limited": "کاربر محدود",
+    "admin": "مدیر سیستم",
+}
+
+ASSIGNABLE_PERMISSIONS = [p for p in DEFAULT_PERMISSIONS]
+
+
+def _permissions_for_role(role: str, requested) -> list:
+    role = (role or "staff").strip().lower()
+    if role == "admin":
+        return ADMIN_PERMISSIONS
+    allowed = []
+    seen = set()
+    for p in requested or []:
+        if p in PERMISSION_LABELS and p in ASSIGNABLE_PERMISSIONS and p not in seen:
+            allowed.append(p)
+            seen.add(p)
+    if role == "staff":
+        base = sorted(allowed) if allowed else list(ASSIGNABLE_PERMISSIONS)
+    else:
+        base = sorted(allowed)
+    if "dashboard" not in base:
+        base.insert(0, "dashboard")
+    return base
 
 # ----------------- Flask & DB -----------------
 app = Flask(__name__, static_url_path=(URL_PREFIX + "/static") if URL_PREFIX else "/static")
@@ -198,35 +251,162 @@ app.register_blueprint(backup_bp, url_prefix=f"{URL_PREFIX}/backup")
 # ----------------- Users bootstrap -----------------
 if not os.path.exists(USERS_FILE):
     with open(USERS_FILE, "w", encoding="utf-8") as f:
-        json.dump({"users":[{"username": ADMIN_USERNAME, "password": ADMIN_PASSWORD}]}, f, ensure_ascii=False, indent=2)
+        json.dump(
+            {
+                "users": [
+                    {
+                        "username": ADMIN_USERNAME,
+                        "password": ADMIN_PASSWORD,
+                        "role": "admin",
+                        "permissions": ADMIN_PERMISSIONS,
+                        "is_active": True,
+                    }
+                ]
+            },
+            f,
+            ensure_ascii=False,
+            indent=2,
+        )
 
-def load_users_dict():
+
+def _normalize_user_entry(username: str, data: dict) -> dict:
+    password = (data.get("password") or "").strip()
+    role = (data.get("role") or ("admin" if username == ADMIN_USERNAME else "staff")).strip()
+    perms_raw = data.get("permissions")
+    if not isinstance(perms_raw, (list, tuple, set)):
+        perms_raw = []
+    perms = _permissions_for_role(role, perms_raw)
+    is_active = bool(data.get("is_active", True))
+    return {
+        "username": username,
+        "password": password,
+        "role": role or "staff",
+        "permissions": perms,
+        "is_active": is_active,
+    }
+
+
+def load_users_catalog() -> dict:
     try:
         with open(USERS_FILE, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return {u["username"]: {"password": u["password"]} for u in data.get("users", [])}
+            raw = json.load(f)
     except Exception:
-        return {ADMIN_USERNAME: {"password": ADMIN_PASSWORD}}
+        raw = {"users": []}
+
+    catalog = {}
+    for entry in raw.get("users", []):
+        username = (entry or {}).get("username")
+        if not username:
+            continue
+        catalog[username] = _normalize_user_entry(username, entry)
+
+    if ADMIN_USERNAME not in catalog:
+        catalog[ADMIN_USERNAME] = _normalize_user_entry(
+            ADMIN_USERNAME,
+            {
+                "password": ADMIN_PASSWORD,
+                "role": "admin",
+                "permissions": ADMIN_PERMISSIONS,
+                "is_active": True,
+            },
+        )
+    return catalog
+
+
+def save_users_catalog(catalog: dict) -> None:
+    payload = {
+        "users": [
+            {
+                "username": username,
+                "password": data.get("password", ""),
+                "role": data.get("role", "staff"),
+                "permissions": _permissions_for_role(data.get("role", "staff"), data.get("permissions", [])),
+                "is_active": bool(data.get("is_active", True)),
+            }
+            for username, data in sorted(catalog.items(), key=lambda kv: kv[0].lower())
+        ]
+    }
+    with open(USERS_FILE, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
 
 # ----------------- Auth -----------------
 login_manager = LoginManager(app)
 login_manager.login_view = "login"
 
+
 class User(UserMixin):
-    def __init__(self, username: str):
+    def __init__(
+        self,
+        username: str,
+        *,
+        role: str = "staff",
+        permissions=None,
+        is_active: bool = True,
+    ):
         self.id = username
         self.username = username
+        self.role = role or "staff"
+        self.permissions = set(permissions or [])
+        self._active = bool(is_active)
+
+    def has_permission(self, perm: str) -> bool:
+        if self.role == "admin":
+            return True
+        return perm in self.permissions
+
+    @property
+    def is_active(self) -> bool:  # type: ignore[override]
+        return self._active
+
 
 @login_manager.user_loader
 def load_user(user_id):
-    return User(user_id)
+    catalog = load_users_catalog()
+    entry = catalog.get(user_id)
+    if not entry or not entry.get("is_active", True):
+        return None
+    return User(
+        user_id,
+        role=entry.get("role", "staff"),
+        permissions=entry.get("permissions", []),
+        is_active=entry.get("is_active", True),
+    )
+
 
 def is_admin() -> bool:
-    return current_user.is_authenticated and current_user.username == ADMIN_USERNAME
+    return current_user.is_authenticated and getattr(current_user, "role", "") == "admin"
+
 
 def admin_required():
     if not is_admin():
         abort(403)
+
+
+def user_permissions() -> set:
+    if not current_user.is_authenticated:
+        return set()
+    if is_admin():
+        return set(ADMIN_PERMISSIONS)
+    return set(getattr(current_user, "permissions", set()))
+
+
+def has_permission(perm: str) -> bool:
+    if is_admin():
+        return True
+    return perm in user_permissions()
+
+
+def ensure_permission(*perms: str) -> None:
+    if not perms:
+        return
+    if not current_user.is_authenticated:
+        abort(403)
+    if is_admin():
+        return
+    allowed = user_permissions()
+    if any(p in allowed for p in perms if p):
+        return
+    abort(403)
 
 def human_duration_from_login():
     try:
@@ -250,6 +430,9 @@ def inject_ctx():
         "logged_username": (current_user.username if current_user.is_authenticated else None),
         "login_duration": human_duration_from_login(),
         "is_admin": is_admin(),
+        "current_user_role": getattr(current_user, "role", None),
+        "user_permissions": sorted(user_permissions()),
+        "has_permission": has_permission,
         "now_info": date_now_info(),
     }
 
@@ -263,6 +446,15 @@ def sep_filter(val):
         return f"{f:,.2f}"
     except Exception:
         return val
+
+
+@app.template_filter('fa_digits')
+def fa_digits_filter(val):
+    try:
+        return fa_digits(val)
+    except Exception:
+        return val
+
 
 @app.template_filter('jdate')
 def jdate_filter(val):
@@ -370,6 +562,7 @@ def validate_entity_form(form, for_update_id=None):
 @app.route(URL_PREFIX + "/")
 @login_required
 def index():
+    ensure_permission("dashboard")
     now = _now_info()
     today = now["datetime"].date()
     horizon = today + timedelta(days=3)
@@ -530,11 +723,22 @@ def login():
     if current_user.is_authenticated:
         return redirect(URL_PREFIX + "/")
     if request.method == "POST":
-        username = request.form.get("username","").strip()
-        password = request.form.get("password","")
-        users = load_users_dict()
-        if username in users and users[username]["password"] == password:
-            login_user(User(username))
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
+        catalog = load_users_catalog()
+        entry = catalog.get(username)
+        if entry and entry.get("password") == password:
+            if not entry.get("is_active", True):
+                flash("دسترسی این کاربر غیرفعال شده است.", "danger")
+                return redirect(URL_PREFIX + "/login")
+            login_user(
+                User(
+                    username,
+                    role=entry.get("role", "staff"),
+                    permissions=entry.get("permissions", []),
+                    is_active=entry.get("is_active", True),
+                )
+            )
             session["login_at_utc"] = datetime.utcnow().isoformat()
             flash("ورود موفق", "success")
             app.logger.info(f"LOGIN  USER={username}  IP={request.remote_addr}")
@@ -653,7 +857,7 @@ def _run_script_lines(lines:list[str]):
 @app.route(URL_PREFIX + "/developer", methods=["GET","POST"])
 @login_required
 def developer_console():
-    if not is_admin(): abort(403)
+    admin_required()
     if request.method == "POST":
         script = request.form.get("script","")
         msgs = _run_script_lines(script.splitlines())
@@ -666,6 +870,7 @@ def developer_console():
 @app.route(URL_PREFIX + "/sales", methods=["GET", "POST"])
 @login_required
 def sales():
+    ensure_permission("sales")
     now_info = _now_info()
     inv_number_generated = jalali_reference("INV", now_info["datetime"])
 
@@ -777,6 +982,7 @@ def sales():
 @app.route(URL_PREFIX + "/purchase", methods=["GET","POST"])
 @login_required
 def purchase_stub():
+    ensure_permission("purchase")
     now_info = _now_info()
     def _next_purchase_number():
         nums = []
@@ -885,6 +1091,7 @@ def purchase_stub():
 @app.route(URL_PREFIX + "/entities")
 @login_required
 def entities_list():
+    ensure_permission("entities")
     kind = (request.args.get("kind") or "item").strip()
     if kind not in ("person","item"):
         kind = "item"
@@ -906,6 +1113,7 @@ def entities_list():
 @app.route(URL_PREFIX + "/entities/new", methods=["GET", "POST"])
 @login_required
 def entities_new():
+    ensure_permission("entities")
     if request.method == "POST":
         errors, data = validate_entity_form(request.form)
         if errors:
@@ -961,6 +1169,7 @@ def entities_delete(eid):
 @app.route(URL_PREFIX + "/reports")
 @login_required
 def reports():
+    ensure_permission("reports")
     q     = (request.args.get("q") or "").strip()
     typ   = (request.args.get("type") or "all").strip().lower()
     dfrom = request.args.get("from")
@@ -1082,6 +1291,7 @@ def reports():
 @app.route(URL_PREFIX + "/invoice/<int:inv_id>")
 @login_required
 def invoice_view(inv_id):
+    ensure_permission("reports", "sales", "purchase")
     inv = Invoice.query.get_or_404(inv_id)
     lines = InvoiceLine.query.filter_by(invoice_id=inv.id).all()
     html = [
@@ -1097,6 +1307,7 @@ def invoice_view(inv_id):
 @app.route(URL_PREFIX + "/cash/<int:doc_id>")
 @login_required
 def cash_view(doc_id):
+    ensure_permission("reports", "receive", "payment")
     doc = CashDoc.query.get_or_404(doc_id)
     kind = "دریافت" if doc.doc_type == "receive" else "پرداخت"
     cheque_meta = ""
@@ -1137,6 +1348,7 @@ def cash_view(doc_id):
 @app.route(URL_PREFIX + "/receive", methods=["GET", "POST"])
 @login_required
 def receive():
+    ensure_permission("receive")
     now_info = _now_info()
     rec_number = jalali_reference("RCV", now_info["datetime"])
     pos_device_key, pos_device_label = _pos_device_config()
@@ -1206,6 +1418,14 @@ def receive():
         cheque_due_date = parse_gregorian_date(
             request.form.get("cheque_due_date"), allow_none=True
         )
+        if cheque_due_date is None:
+            cheque_due_date = parse_jalali_date(
+                request.form.get("cheque_due_date_fa"), allow_none=True
+            )
+        if cheque_due_date is None:
+            cheque_due_date = parse_jalali_date(
+                request.form.get("cheque_due_date_fa"), allow_none=True
+            )
 
         if method in ("cash", "bank"):
             required_kind = "cash" if method == "cash" else "bank"
@@ -1275,7 +1495,7 @@ def receive():
 @app.route(URL_PREFIX + "/cash/<int:doc_id>/edit", methods=["GET","POST"])
 @login_required
 def cash_edit(doc_id):
-    if not is_admin(): abort(403)
+    admin_required()
     doc = CashDoc.query.get_or_404(doc_id)
     if request.method == "POST":
         try:
@@ -1312,6 +1532,7 @@ def cash_edit(doc_id):
 @app.route(URL_PREFIX + "/payment", methods=["GET", "POST"])
 @login_required
 def payment():
+    ensure_permission("payment")
     now_info = _now_info()
     pay_number = jalali_reference("PAY", now_info["datetime"])
     pos_device_key, pos_device_label = _pos_device_config()
@@ -1478,6 +1699,102 @@ def settings_stub():
 def admin_stub():
     admin_required()
     return render_template("admin/dashboard.html", prefix=URL_PREFIX)
+
+
+@app.route(URL_PREFIX + "/admin/users", methods=["GET", "POST"])
+@login_required
+def admin_users():
+    admin_required()
+    catalog = load_users_catalog()
+
+    if request.method == "POST":
+        action = (request.form.get("action") or "").strip().lower()
+        username = (request.form.get("username") or "").strip()
+
+        if action == "delete":
+            if not username:
+                flash("نام کاربری ارسال نشده است.", "danger")
+            elif username == ADMIN_USERNAME:
+                flash("کاربر مدیر اصلی قابل حذف نیست.", "warning")
+            elif username not in catalog:
+                flash("کاربر یافت نشد.", "danger")
+            else:
+                catalog.pop(username, None)
+                save_users_catalog(catalog)
+                flash(f"کاربر «{username}» حذف شد.", "success")
+            return redirect(URL_PREFIX + "/admin/users")
+
+        role = (request.form.get("role") or "staff").strip().lower()
+        if role not in USER_ROLE_LABELS:
+            role = "staff"
+        requested_perms = request.form.getlist("permissions")
+        is_active = request.form.get("is_active") == "on"
+
+        if action == "update":
+            if not username or username not in catalog:
+                flash("کاربر مورد نظر یافت نشد.", "danger")
+                return redirect(URL_PREFIX + "/admin/users")
+
+            entry = catalog[username]
+            if username == ADMIN_USERNAME:
+                role = "admin"
+                is_active = True
+            entry["role"] = role
+            entry["permissions"] = _permissions_for_role(role, requested_perms)
+            entry["is_active"] = is_active
+
+            new_password = (request.form.get("password") or "").strip()
+            if new_password:
+                entry["password"] = new_password
+
+            save_users_catalog(catalog)
+            flash("تغییرات ذخیره شد.", "success")
+            return redirect(URL_PREFIX + "/admin/users")
+
+        # default: create
+        password = (request.form.get("password") or "").strip()
+        confirm = (request.form.get("password_confirm") or "").strip()
+
+        if not username:
+            flash("نام کاربری را وارد کنید.", "danger")
+            return redirect(URL_PREFIX + "/admin/users")
+        if username in catalog:
+            flash("کاربری با این نام از قبل وجود دارد.", "warning")
+            return redirect(URL_PREFIX + "/admin/users")
+        if not password:
+            flash("رمز عبور را وارد کنید.", "danger")
+            return redirect(URL_PREFIX + "/admin/users")
+        if password != confirm:
+            flash("تکرار رمز عبور با مقدار اولیه یکسان نیست.", "danger")
+            return redirect(URL_PREFIX + "/admin/users")
+
+        entry = _normalize_user_entry(
+            username,
+            {
+                "password": password,
+                "role": role,
+                "permissions": requested_perms,
+                "is_active": is_active,
+            },
+        )
+        catalog[username] = entry
+        save_users_catalog(catalog)
+        flash(f"کاربر «{username}» ایجاد شد.", "success")
+        return redirect(URL_PREFIX + "/admin/users")
+
+    users = sorted(
+        catalog.values(),
+        key=lambda u: (0 if u["username"] == ADMIN_USERNAME else 1, u["username"].lower()),
+    )
+    return render_template(
+        "admin/users.html",
+        prefix=URL_PREFIX,
+        users=users,
+        role_labels=USER_ROLE_LABELS,
+        permission_labels=PERMISSION_LABELS,
+        assignable_permissions=ASSIGNABLE_PERMISSIONS,
+        admin_username=ADMIN_USERNAME,
+    )
 
 
 @app.route(URL_PREFIX + "/admin/cashboxes", methods=["GET", "POST"])

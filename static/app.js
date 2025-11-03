@@ -28,6 +28,9 @@ function badgeOf(t){
   const panel   = $('#global-results') || $('#search-results');
   const actions = $('#global-actions') || $('#search-actions');
   const kindSel = $('#global-kind');
+  const userPerms = Array.isArray(window.USER_PERMISSIONS) ? window.USER_PERMISSIONS : [];
+  const isAdmin = (window.IS_ADMIN === true || window.IS_ADMIN === 'true');
+  const allow = (perm)=>{ if(!perm) return true; return isAdmin || userPerms.indexOf(perm) !== -1; };
 
   if(!input || !panel) return;
 
@@ -43,13 +46,19 @@ function badgeOf(t){
   };
 
   if(actions){
-    actions.innerHTML = [
-      {href:`${window.prefix}/reports`, label:'📊 گزارشات'},
-      {href:`${window.prefix}/sales`,   label:'🧾 فاکتور فروش جدید'},
-      {href:`${window.prefix}/entities?kind=item`,   label:'📚 لیست کالاها'},
-      {href:`${window.prefix}/entities?kind=person`, label:'📚 لیست اشخاص'}
-    ].map(x=>`<a class="act" href="${x.href}">${x.label}</a>`).join('');
-    showActions();
+    const quickLinks = [
+      {href:`${window.prefix}/reports`, label:'📊 گزارشات', perm:'reports'},
+      {href:`${window.prefix}/sales`,   label:'🧾 فاکتور فروش جدید', perm:'sales'},
+      {href:`${window.prefix}/entities?kind=item`,   label:'📚 لیست کالاها', perm:'entities'},
+      {href:`${window.prefix}/entities?kind=person`, label:'📚 لیست اشخاص', perm:'entities'}
+    ].filter(link => allow(link.perm));
+    if(quickLinks.length){
+      actions.innerHTML = quickLinks.map(x=>`<a class="act" href="${x.href}">${x.label}</a>`).join('');
+      showActions();
+    } else {
+      actions.innerHTML = '<span class="muted">مجوزی برای میانبرها ندارید.</span>';
+      showActions();
+    }
   }
 
   let tmr = null;
@@ -125,25 +134,41 @@ function badgeOf(t){
 
     let acts = [];
     if(typ === 'invoice'){
-      acts.push({href:`${window.prefix}/invoice/${id}`, label:'مشاهده فاکتور'});
-      if(window.IS_ADMIN === true || window.IS_ADMIN === 'true'){
+      if(allow('reports') || allow('sales') || allow('purchase')){
+        acts.push({href:`${window.prefix}/invoice/${id}`, label:'مشاهده فاکتور'});
+      }
+      if(isAdmin){
         acts.push({href:`${window.prefix}/invoice/${id}/edit`, label:'ویرایش فاکتور'});
       }
     }else if(typ === 'receive' || typ === 'payment'){
-      acts.push({href:`${window.prefix}/cash/${id}`, label:'مشاهده سند'});
-      if(window.IS_ADMIN === true || window.IS_ADMIN === 'true'){
+      if(allow('reports') || allow(typ)){
+        acts.push({href:`${window.prefix}/cash/${id}`, label:'مشاهده سند'});
+      }
+      if(isAdmin){
         acts.push({href:`${window.prefix}/cash/${id}/edit`, label:'ویرایش سند'});
       }
     }else if(typ === 'person'){
-      acts.push({href:`${window.prefix}/entities?kind=person&q=${encodeURIComponent(code)}`, label:'نمایه شخص'});
-      acts.push({href:`${window.prefix}/reports?person_id=${id}`, label:'گزارشات این مشتری'});
+      if(allow('entities')){
+        acts.push({href:`${window.prefix}/entities?kind=person&q=${encodeURIComponent(code)}`, label:'نمایه شخص'});
+      }
+      if(allow('reports')){
+        acts.push({href:`${window.prefix}/reports?person_id=${id}`, label:'گزارشات این مشتری'});
+      }
     }else if(typ === 'item'){
-      acts.push({href:`${window.prefix}/entities?kind=item&q=${encodeURIComponent(code)}`, label:'نمایه کالا'});
-      acts.push({href:`${window.prefix}/reports?item_id=${id}`, label:'گزارشات فروش این کالا'});
+      if(allow('entities')){
+        acts.push({href:`${window.prefix}/entities?kind=item&q=${encodeURIComponent(code)}`, label:'نمایه کالا'});
+      }
+      if(allow('reports')){
+        acts.push({href:`${window.prefix}/reports?item_id=${id}`, label:'گزارشات فروش این کالا'});
+      }
     }
 
     if(actions){
-      actions.innerHTML = acts.map(l=>`<a class="act" href="${l.href}">${l.label}</a>`).join('');
+      if(acts.length){
+        actions.innerHTML = acts.map(l=>`<a class="act" href="${l.href}">${l.label}</a>`).join('');
+      }else{
+        actions.innerHTML = '<span class="muted">مجوزی برای این نتیجه ندارید.</span>';
+      }
       showActions();
     }
     hide(panel);
@@ -197,5 +222,140 @@ function badgeOf(t){
 
   tick();
   setInterval(tick, 1000);
+})();
+
+// =============== Jalali Date Inputs ===============
+(function(){
+  const inputs = document.querySelectorAll('[data-jalali-input]');
+  if(inputs.length === 0) return;
+
+  const faDigits = '۰۱۲۳۴۵۶۷۸۹'.split('');
+  const enDigits = '0123456789'.split('');
+
+  const toFaDigits = (value)=> String(value || '').replace(/\d/g, d => faDigits[Number(d)]);
+  const toEnDigits = (value)=> String(value || '').replace(/[۰-۹]/g, ch => enDigits[faDigits.indexOf(ch)]);
+
+  const pad = (n)=> n.toString().padStart(2, '0');
+
+  function jalaliToGregorian(jy, jm, jd){
+    jy = parseInt(jy, 10);
+    jm = parseInt(jm, 10);
+    jd = parseInt(jd, 10);
+    if(isNaN(jy) || isNaN(jm) || isNaN(jd)) return null;
+    jy += 1595;
+    let days = -355668 + (365 * jy) + Math.floor(jy / 33) * 8 + Math.floor(((jy % 33) + 3) / 4);
+    days += jd + (jm <= 6 ? (31 * (jm - 1)) : ((jm - 7) * 30) + 186);
+    let gy = 400 * Math.floor(days / 146097);
+    days %= 146097;
+    if(days > 36524){
+      gy += 100 * Math.floor((days - 1) / 36524);
+      days = (days - 1) % 36524;
+      if(days >= 365){
+        days += 1;
+      }
+    }
+    gy += 4 * Math.floor(days / 1461);
+    days %= 1461;
+    if(days > 365){
+      gy += Math.floor((days - 1) / 365);
+      days = (days - 1) % 365;
+    }
+    let gd = days + 1;
+    let gm;
+    if(days < 186){
+      gm = 1 + Math.floor(days / 31);
+      gd = 1 + (days % 31);
+    } else {
+      gm = 7 + Math.floor((days - 186) / 30);
+      gd = 1 + ((days - 186) % 30);
+    }
+    return [gy, gm, gd];
+  }
+
+  function gregorianToJalali(gy, gm, gd){
+    gy = parseInt(gy, 10);
+    gm = parseInt(gm, 10);
+    gd = parseInt(gd, 10);
+    if(isNaN(gy) || isNaN(gm) || isNaN(gd)) return null;
+    const g_d_m = [0,31,59,90,120,151,181,212,243,273,304,334];
+    let jy = (gy > 1600) ? 979 : 0;
+    gy -= (gy > 1600) ? 1600 : 621;
+    const gy2 = gm > 2 ? gy + 1 : gy;
+    let days = (365 * gy) + Math.floor((gy2 + 3) / 4) - Math.floor((gy2 + 99) / 100) + Math.floor((gy2 + 399) / 400);
+    days += gd + g_d_m[gm - 1] - 80;
+    jy += 33 * Math.floor(days / 12053);
+    days %= 12053;
+    jy += 4 * Math.floor(days / 1461);
+    days %= 1461;
+    if(days > 365){
+      jy += Math.floor((days - 1) / 365);
+      days = (days - 1) % 365;
+    }
+    const jm = (days < 186) ? 1 + Math.floor(days / 31) : 7 + Math.floor((days - 186) / 30);
+    const jd = (days < 186) ? 1 + (days % 31) : 1 + ((days - 186) % 30);
+    return [jy, jm, jd];
+  }
+
+  function parseJalali(raw){
+    if(!raw) return null;
+    const clean = toEnDigits(String(raw)).replace(/\//g, '-').trim();
+    const parts = clean.split('-');
+    if(parts.length !== 3) return null;
+    const jy = parseInt(parts[0], 10);
+    const jm = parseInt(parts[1], 10);
+    const jd = parseInt(parts[2], 10);
+    if(!jy || !jm || !jd) return null;
+    if(jm < 1 || jm > 12 || jd < 1 || jd > 31) return null;
+    return {jy, jm, jd};
+  }
+
+  inputs.forEach(inp => {
+    const targetId = inp.dataset.jalaliTarget;
+    if(!targetId) return;
+    const hidden = document.getElementById(targetId) || document.querySelector(`[name="${targetId}"]`);
+    if(!hidden) return;
+
+    const syncFromHidden = ()=>{
+      const raw = hidden.value || '';
+      if(!raw) return;
+      const parts = raw.split('-');
+      if(parts.length !== 3) return;
+      const g = parts.map(p=>parseInt(p,10));
+      const j = gregorianToJalali(g[0], g[1], g[2]);
+      if(j){
+        inp.value = toFaDigits(`${j[0]}-${pad(j[1])}-${pad(j[2])}`);
+      }
+    };
+
+    const syncHidden = ()=>{
+      const parsed = parseJalali(inp.value);
+      if(!parsed){
+        hidden.value = '';
+        inp.setCustomValidity(inp.value.trim() ? 'تاریخ جلالی نامعتبر است.' : '');
+        return;
+      }
+      const g = jalaliToGregorian(parsed.jy, parsed.jm, parsed.jd);
+      if(!g){
+        hidden.value = '';
+        inp.setCustomValidity('تاریخ جلالی نامعتبر است.');
+        return;
+      }
+      hidden.value = `${g[0]}-${pad(g[1])}-${pad(g[2])}`;
+      inp.value = toFaDigits(`${parsed.jy}-${pad(parsed.jm)}-${pad(parsed.jd)}`);
+      inp.setCustomValidity('');
+    };
+
+    inp.addEventListener('input', ()=>{
+      inp.value = toFaDigits(inp.value.replace(/[^0-9۰-۹\-\/]/g, ''));
+    });
+    inp.addEventListener('blur', syncHidden);
+    inp.addEventListener('change', syncHidden);
+
+    if(hidden.value){
+      syncFromHidden();
+    } else if(inp.value){
+      syncHidden();
+    }
+  });
 })();
 

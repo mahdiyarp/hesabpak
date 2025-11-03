@@ -8,6 +8,15 @@
   </p>
 
   <div class="admin-grid">
+    <a class="admin-card" href="{{ url_for('admin_users') }}">
+      <div class="admin-card__icon">👥</div>
+      <div class="admin-card__body">
+        <h3>کاربران و سطوح دسترسی</h3>
+        <p>ایجاد، ویرایش، غیرفعال‌سازی و تعیین مجوزهای دسترسی کاربران سامانه.</p>
+      </div>
+      <div class="admin-card__chev">›</div>
+    </a>
+
     <a class="admin-card" href="{{ url_for('admin_cashboxes') }}">
       <div class="admin-card__icon">🏦</div>
       <div class="admin-card__body">

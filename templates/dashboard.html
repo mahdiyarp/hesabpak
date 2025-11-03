@@ -5,8 +5,8 @@
     <div class="hero-info">
       <h1>داشبورد مدیریتی</h1>
       <p>نمای کلی عملکرد امروز فروشگاه.</p>
-      <div class="hero-clock" data-live-clock data-jalali="{{ now_info['jalali_date'] }}">
-        <span class="hero-date" data-role="date">{{ now_info['jalali_date'] }}</span>
+      <div class="hero-clock" data-live-clock data-jalali="{{ now_info['jalali_date']|fa_digits }}">
+        <span class="hero-date" data-role="date">{{ now_info['jalali_date']|fa_digits }}</span>
         <span class="hero-time" data-role="time">--:--:--</span>
       </div>
     </div>
@@ -89,7 +89,7 @@
             <strong>{{ doc.person }}</strong>
             <span class="amount">{{ doc.amount|sep }} تومان</span>
           </div>
-          <div class="row-meta">{{ doc.date }} | شماره سند {{ doc.number }}{% if doc.cheque_number %} | چک {{ doc.cheque_number }}{% endif %}</div>
+          <div class="row-meta">{{ doc.date|fa_digits }} | شماره سند {{ doc.number|fa_digits }}{% if doc.cheque_number %} | چک {{ doc.cheque_number|fa_digits }}{% endif %}</div>
         </li>
         {% endfor %}
       </ul>
@@ -107,7 +107,7 @@
             <strong>{{ doc.person }}</strong>
             <span class="amount">{{ doc.amount|sep }} تومان</span>
           </div>
-          <div class="row-meta">{{ doc.date }} | شماره سند {{ doc.number }}{% if doc.cheque_number %} | چک {{ doc.cheque_number }}{% endif %}</div>
+          <div class="row-meta">{{ doc.date|fa_digits }} | شماره سند {{ doc.number|fa_digits }}{% if doc.cheque_number %} | چک {{ doc.cheque_number|fa_digits }}{% endif %}</div>
         </li>
         {% endfor %}
       </ul>
