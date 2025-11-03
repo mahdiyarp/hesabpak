@@ -43,7 +43,7 @@
         </div>
         <div>
           <label class="lbl">روش دریافت</label>
-          <div class="radios" style="display:flex;gap:12px;align-items:center;">
+          <div class="radios" style="display:flex;gap:12px;align-items:center;flex-wrap:wrap;">
             <label><input type="radio" name="method" value="pos" checked> دستگاه پوز</label>
             <label><input type="radio" name="method" value="cash"> نقدی</label>
             <label><input type="radio" name="method" value="bank"> بانک</label>
@@ -51,8 +51,47 @@
           </div>
         </div>
         <div>
+          <label class="lbl">صندوق/حساب مقصد</label>
+          <select class="inp" name="cashbox_id" id="cashbox_id">
+            <option value="">یک گزینه انتخاب کنید...</option>
+            {% for box in cashboxes %}
+              <option value="{{ box.id }}" data-kind="{{ box.kind }}" data-bank="{{ box.bank_name or '' }}" data-account="{{ box.account_no or '' }}">
+                {{ box.name }}{% if box.kind == 'bank' and box.bank_name %} — {{ box.bank_name }}{% endif %}{% if box.account_no %} ({{ box.account_no }}){% endif %}
+              </option>
+            {% endfor %}
+          </select>
+          <div class="hint">انتخاب صندوق یا حساب متناسب با روش دریافت الزامی است.</div>
+        </div>
+        <div>
           <label class="lbl">یادداشت (اختیاری)</label>
           <input class="inp" name="note" id="note" placeholder="توضیحات..." value="{{ prefill_note if prefill_note else '' }}">
+        </div>
+      </div>
+
+      <div class="card cheque-wrapper" id="cheque_fields" hidden>
+        <h4 class="cheque-title">اطلاعات چک صیادی</h4>
+        <div class="cheque-card">
+          <div class="cheque-row">
+            <label for="cheque_number">شماره صیادی</label>
+            <input class="cheque-input" id="cheque_number" name="cheque_number" maxlength="23" placeholder="۱۶ رقم" autocomplete="off">
+          </div>
+          <div class="cheque-row">
+            <label for="cheque_bank">بانک</label>
+            <input class="cheque-input" id="cheque_bank" name="cheque_bank" placeholder="نام بانک صادرکننده">
+            <label for="cheque_branch">شعبه</label>
+            <input class="cheque-input" id="cheque_branch" name="cheque_branch" placeholder="مثلاً مرکزی">
+          </div>
+          <div class="cheque-row">
+            <label for="cheque_account">شماره حساب</label>
+            <input class="cheque-input" id="cheque_account" name="cheque_account" placeholder="شماره حساب مرتبط">
+            <label for="cheque_owner">صاحب حساب</label>
+            <input class="cheque-input" id="cheque_owner" name="cheque_owner" placeholder="نام صاحب حساب">
+          </div>
+          <div class="cheque-row">
+            <label for="cheque_due_date">تاریخ سررسید</label>
+            <input class="cheque-input" type="date" id="cheque_due_date" name="cheque_due_date">
+            <div class="cheque-hint">تاریخ و سایر اطلاعات به صورت خودکار در گزارشات لحاظ می‌شود.</div>
+          </div>
         </div>
       </div>
 
@@ -148,6 +187,63 @@
   const posStatus=document.getElementById('pos_status');
   const posDevice=posStatus ? (posStatus.dataset.device||'none') : 'none';
   const posLabel=posStatus ? (posStatus.dataset.label||'') : '';
+  const methodRadios=document.querySelectorAll('input[name="method"]');
+  const cashboxSelect=document.getElementById('cashbox_id');
+  const chequeFields=document.getElementById('cheque_fields');
+  const chequeNumber=document.getElementById('cheque_number');
+  const chequeBank=document.getElementById('cheque_bank');
+
+  function currentMethod(){
+    const checked=Array.from(methodRadios).find(r=>r.checked);
+    return checked?checked.value:'';
+  }
+
+  function toggleChequeSection(){
+    const method=currentMethod();
+    const isCheque=method==='cheque';
+    if(chequeFields){
+      if(isCheque){ show(chequeFields); }
+      else{ hide(chequeFields); }
+    }
+    if(!cashboxSelect) return;
+    const opts=Array.from(cashboxSelect.options);
+    opts.forEach(opt=>{
+      if(!opt.value){ opt.hidden=false; return; }
+      const kind=opt.dataset.kind||'cash';
+      if(isCheque){ opt.hidden = kind !== 'bank'; }
+      else if(method==='cash'){ opt.hidden = kind !== 'cash'; }
+      else if(method==='bank'){ opt.hidden = kind !== 'bank'; }
+      else{ opt.hidden = false; }
+    });
+    if(cashboxSelect.value){
+      const sel=cashboxSelect.options[cashboxSelect.selectedIndex];
+      if(sel && sel.hidden){ cashboxSelect.value=''; }
+    }
+  }
+
+  methodRadios.forEach(r=>{
+    r.addEventListener('change', toggleChequeSection);
+  });
+
+  if(cashboxSelect){
+    cashboxSelect.addEventListener('change', function(){
+      const opt=this.options[this.selectedIndex];
+      if(opt && chequeBank && !chequeBank.value){
+        const bankLabel=opt.dataset.bank||'';
+        if(bankLabel){ chequeBank.value = bankLabel; }
+      }
+    });
+  }
+
+  if(chequeNumber){
+    chequeNumber.addEventListener('input', function(){
+      const digits=this.value.replace(/\D/g,'').slice(0,16);
+      const grouped = digits.replace(/(.{4})/g,'$1 ').trim();
+      this.value = grouped;
+    });
+  }
+
+  toggleChequeSection();
 
   function fmtAmount(val){
     if(val==null) return '';

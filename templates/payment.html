@@ -46,6 +46,18 @@
             <option value="cheque">چک</option>
           </select>
         </div>
+        <div>
+          <label class="lbl">صندوق/حساب مبدأ</label>
+          <select class="inp" name="cashbox_id" id="cashbox_id">
+            <option value="">انتخاب حساب پرداخت‌کننده...</option>
+            {% for box in cashboxes %}
+              <option value="{{ box.id }}" data-kind="{{ box.kind }}" data-bank="{{ box.bank_name or '' }}" data-account="{{ box.account_no or '' }}">
+                {{ box.name }}{% if box.kind == 'bank' and box.bank_name %} — {{ box.bank_name }}{% endif %}{% if box.account_no %} ({{ box.account_no }}){% endif %}
+              </option>
+            {% endfor %}
+          </select>
+          <div class="hint">انتخاب صندوق یا حساب سازگار با روش پرداخت الزامی است.</div>
+        </div>
       </div>
     </div>
 
@@ -53,6 +65,33 @@
     <div class="card">
       <label class="lbl">توضیح</label>
       <input class="inp" name="note" id="note" placeholder="اختیاری" value="{{ prefill_note if prefill_note else '' }}">
+    </div>
+
+    <div class="card cheque-wrapper" id="cheque_fields" hidden>
+      <h4 class="cheque-title">صدور چک پرداختی</h4>
+      <div class="cheque-card">
+        <div class="cheque-row">
+          <label for="cheque_number">شماره صیادی</label>
+          <input class="cheque-input" id="cheque_number" name="cheque_number" maxlength="23" placeholder="۱۶ رقم" autocomplete="off">
+        </div>
+        <div class="cheque-row">
+          <label for="cheque_bank">بانک</label>
+          <input class="cheque-input" id="cheque_bank" name="cheque_bank" placeholder="بانک صادرکننده">
+          <label for="cheque_branch">شعبه</label>
+          <input class="cheque-input" id="cheque_branch" name="cheque_branch" placeholder="مثلاً مرکزی">
+        </div>
+        <div class="cheque-row">
+          <label for="cheque_account">شماره حساب</label>
+          <input class="cheque-input" id="cheque_account" name="cheque_account" placeholder="شماره حساب">
+          <label for="cheque_owner">صاحب حساب</label>
+          <input class="cheque-input" id="cheque_owner" name="cheque_owner" placeholder="نام صاحب حساب">
+        </div>
+        <div class="cheque-row">
+          <label for="cheque_due_date">تاریخ سررسید</label>
+          <input class="cheque-input" type="date" id="cheque_due_date" name="cheque_due_date">
+          <div class="cheque-hint">اطلاعات چک در گزارشات و جستجو قابل پیگیری خواهد بود.</div>
+        </div>
+      </div>
     </div>
 
     <!-- دکمه‌ها -->
@@ -82,6 +121,10 @@
   const personBox   = document.getElementById('person_results');
   const personHint  = document.getElementById('person_hint');
   const methodSel   = document.getElementById('method');
+  const cashboxSel  = document.getElementById('cashbox_id');
+  const chequeFields= document.getElementById('cheque_fields');
+  const chequeNumber= document.getElementById('cheque_number');
+  const chequeBank  = document.getElementById('cheque_bank');
 
   function show(el){ if(!el) return; el.hidden=false; el.style.display='block'; }
   function hide(el){ if(!el) return; el.hidden=true; el.style.display='none'; }
@@ -124,6 +167,48 @@
     personHint.classList.add('selected');
   }
 
+  function syncChequeUI(){
+    const method = methodSel ? methodSel.value : '';
+    const isCheque = method === 'cheque';
+    if(chequeFields){
+      if(isCheque){ show(chequeFields); } else { hide(chequeFields); }
+    }
+    if(!cashboxSel) return;
+    Array.from(cashboxSel.options).forEach(opt=>{
+      if(!opt.value){ opt.hidden = false; return; }
+      const kind = opt.dataset.kind || 'cash';
+      if(method === 'cash'){ opt.hidden = kind !== 'cash'; }
+      else if(method === 'bank' || method === 'cheque'){ opt.hidden = kind !== 'bank'; }
+      else { opt.hidden = false; }
+    });
+    if(cashboxSel.value){
+      const sel = cashboxSel.options[cashboxSel.selectedIndex];
+      if(sel && sel.hidden){ cashboxSel.value=''; }
+    }
+  }
+
+  methodSel && methodSel.addEventListener('change', syncChequeUI);
+
+  if(cashboxSel){
+    cashboxSel.addEventListener('change', function(){
+      const opt = this.options[this.selectedIndex];
+      if(opt && chequeBank && !chequeBank.value){
+        const bankLabel = opt.dataset.bank || '';
+        if(bankLabel){ chequeBank.value = bankLabel; }
+      }
+    });
+  }
+
+  if(chequeNumber){
+    chequeNumber.addEventListener('input', function(){
+      const digits = this.value.replace(/\D/g,'').slice(0,16);
+      const grouped = digits.replace(/(.{4})/g,'$1 ').trim();
+      this.value = grouped;
+    });
+  }
+
+  syncChequeUI();
+
   const amountInp=document.getElementById('amount');
   const amountWords=document.getElementById('amount_words');
   const posStatus=document.getElementById('pos_status');
@@ -153,7 +238,7 @@
         .catch(()=>{ amountWords.textContent='—'; });
       if(posStatus && posDevice && posDevice!=='none' && num>0){
         posStatus.textContent=`ارسال خودکار مبلغ ${fmtAmount(raw)} تومان به ${posLabel}`;
-        if(methodSel && methodSel.value==='cash'){ methodSel.value='pos'; }
+        if(methodSel && methodSel.value==='cash'){ methodSel.value='pos'; syncChequeUI(); }
       }
     }, 220);
   }

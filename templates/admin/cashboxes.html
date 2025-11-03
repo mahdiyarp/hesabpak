@@ -1,0 +1,113 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="module-wrap">
+  <h2>🏦 مدیریت صندوق‌ها و حساب‌ها</h2>
+  <p class="muted" style="margin-top:-4px;margin-bottom:18px;">صندوق‌های نقدی و حساب‌های بانکی در فرم‌های دریافت و پرداخت قابل انتخاب هستند.</p>
+
+  <div class="card" style="display:block;">
+    <h3 style="margin-top:0;">ثبت صندوق جدید</h3>
+    <form method="post" class="cashbox-form" style="display:grid;gap:12px;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));align-items:end;">
+      <div>
+        <label class="lbl" for="name">نام صندوق/حساب</label>
+        <input class="inp" id="name" name="name" placeholder="مثلاً صندوق اصلی یا بانک ملت">
+      </div>
+      <div>
+        <label class="lbl" for="kind">نوع</label>
+        <select class="inp" id="kind" name="kind">
+          <option value="cash">نقدی</option>
+          <option value="bank">بانکی</option>
+        </select>
+      </div>
+      <div data-bank-only>
+        <label class="lbl" for="bank_name">نام بانک</label>
+        <input class="inp" id="bank_name" name="bank_name" placeholder="مثلاً ملت" />
+      </div>
+      <div data-bank-only>
+        <label class="lbl" for="account_no">شماره حساب</label>
+        <input class="inp" id="account_no" name="account_no" placeholder="شماره حساب یا کارت" />
+      </div>
+      <div data-bank-only>
+        <label class="lbl" for="iban">شبا (اختیاری)</label>
+        <input class="inp" id="iban" name="iban" placeholder="IR...">
+      </div>
+      <div>
+        <label class="lbl" for="description">توضیحات</label>
+        <input class="inp" id="description" name="description" placeholder="توضیح کوتاه یا آدرس شعبه">
+      </div>
+      <div style="display:flex;gap:10px;">
+        <button class="btn btn-primary" type="submit">افزودن صندوق</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card" style="display:block;margin-top:18px;">
+    <h3 style="margin-top:0;">لیست صندوق‌ها</h3>
+    {% if boxes %}
+    <div class="table-responsive">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>نام</th>
+            <th>نوع</th>
+            <th>بانک</th>
+            <th>شماره حساب/کارت</th>
+            <th>وضعیت</th>
+            <th class="center">عملیات</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for box in boxes %}
+          <tr class="{{ 'muted' if not box.is_active else '' }}">
+            <td>{{ box.name }}</td>
+            <td>{{ 'بانکی' if box.kind=='bank' else 'نقدی' }}</td>
+            <td>{{ box.bank_name or '—' }}</td>
+            <td class="ltr">{{ box.account_no or '—' }}</td>
+            <td>{{ 'فعال' if box.is_active else 'غیرفعال' }}</td>
+            <td class="center">
+              {% if box.is_active %}
+              <form method="post" action="{{ url_for('admin_cashboxes_delete', box_id=box.id) }}" onsubmit="return confirm('حذف یا غیرفعال‌سازی این صندوق انجام شود؟');" style="display:inline-block;">
+                <button class="btn danger" type="submit" style="padding:6px 12px;">حذف/غیرفعال</button>
+              </form>
+              {% else %}
+                <span class="muted">—</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    <p class="muted" style="font-size:12px;margin-top:10px;">در صورت استفاده صندوق در اسناد گذشته، حذف فیزیکی انجام نمی‌شود و صندوق غیرفعال می‌گردد.</p>
+    {% else %}
+      <div class="muted">هنوز صندوقی ثبت نشده است.</div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}
+
+{% block body_scripts %}
+{{ super() }}
+<script>
+(function(){
+  const kind = document.getElementById('kind');
+  const bankFields = document.querySelectorAll('[data-bank-only]');
+  function sync(){
+    const isBank = kind && kind.value === 'bank';
+    bankFields.forEach(wrap => {
+      const input = wrap.querySelector('input');
+      if(isBank){
+        wrap.style.display = '';
+        if(input) input.disabled = false;
+      }else{
+        wrap.style.display = 'none';
+        if(input){ input.value=''; input.disabled = true; }
+      }
+    });
+  }
+  if(kind){
+    sync();
+    kind.addEventListener('change', sync);
+  }
+})();
+</script>
+{% endblock %}

@@ -89,7 +89,7 @@
             <strong>{{ doc.person }}</strong>
             <span class="amount">{{ doc.amount|sep }} تومان</span>
           </div>
-          <div class="row-meta">{{ doc.date }} | شماره سند {{ doc.number }}</div>
+          <div class="row-meta">{{ doc.date }} | شماره سند {{ doc.number }}{% if doc.cheque_number %} | چک {{ doc.cheque_number }}{% endif %}</div>
         </li>
         {% endfor %}
       </ul>
@@ -107,7 +107,7 @@
             <strong>{{ doc.person }}</strong>
             <span class="amount">{{ doc.amount|sep }} تومان</span>
           </div>
-          <div class="row-meta">{{ doc.date }} | شماره سند {{ doc.number }}</div>
+          <div class="row-meta">{{ doc.date }} | شماره سند {{ doc.number }}{% if doc.cheque_number %} | چک {{ doc.cheque_number }}{% endif %}</div>
         </li>
         {% endfor %}
       </ul>

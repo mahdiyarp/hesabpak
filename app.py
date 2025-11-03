@@ -144,6 +144,19 @@ class PriceHistory(db.Model):
     updated_at= db.Column(db.DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
     __table_args__ = (UniqueConstraint("person_id", "item_id", name="uq_price_person_item"),)
 
+class CashBox(db.Model):
+    __tablename__ = "cash_boxes"
+    id         = db.Column(db.Integer, primary_key=True)
+    name       = db.Column(db.String(128), nullable=False, unique=True)
+    kind       = db.Column(db.String(16), nullable=False, default="cash")  # cash | bank
+    bank_name  = db.Column(db.String(128), nullable=True)
+    account_no = db.Column(db.String(64), nullable=True)
+    iban       = db.Column(db.String(64), nullable=True)
+    description= db.Column(db.String(255), nullable=True)
+    is_active  = db.Column(db.Boolean, nullable=False, default=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.now)
+
+
 class CashDoc(db.Model):
     __tablename__ = "cash_docs"
     id        = db.Column(db.Integer, primary_key=True)
@@ -154,9 +167,17 @@ class CashDoc(db.Model):
     amount    = db.Column(db.Float, nullable=False, default=0.0)
     method    = db.Column(db.String(64), nullable=True)   # نقد، کارت، حواله...
     note      = db.Column(db.String(255), nullable=True)
+    cashbox_id= db.Column(db.Integer, db.ForeignKey("cash_boxes.id"), nullable=True)
+    cheque_number = db.Column(db.String(32), nullable=True, index=True)
+    cheque_bank   = db.Column(db.String(128), nullable=True)
+    cheque_branch = db.Column(db.String(128), nullable=True)
+    cheque_account= db.Column(db.String(64), nullable=True)
+    cheque_owner  = db.Column(db.String(128), nullable=True)
+    cheque_due_date = db.Column(db.Date, nullable=True)
     created_at= db.Column(db.DateTime, nullable=False, default=datetime.now)
 
     person    = db.relationship("Entity", lazy="joined")
+    cashbox   = db.relationship("CashBox", lazy="joined")
 
 class AuditEvent(db.Model):
     __tablename__ = "audit_events"
@@ -405,14 +426,15 @@ def index():
             }
         )
 
+    due_date_expr = func.coalesce(CashDoc.cheque_due_date, CashDoc.date)
     upcoming_receive_cheques = (
         CashDoc.query.filter(
             CashDoc.doc_type == "receive",
             func.lower(func.coalesce(CashDoc.method, "")) == "cheque",
-            CashDoc.date >= today,
-            CashDoc.date <= horizon,
+            due_date_expr >= today,
+            due_date_expr <= horizon,
         )
-        .order_by(CashDoc.date.asc())
+        .order_by(due_date_expr.asc())
         .all()
     )
 
@@ -420,20 +442,22 @@ def index():
         CashDoc.query.filter(
             CashDoc.doc_type == "payment",
             func.lower(func.coalesce(CashDoc.method, "")) == "cheque",
-            CashDoc.date >= today,
-            CashDoc.date <= horizon,
+            due_date_expr >= today,
+            due_date_expr <= horizon,
         )
-        .order_by(CashDoc.date.asc())
+        .order_by(due_date_expr.asc())
         .all()
     )
 
     def cheque_to_dict(doc: CashDoc):
+        due_dt = doc.cheque_due_date or doc.date
         return {
             "id": doc.id,
             "number": doc.number,
             "person": doc.person.name if doc.person else "—",
             "amount": float(doc.amount or 0.0),
-            "date": to_jdate_str(doc.date),
+            "date": to_jdate_str(due_dt) if due_dt else "—",
+            "cheque_number": doc.cheque_number,
         }
 
     chart_days = [today - timedelta(days=i) for i in range(6, -1, -1)]
@@ -978,6 +1002,7 @@ def reports():
                 CashDoc.number.ilike(f"%{q}%"),
                 Entity.name.ilike(f"%{q}%"),
                 Entity.code.ilike(f"%{q}%"),
+                CashDoc.cheque_number.ilike(f"%{q}%"),
             ))
         if df: cd_q = cd_q.filter(CashDoc.date >= df)
         if dt: cd_q = cd_q.filter(CashDoc.date <= dt)
@@ -990,6 +1015,10 @@ def reports():
                 "date": d.date,
                 "person": d.person.name,
                 "amount": d.amount,
+                "cheque_number": d.cheque_number,
+                "method": d.method,
+                "cashbox": d.cashbox.name if d.cashbox else None,
+                "cheque_due": to_jdate_str(d.cheque_due_date) if d.cheque_due_date else None,
             })
 
     rows.sort(key=lambda r: (r["date"], str(r["number"])), reverse=True)
@@ -1070,7 +1099,38 @@ def invoice_view(inv_id):
 def cash_view(doc_id):
     doc = CashDoc.query.get_or_404(doc_id)
     kind = "دریافت" if doc.doc_type == "receive" else "پرداخت"
-    html = f"<b>نوع:</b> {kind}<br><b>شماره:</b> {doc.number}<br><b>تاریخ (شمسی):</b> {to_jdate_str(doc.date)}<br><b>طرف حساب:</b> {doc.person.name}<br><b>مبلغ:</b> {int(doc.amount):,}"
+    cheque_meta = ""
+    if (doc.method or "").lower() == "cheque":
+        cheque_parts = []
+        if doc.cheque_number:
+            cheque_parts.append(f"شماره صیادی: <code>{doc.cheque_number}</code>")
+        if doc.cheque_bank:
+            cheque_parts.append(f"بانک: {doc.cheque_bank}")
+        if doc.cheque_branch:
+            cheque_parts.append(f"شعبه: {doc.cheque_branch}")
+        if doc.cheque_due_date:
+            cheque_parts.append(f"سررسید: {to_jdate_str(doc.cheque_due_date)}")
+        if doc.cheque_account:
+            cheque_parts.append(f"شماره حساب: {doc.cheque_account}")
+        if doc.cheque_owner:
+            cheque_parts.append(f"صاحب حساب: {doc.cheque_owner}")
+        if cheque_parts:
+            cheque_meta = "<br><b>جزئیات چک:</b> " + "<br>".join(cheque_parts)
+    cashbox_line = ""
+    if doc.cashbox:
+        box_label = doc.cashbox.name
+        if doc.cashbox.kind == "bank" and doc.cashbox.bank_name:
+            box_label += f" ({doc.cashbox.bank_name})"
+        cashbox_line = f"<br><b>صندوق/حساب:</b> {box_label}"
+    html = (
+        f"<b>نوع:</b> {kind}<br><b>شماره:</b> {doc.number}"
+        f"<br><b>تاریخ (شمسی):</b> {to_jdate_str(doc.date)}"
+        f"<br><b>طرف حساب:</b> {doc.person.name}"
+        f"<br><b>مبلغ:</b> {int(doc.amount):,}"
+        f"<br><b>روش:</b> {CASH_METHOD_LABELS.get(doc.method or '', doc.method or '—')}"
+        + cashbox_line
+        + cheque_meta
+    )
     return render_template("page.html", title="سند نقدی", content=Markup(html), prefix=URL_PREFIX)
 
 # ===================== دریافت وجه =====================
@@ -1083,6 +1143,11 @@ def receive():
     prefill_amount = None
     prefill_note = None
     prefill_person = None
+    cashboxes = (
+        CashBox.query.filter_by(is_active=True)
+        .order_by(CashBox.kind.desc(), CashBox.name.asc())
+        .all()
+    )
     if request.method == "GET":
         invoice_id = (request.args.get("invoice_id") or "").strip()
         if invoice_id.isdigit():
@@ -1126,6 +1191,42 @@ def receive():
             method = "cash"
         note = (request.form.get("note") or "").strip() or None
 
+        cashbox = None
+        cashbox_raw = (request.form.get("cashbox_id") or "").strip()
+        if cashbox_raw.isdigit():
+            cashbox = CashBox.query.get(int(cashbox_raw))
+            if cashbox and not cashbox.is_active:
+                cashbox = None
+
+        cheque_number = "".join(ch for ch in (request.form.get("cheque_number") or "") if ch.isdigit())
+        cheque_bank = (request.form.get("cheque_bank") or "").strip() or None
+        cheque_branch = (request.form.get("cheque_branch") or "").strip() or None
+        cheque_account = (request.form.get("cheque_account") or "").strip() or None
+        cheque_owner = (request.form.get("cheque_owner") or "").strip() or None
+        cheque_due_date = parse_gregorian_date(
+            request.form.get("cheque_due_date"), allow_none=True
+        )
+
+        if method in ("cash", "bank"):
+            required_kind = "cash" if method == "cash" else "bank"
+            if not cashbox or cashbox.kind != required_kind:
+                flash("لطفاً صندوق/حساب متناسب با روش دریافت را انتخاب کنید.", "danger")
+                return redirect(URL_PREFIX + "/receive")
+        if method == "cheque":
+            if not cashbox or cashbox.kind != "bank":
+                flash("برای ثبت چک، یک حساب بانکی فعال انتخاب کنید.", "danger")
+                return redirect(URL_PREFIX + "/receive")
+            if len(cheque_number) != 16:
+                flash("شماره صیادی چک باید ۱۶ رقم باشد.", "danger")
+                return redirect(URL_PREFIX + "/receive")
+        else:
+            cheque_number = None
+            cheque_bank = None
+            cheque_branch = None
+            cheque_account = None
+            cheque_owner = None
+            cheque_due_date = None
+
         doc = CashDoc(
             doc_type="receive",
             number=number,
@@ -1133,7 +1234,14 @@ def receive():
             person_id=person.id,
             amount=amount,
             method=method,
-            note=note
+            note=note,
+            cashbox_id=cashbox.id if cashbox else None,
+            cheque_number=cheque_number or None,
+            cheque_bank=cheque_bank,
+            cheque_branch=cheque_branch,
+            cheque_account=cheque_account,
+            cheque_owner=cheque_owner,
+            cheque_due_date=cheque_due_date,
         )
         db.session.add(doc)
 
@@ -1160,6 +1268,7 @@ def receive():
         prefill_amount=prefill_amount,
         prefill_person=prefill_person,
         prefill_note=prefill_note,
+        cashboxes=cashboxes,
     )
 
 # ===================== ویرایش سند نقدی =====================
@@ -1209,6 +1318,11 @@ def payment():
     prefill_amount = None
     prefill_note = None
     prefill_person = None
+    cashboxes = (
+        CashBox.query.filter_by(is_active=True)
+        .order_by(CashBox.kind.desc(), CashBox.name.asc())
+        .all()
+    )
     if request.method == "GET":
         invoice_id = (request.args.get("invoice_id") or "").strip()
         if invoice_id.isdigit():
@@ -1257,6 +1371,42 @@ def payment():
         method = (request.form.get("method") or "").strip().lower() or None
         note   = (request.form.get("note") or "").strip() or None
 
+        cashbox = None
+        cashbox_raw = (request.form.get("cashbox_id") or "").strip()
+        if cashbox_raw.isdigit():
+            cashbox = CashBox.query.get(int(cashbox_raw))
+            if cashbox and not cashbox.is_active:
+                cashbox = None
+
+        cheque_number = "".join(ch for ch in (request.form.get("cheque_number") or "") if ch.isdigit())
+        cheque_bank = (request.form.get("cheque_bank") or "").strip() or None
+        cheque_branch = (request.form.get("cheque_branch") or "").strip() or None
+        cheque_account = (request.form.get("cheque_account") or "").strip() or None
+        cheque_owner = (request.form.get("cheque_owner") or "").strip() or None
+        cheque_due_date = parse_gregorian_date(
+            request.form.get("cheque_due_date"), allow_none=True
+        )
+
+        if method in ("cash", "bank"):
+            required_kind = "cash" if method == "cash" else "bank"
+            if not cashbox or cashbox.kind != required_kind:
+                flash("لطفاً حساب متناسب با روش پرداخت را انتخاب کنید.", "danger")
+                return redirect(URL_PREFIX + "/payment")
+        if method == "cheque":
+            if not cashbox or cashbox.kind != "bank":
+                flash("برای صدور چک، حساب بانکی معتبر انتخاب کنید.", "danger")
+                return redirect(URL_PREFIX + "/payment")
+            if len(cheque_number) != 16:
+                flash("شماره صیادی چک باید ۱۶ رقم باشد.", "danger")
+                return redirect(URL_PREFIX + "/payment")
+        else:
+            cheque_number = None
+            cheque_bank = None
+            cheque_branch = None
+            cheque_account = None
+            cheque_owner = None
+            cheque_due_date = None
+
         doc = CashDoc(
             doc_type="payment",
             number=number,
@@ -1264,7 +1414,14 @@ def payment():
             person_id=person.id,
             amount=amount,
             method=method,
-            note=note
+            note=note,
+            cashbox_id=cashbox.id if cashbox else None,
+            cheque_number=cheque_number or None,
+            cheque_bank=cheque_bank,
+            cheque_branch=cheque_branch,
+            cheque_account=cheque_account,
+            cheque_owner=cheque_owner,
+            cheque_due_date=cheque_due_date,
         )
         db.session.add(doc)
 
@@ -1291,6 +1448,7 @@ def payment():
         prefill_amount=prefill_amount,
         prefill_person=prefill_person,
         prefill_note=prefill_note,
+        cashboxes=cashboxes,
     )
 
 # ----------------- Settings/Admin stubs -----------------
@@ -1320,6 +1478,74 @@ def settings_stub():
 def admin_stub():
     admin_required()
     return render_template("admin/dashboard.html", prefix=URL_PREFIX)
+
+
+@app.route(URL_PREFIX + "/admin/cashboxes", methods=["GET", "POST"])
+@login_required
+def admin_cashboxes():
+    admin_required()
+    if request.method == "POST":
+        name = (request.form.get("name") or "").strip()
+        kind = (request.form.get("kind") or "cash").strip().lower()
+        bank_name = (request.form.get("bank_name") or "").strip() or None
+        account_no = (request.form.get("account_no") or "").strip() or None
+        iban = (request.form.get("iban") or "").strip() or None
+        description = (request.form.get("description") or "").strip() or None
+
+        if kind not in ("cash", "bank"):
+            kind = "cash"
+
+        if not name:
+            flash("نام صندوق/حساب را وارد کنید.", "danger")
+        else:
+            exists = CashBox.query.filter(func.lower(CashBox.name) == name.lower()).first()
+            if exists:
+                flash("صندوقی با این نام از قبل ثبت شده است.", "warning")
+            else:
+                box = CashBox(
+                    name=name,
+                    kind=kind,
+                    bank_name=bank_name if kind == "bank" else None,
+                    account_no=account_no if kind == "bank" else None,
+                    iban=iban if kind == "bank" else None,
+                    description=description,
+                    is_active=True,
+                )
+                db.session.add(box)
+                db.session.commit()
+                flash("صندوق جدید ثبت شد.", "success")
+        return redirect(URL_PREFIX + "/admin/cashboxes")
+
+    boxes = (
+        CashBox.query.order_by(CashBox.kind.desc(), CashBox.is_active.desc(), CashBox.name.asc())
+        .all()
+    )
+    return render_template(
+        "admin/cashboxes.html",
+        prefix=URL_PREFIX,
+        boxes=boxes,
+    )
+
+
+@app.route(URL_PREFIX + "/admin/cashboxes/<int:box_id>/delete", methods=["POST"])
+@login_required
+def admin_cashboxes_delete(box_id):
+    admin_required()
+    box = CashBox.query.get_or_404(box_id)
+    usage_exists = (
+        db.session.query(CashDoc.id)
+        .filter(CashDoc.cashbox_id == box.id)
+        .limit(1)
+        .first()
+    )
+    if usage_exists:
+        box.is_active = False
+        flash("به دلیل استفاده در اسناد، صندوق غیرفعال شد.", "warning")
+    else:
+        db.session.delete(box)
+        flash("صندوق حذف شد.", "success")
+    db.session.commit()
+    return redirect(URL_PREFIX + "/admin/cashboxes")
 
 # ----------------- Utility APIs -----------------
 @app.route(URL_PREFIX + "/api/num2words", methods=["GET"])
@@ -1447,6 +1673,9 @@ def api_search():
 
     default_targets = {"item", "person", "invoice", "receive", "payment"}
     targets = alias_map.get(kind, default_targets if not kind else {kind})
+    cheque_only = kind in {"cheque", "check", "chak", "cek"}
+    if cheque_only:
+        targets = {"receive", "payment"}
     # اگر مقدار ناشناس بود، به صورت عمومی جستجو کن
     if not targets.intersection(default_targets):
         targets = default_targets
@@ -1569,6 +1798,7 @@ def api_search():
         if term:
             conds.append(CashDoc.number.ilike(term))
             conds.append(CashDoc.person.has(Entity.name.ilike(term)))
+            conds.append(CashDoc.cheque_number.ilike(term))
         if q_number is not None:
             conds.append(CashDoc.amount == q_number)
         if conds:
@@ -1583,6 +1813,8 @@ def api_search():
             query = query.filter(CashDoc.doc_type == "receive")
         elif "payment" in targets and "receive" not in targets:
             query = query.filter(CashDoc.doc_type == "payment")
+        if cheque_only:
+            query = query.filter(func.lower(func.coalesce(CashDoc.method, "")) == "cheque")
 
         rows = (
             query.order_by(CashDoc.date.desc(), CashDoc.number.desc())
@@ -1596,6 +1828,8 @@ def api_search():
             if doc.date:
                 meta_parts.append(doc.date.strftime("%Y-%m-%d"))
             meta_parts.append(f"مبلغ: {fmt_number(doc.amount)}")
+            if doc.cheque_number:
+                meta_parts.append(f"چک: {doc.cheque_number}")
             results.append({
                 "id": doc.id,
                 "type": doc.doc_type,
@@ -1625,6 +1859,13 @@ with app.app_context():
     db.create_all()
     _ensure_column_sqlite("entities", "stock_qty", "REAL", "0")
     _ensure_column_sqlite("entities", "balance",   "REAL", "0")
+    _ensure_column_sqlite("cash_docs", "cashbox_id", "INTEGER", "NULL")
+    _ensure_column_sqlite("cash_docs", "cheque_number", "TEXT", "NULL")
+    _ensure_column_sqlite("cash_docs", "cheque_bank", "TEXT", "NULL")
+    _ensure_column_sqlite("cash_docs", "cheque_branch", "TEXT", "NULL")
+    _ensure_column_sqlite("cash_docs", "cheque_account", "TEXT", "NULL")
+    _ensure_column_sqlite("cash_docs", "cheque_owner", "TEXT", "NULL")
+    _ensure_column_sqlite("cash_docs", "cheque_due_date", "TEXT", "NULL")
 
 if __name__ == "__main__":
     if URL_PREFIX:
