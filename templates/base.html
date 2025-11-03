@@ -21,18 +21,19 @@
   </script>
   <script>
   window.IS_ADMIN = {{ 'true' if is_admin else 'false' }};
+  window.USER_PERMISSIONS = {{ (user_permissions or [])|tojson }};
   </script>
   <script defer src="{{ prefix }}/static/search-unified.js"></script>
 
 </head>
-<body>
+<body class="theme-{{ active_theme }}" data-active-theme="{{ active_theme }}" data-search-sort="{{ search_sort_pref }}" data-price-mode="{{ price_display_mode }}">
 <header class="topbar">
   <div class="brand">حساب پاک <span class="en">hesab pak</span></div>
   <div class="clock" id="top-clock" data-live-clock data-jalali="{{ now_info['jalali_date'] }}">
     <span class="icon">⏰</span>
     <span class="time" data-role="time">--:--:--</span>
     <span class="sep">|</span>
-    <span class="date" data-role="date">{{ now_info['jalali_date'] }}</span>
+    <span class="date" data-role="date">{{ now_info['jalali_date']|fa_digits }}</span>
   </div>
   <div class="who">
     {% if current_user.is_authenticated %}
@@ -53,6 +54,12 @@
       <option value="">همه</option>
       <option value="item">کالا</option>
       <option value="person">شخص</option>
+      <option value="cheque">چک</option>
+    </select>
+    <select id="global-sort" class="search-inp" style="max-width:160px;height:44px;">
+      {% for value,label in search_sort_choices %}
+      <option value="{{ value }}" {% if value == search_sort_pref %}selected{% endif %}>مرتب‌سازی: {{ label }}</option>
+      {% endfor %}
     </select>
   </div>
 
@@ -80,16 +87,27 @@
 
 <!-- بعد: منوهای عمودی موبایلی -->
 <nav class="mobile-menu" style="padding:0 12px;">
+  {% set perms = user_permissions or [] %}
+  {% if 'sales' in perms %}
   <a class="menu-item" href="{{ prefix }}/sales"><span class="icon">🧾</span><span class="label">فروش</span><span class="chev">›</span></a>
+  {% endif %}
+  {% if 'receive' in perms %}
   <a class="menu-item" href="{{ prefix }}/receive"><span class="icon">➕</span><span class="label">دریافت</span><span class="chev">›</span></a>
+  {% endif %}
+  {% if 'purchase' in perms %}
   <a class="menu-item" href="{{ prefix }}/purchase"><span class="icon">🛒</span><span class="label">خرید</span><span class="chev">›</span></a>
+  {% endif %}
+  {% if 'payment' in perms %}
   <a class="menu-item" href="{{ prefix }}/payment"><span class="icon">➖</span><span class="label">پرداخت</span><span class="chev">›</span></a>
+  {% endif %}
+  {% if 'reports' in perms %}
   <a class="menu-item" href="{{ prefix }}/reports"><span class="icon">📊</span><span class="label">گزارشات</span><span class="chev">›</span></a>
+  {% endif %}
+  {% if 'entities' in perms %}
   <a class="menu-item" href="{{ prefix }}/entities?kind=item"><span class="icon">➕</span><span class="label">ثبت شخص یا کالا جدید</span><span class="chev">›</span></a>
-  <a class="menu-item" href="{{ prefix }}/settings"><span class="icon">⚙️</span><span class="label">تنظیمات</span><span class="chev">›</span></a>
-  {% if is_admin %}
-  <a class="menu-item" href="{{ prefix }}/developer"><span class="icon">🧑‍💻</span><span class="label">Developer</span><span class="chev">›</span></a>
-  <a class="menu-item" href="{{ prefix }}/admin"><span class="icon">🗄️</span><span class="label">مدیریت/بکاپ</span><span class="chev">›</span></a>
+  {% endif %}
+  {% if 'admin' in perms %}
+  <a class="menu-item" href="{{ prefix }}/admin"><span class="icon">🗄️</span><span class="label">مدیریت</span><span class="chev">›</span></a>
   {% endif %}
 </nav>
 

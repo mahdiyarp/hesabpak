@@ -3,18 +3,18 @@
 <div class="module-wrap">
   <h2>💳 پرداخت وجه</h2>
 
-  <form method="post" action="{{ prefix }}/payment" id="payment-form" novalidate>
+  <form method="post" action="{{ prefix }}/payment" id="payment-form" novalidate data-persist="true" data-persist-key="payment">
     <!-- سربرگ -->
     <div class="card header-box">
       <div class="header-grid">
         <div>
           <label class="lbl">شماره سند</label>
-          <input class="inp" name="pay_number" id="pay_number" value="{{ pay_number }}" readonly>
+          <input class="inp" name="pay_number" id="pay_number" value="{{ pay_number|fa_digits }}" readonly>
         </div>
 
         <div>
           <label class="lbl">تاریخ (شمسی)</label>
-          <input class="inp" id="pay_date_fa" readonly value="{{ current_jdate }}" data-greg="{{ current_gdate }}">
+          <input class="inp" id="pay_date_fa" readonly value="{{ current_jdate|fa_digits }}" data-greg="{{ current_gdate }}">
           <input type="hidden" name="pay_date_greg" id="pay_date_greg" value="{{ current_gdate }}">
         </div>
 
@@ -22,7 +22,7 @@
           <label class="lbl">طرف حساب (شخص)</label>
           <input type="hidden" name="person_token" id="person_token" value="{{ prefill_person.id if prefill_person else '' }}">
           <div class="search-wrapper">
-            <input class="inp" id="person_search" placeholder="جستجو و انتخاب شخص..." value="{% if prefill_person %}{{ prefill_person.code }} — {{ prefill_person.name }}{% endif %}">
+            <input class="inp" id="person_search" placeholder="جستجو و انتخاب شخص..." value="{% if prefill_person %}{{ prefill_person.code|fa_digits }} — {{ prefill_person.name }}{% endif %}">
             <div id="person_results" class="search-results"></div>
           </div>
           <div id="person_hint" class="hint">{% if prefill_person %}{{ prefill_person.name }} انتخاب شده است{% else %}نام یا کد شخص را بنویسید و از لیست انتخاب کنید.{% endif %}</div>
@@ -46,6 +46,18 @@
             <option value="cheque">چک</option>
           </select>
         </div>
+        <div>
+          <label class="lbl">صندوق/حساب مبدأ</label>
+          <select class="inp" name="cashbox_id" id="cashbox_id" {% if not cashboxes %}disabled{% endif %}>
+            <option value="">{% if cashboxes %}انتخاب حساب پرداخت‌کننده...{% else %}هیچ صندوق فعالی ثبت نشده است{% endif %}</option>
+            {% for box in cashboxes %}
+              <option value="{{ box.id }}" data-kind="{{ box.kind }}" data-bank="{{ box.bank_name or '' }}" data-account="{{ box.account_no or '' }}">
+                {{ box.name }}{% if box.kind == 'bank' and box.bank_name %} — {{ box.bank_name }}{% endif %}{% if box.account_no %} ({{ box.account_no|fa_digits }}){% endif %}
+              </option>
+            {% endfor %}
+          </select>
+          <div class="hint">انتخاب صندوق یا حساب سازگار با روش پرداخت الزامی است.</div>
+        </div>
       </div>
     </div>
 
@@ -53,6 +65,34 @@
     <div class="card">
       <label class="lbl">توضیح</label>
       <input class="inp" name="note" id="note" placeholder="اختیاری" value="{{ prefill_note if prefill_note else '' }}">
+    </div>
+
+    <div class="card cheque-wrapper" id="cheque_fields" hidden>
+      <h4 class="cheque-title">صدور چک پرداختی</h4>
+      <div class="cheque-card">
+        <div class="cheque-row">
+          <label for="cheque_number">شماره صیادی</label>
+          <input class="cheque-input" id="cheque_number" name="cheque_number" maxlength="23" placeholder="۱۶ رقم" autocomplete="off">
+        </div>
+        <div class="cheque-row">
+          <label for="cheque_bank">بانک</label>
+          <input class="cheque-input" id="cheque_bank" name="cheque_bank" placeholder="بانک صادرکننده">
+          <label for="cheque_branch">شعبه</label>
+          <input class="cheque-input" id="cheque_branch" name="cheque_branch" placeholder="مثلاً مرکزی">
+        </div>
+        <div class="cheque-row">
+          <label for="cheque_account">شماره حساب</label>
+          <input class="cheque-input" id="cheque_account" name="cheque_account" placeholder="شماره حساب">
+          <label for="cheque_owner">صاحب حساب</label>
+          <input class="cheque-input" id="cheque_owner" name="cheque_owner" placeholder="نام صاحب حساب">
+        </div>
+        <div class="cheque-row">
+          <label for="cheque_due_date_fa">تاریخ سررسید (شمسی)</label>
+          <input class="cheque-input" type="text" id="cheque_due_date_fa" name="cheque_due_date_fa" data-jalali-input data-jalali-target="cheque_due_date" placeholder="۱۴۰۳-۰۱-۱۵" autocomplete="off">
+          <input type="hidden" id="cheque_due_date" name="cheque_due_date">
+          <div class="cheque-hint">اطلاعات چک در گزارشات و جستجو قابل پیگیری خواهد بود.</div>
+        </div>
+      </div>
     </div>
 
     <!-- دکمه‌ها -->
@@ -82,6 +122,10 @@
   const personBox   = document.getElementById('person_results');
   const personHint  = document.getElementById('person_hint');
   const methodSel   = document.getElementById('method');
+  const cashboxSel  = document.getElementById('cashbox_id');
+  const chequeFields= document.getElementById('cheque_fields');
+  const chequeNumber= document.getElementById('cheque_number');
+  const chequeBank  = document.getElementById('cheque_bank');
 
   function show(el){ if(!el) return; el.hidden=false; el.style.display='block'; }
   function hide(el){ if(!el) return; el.hidden=true; el.style.display='none'; }
@@ -124,6 +168,48 @@
     personHint.classList.add('selected');
   }
 
+  function syncChequeUI(){
+    const method = methodSel ? methodSel.value : '';
+    const isCheque = method === 'cheque';
+    if(chequeFields){
+      if(isCheque){ show(chequeFields); } else { hide(chequeFields); }
+    }
+    if(!cashboxSel) return;
+    Array.from(cashboxSel.options).forEach(opt=>{
+      if(!opt.value){ opt.hidden = false; return; }
+      const kind = opt.dataset.kind || 'cash';
+      if(method === 'cash'){ opt.hidden = kind !== 'cash'; }
+      else if(method === 'bank' || method === 'cheque'){ opt.hidden = kind !== 'bank'; }
+      else { opt.hidden = false; }
+    });
+    if(cashboxSel.value){
+      const sel = cashboxSel.options[cashboxSel.selectedIndex];
+      if(sel && sel.hidden){ cashboxSel.value=''; }
+    }
+  }
+
+  methodSel && methodSel.addEventListener('change', syncChequeUI);
+
+  if(cashboxSel){
+    cashboxSel.addEventListener('change', function(){
+      const opt = this.options[this.selectedIndex];
+      if(opt && chequeBank && !chequeBank.value){
+        const bankLabel = opt.dataset.bank || '';
+        if(bankLabel){ chequeBank.value = bankLabel; }
+      }
+    });
+  }
+
+  if(chequeNumber){
+    chequeNumber.addEventListener('input', function(){
+      const digits = this.value.replace(/\D/g,'').slice(0,16);
+      const grouped = digits.replace(/(.{4})/g,'$1 ').trim();
+      this.value = grouped;
+    });
+  }
+
+  syncChequeUI();
+
   const amountInp=document.getElementById('amount');
   const amountWords=document.getElementById('amount_words');
   const posStatus=document.getElementById('pos_status');
@@ -153,7 +239,7 @@
         .catch(()=>{ amountWords.textContent='—'; });
       if(posStatus && posDevice && posDevice!=='none' && num>0){
         posStatus.textContent=`ارسال خودکار مبلغ ${fmtAmount(raw)} تومان به ${posLabel}`;
-        if(methodSel && methodSel.value==='cash'){ methodSel.value='pos'; }
+        if(methodSel && methodSel.value==='cash'){ methodSel.value='pos'; syncChequeUI(); }
       }
     }, 220);
   }
