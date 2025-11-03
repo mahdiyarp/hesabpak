@@ -1297,6 +1297,7 @@ def payment():
 @app.route(URL_PREFIX + "/settings", methods=["GET", "POST"])
 @login_required
 def settings_stub():
+    admin_required()
     current_key, current_label = _pos_device_config()
     if request.method == "POST":
         key = (request.form.get("pos_device") or "none").strip()
@@ -1317,8 +1318,8 @@ def settings_stub():
 @app.route(URL_PREFIX + "/admin", methods=["GET"])
 @login_required
 def admin_stub():
-    admin_html = "<p>مدیریت/بکاپ (در حال توسعه)</p>"
-    return render_template("page.html", title="مدیریت", content=Markup(admin_html), prefix=URL_PREFIX)
+    admin_required()
+    return render_template("admin/dashboard.html", prefix=URL_PREFIX)
 
 # ----------------- Utility APIs -----------------
 @app.route(URL_PREFIX + "/api/num2words", methods=["GET"])
