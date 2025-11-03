@@ -1,0 +1,8 @@
+cat > requirements.txt << 'EOF'
+Flask
+Flask-Login
+Flask-SQLAlchemy
+SQLAlchemy>=2.0
+python-dotenv
+MarkupSafe
+EOF
