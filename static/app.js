@@ -28,6 +28,7 @@ function badgeOf(t){
   const panel   = $('#global-results') || $('#search-results');
   const actions = $('#global-actions') || $('#search-actions');
   const kindSel = $('#global-kind');
+  const sortSel = $('#global-sort');
   const userPerms = Array.isArray(window.USER_PERMISSIONS) ? window.USER_PERMISSIONS : [];
   const isAdmin = (window.IS_ADMIN === true || window.IS_ADMIN === 'true');
   const allow = (perm)=>{ if(!perm) return true; return isAdmin || userPerms.indexOf(perm) !== -1; };
@@ -75,6 +76,17 @@ function badgeOf(t){
     tmr = setTimeout(()=> runSearch(q), 220);
   });
 
+  function rerunIfNeeded(){
+    const q = input.value.trim();
+    if(!q){
+      hide(panel);
+      showActions();
+      return;
+    }
+    if(tmr) clearTimeout(tmr);
+    runSearch(q);
+  }
+
   if(kindSel){
     kindSel.addEventListener('change', function(){
       const q = input.value.trim();
@@ -83,8 +95,16 @@ function badgeOf(t){
         showActions();
         return;
       }
-      if(tmr) clearTimeout(tmr);
-      runSearch(q);
+      rerunIfNeeded();
+    });
+  }
+
+  if(sortSel){
+    sortSel.addEventListener('change', function(){
+      if(document && document.body){
+        document.body.setAttribute('data-search-sort', sortSel.value || '');
+      }
+      rerunIfNeeded();
     });
   }
 
@@ -99,7 +119,8 @@ function badgeOf(t){
 
   function runSearch(q){
     const kind = kindSel ? (kindSel.value || '').trim() : '';
-    const url  = `${window.prefix}/api/search?q=${encodeURIComponent(q)}${kind ? `&kind=${encodeURIComponent(kind)}` : ''}`;
+    const sort = sortSel ? (sortSel.value || '').trim() : (document.body?.dataset?.searchSort || '');
+    const url  = `${window.prefix}/api/search?q=${encodeURIComponent(q)}${kind ? `&kind=${encodeURIComponent(kind)}` : ''}${sort ? `&sort=${encodeURIComponent(sort)}` : ''}`;
     fetch(url, {credentials:'same-origin'})
       .then(r=>r.json())
       .then(data=>{
@@ -109,9 +130,16 @@ function badgeOf(t){
           return;
         }
         panel.innerHTML = data.map(m => {
-          const meta = m.meta ? ` <span class="meta">| ${m.meta}</span>` : '';
-          return `<a class="res" href="#" data-id="${m.id}" data-type="${m.type}" data-code="${m.code}">
-                    <b>${badgeOf(m.type)}</b> — <code>${m.code}</code> — ${m.name}${meta}
+          const pieces = (m.meta || '').split('•').map(part => part.trim()).filter(Boolean);
+          if(m.stock){ pieces.push(`موجودی: ${m.stock}`); }
+          if(m.price){ pieces.push(`قیمت: ${m.price}`); }
+          if(m.balance && (!m.type || m.type === 'person')){ pieces.push(`مانده: ${m.balance}`); }
+          const meta = pieces.length ? `<div class="res-meta">${pieces.map(p=>`<span class="res-sub">${p}</span>`).join('')}</div>` : '';
+          const badge = `<span class="res-badge">${badgeOf(m.type)}</span>`;
+          const code = m.code ? `<span class="res-code">${m.code}</span>` : '';
+          return `<a class="res" href="#" data-id="${m.id}" data-type="${m.type}" data-code="${m.code || ''}">
+                    <div class="res-head">${badge}${code}<span class="res-title">${m.name || ''}</span></div>
+                    ${meta}
                   </a>`;
         }).join('');
         show(panel);
@@ -178,6 +206,70 @@ function badgeOf(t){
     if(ev.target.closest('.global-search, .search-wrap')) return;
     hide(panel);
     if(!input.value.trim()) showActions();
+  });
+})();
+
+// =============== Form persistence (per-page, sessionStorage) ===============
+(function(){
+  const forms = $all('form[data-persist="true"]');
+  if(!forms.length) return;
+  if(typeof window.sessionStorage === 'undefined') return;
+
+  function storageKey(form){
+    const custom = form.getAttribute('data-persist-key');
+    return `hp:persist:${custom || window.location.pathname}`;
+  }
+
+  function collect(form){
+    const data = {};
+    Array.from(form.elements).forEach(el => {
+      if(!el.name || el.disabled) return;
+      if(el.type === 'password') return;
+      if(el.name.endsWith('[]')) return;
+      if(el.type === 'checkbox'){
+        data[el.name] = el.checked;
+      }else if(el.type === 'radio'){
+        if(el.checked) data[el.name] = el.value;
+      }else{
+        data[el.name] = el.value;
+      }
+    });
+    return data;
+  }
+
+  function restore(form, data){
+    if(!data) return;
+    Array.from(form.elements).forEach(el => {
+      if(!el.name || !(el.name in data)) return;
+      const val = data[el.name];
+      if(el.type === 'checkbox'){
+        el.checked = !!val;
+      }else if(el.type === 'radio'){
+        el.checked = (el.value === val);
+      }else{
+        el.value = val;
+      }
+    });
+  }
+
+  forms.forEach(form => {
+    const key = storageKey(form);
+    try {
+      const saved = sessionStorage.getItem(key);
+      if(saved){ restore(form, JSON.parse(saved)); }
+    } catch(err){ console.warn('restore form failed', err); }
+
+    const handler = () => {
+      try {
+        const snapshot = collect(form);
+        sessionStorage.setItem(key, JSON.stringify(snapshot));
+      } catch(err){ console.warn('persist form failed', err); }
+    };
+    form.addEventListener('input', handler);
+    form.addEventListener('change', handler);
+    form.addEventListener('submit', () => {
+      try { sessionStorage.removeItem(key); } catch(err){ /* ignore */ }
+    });
   });
 })();
 

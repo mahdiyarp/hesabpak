@@ -37,15 +37,15 @@
         <tr>
           <td>{{ label }}</td>
           <td>
-            <code>{{ r.number }}</code>
+            <code>{{ r.number|fa_digits }}</code>
             {% if r.cheque_number or r.cashbox %}
               <div class="muted" style="font-size:12px;margin-top:2px;">
-                {% if r.cheque_number %}چک: <code>{{ r.cheque_number }}</code>{% if r.cheque_due %} — سررسید {{ r.cheque_due }}{% endif %}{% endif %}
+                {% if r.cheque_number %}چک: <code>{{ r.cheque_number|fa_digits }}</code>{% if r.cheque_due %} — سررسید {{ r.cheque_due|fa_digits }}{% endif %}{% endif %}
                 {% if r.cashbox %}{% if r.cheque_number %} | {% endif %}صندوق: {{ r.cashbox }}{% endif %}
               </div>
             {% endif %}
           </td>
-        <td>{{ r.date }}</td>
+        <td>{{ r.date|fa_digits }}</td>
         <td>{{ r.person }}</td>
         <td>{{ r.amount|sep }}</td>
           <td class="center">

@@ -44,6 +44,32 @@ POS_DEVICE_CHOICES = [
     ("saman-s2100", "Saman S2100 (سپاس)"),
 ]
 
+THEME_CHOICES = [
+    ("light", "روشن"),
+    ("dark", "تاریک"),
+    ("slate", "طوسی مورب"),
+]
+
+SEARCH_SORT_CHOICES = [
+    ("recent", "جدیدترین"),
+    ("code", "بر اساس کد"),
+    ("name", "بر اساس نام"),
+    ("balance", "بر اساس مانده/موجودی"),
+]
+
+PRICE_DISPLAY_MODES = [
+    ("last", "آخرین قیمت"),
+    ("average", "میانگین قیمت"),
+]
+
+DASHBOARD_WIDGET_CHOICES = [
+    ("hero", "سربرگ"),
+    ("stats", "کارت‌های آماری"),
+    ("cash", "خلاصه صندوق"),
+    ("charts", "نمودارها"),
+    ("cheques", "چک‌های آتی"),
+]
+
 CASH_METHOD_LABELS = {
     "cash": "نقدی",
     "pos": "دستگاه پوز",
@@ -434,6 +460,15 @@ def inject_ctx():
         "user_permissions": sorted(user_permissions()),
         "has_permission": has_permission,
         "now_info": date_now_info(),
+        "active_theme": _ui_theme_key(),
+        "theme_choices": THEME_CHOICES,
+        "search_sort_pref": _search_sort_key(),
+        "search_sort_choices": SEARCH_SORT_CHOICES,
+        "price_display_mode": _price_display_mode(),
+        "price_display_modes": PRICE_DISPLAY_MODES,
+        "dashboard_widgets": _dashboard_widgets(),
+        "dashboard_widget_choices": DASHBOARD_WIDGET_CHOICES,
+        "allow_negative_sales": _allow_negative_sales(),
     }
 
 # === فیلتر جینجا برای جداکننده هزارگان ===
@@ -485,6 +520,45 @@ def _pos_device_config():
     key = Setting.get("pos_device", "none") or "none"
     label = dict(POS_DEVICE_CHOICES).get(key, POS_DEVICE_CHOICES[0][1])
     return key, label
+
+def _ui_theme_key():
+    key = (Setting.get("ui_theme", "light") or "light").strip().lower()
+    valid = {k for k, _ in THEME_CHOICES}
+    if key not in valid:
+        key = "light"
+    return key
+
+def _search_sort_key():
+    key = (Setting.get("search_sort", "recent") or "recent").strip().lower()
+    valid = {k for k, _ in SEARCH_SORT_CHOICES}
+    if key not in valid:
+        key = "recent"
+    return key
+
+def _price_display_mode():
+    key = (Setting.get("price_display_mode", "last") or "last").strip().lower()
+    valid = {k for k, _ in PRICE_DISPLAY_MODES}
+    if key not in valid:
+        key = "last"
+    return key
+
+def _dashboard_widgets():
+    raw = Setting.get("dashboard_widgets", "") or ""
+    valid = [k for k, _ in DASHBOARD_WIDGET_CHOICES]
+    try:
+        data = json.loads(raw) if raw else []
+        if not isinstance(data, list):
+            data = []
+    except Exception:
+        data = []
+    filtered = [k for k in data if k in valid]
+    if not filtered:
+        filtered = list(valid)
+    return filtered
+
+def _allow_negative_sales() -> bool:
+    val = (Setting.get("allow_negative_sales", "off") or "off").strip().lower()
+    return val in ("on", "true", "1", "yes")
 
 def _find_entity_by_code_or_id(kind: str, code_or_id: str):
     if not code_or_id: return None
@@ -716,6 +790,7 @@ def index():
             "receivesTotals": chart_receives_totals,
             "paymentsTotals": chart_payments_totals,
         },
+        dashboard_widgets=_dashboard_widgets(),
     )
 
 @app.route(URL_PREFIX + "/login", methods=["GET", "POST"])
@@ -873,6 +948,7 @@ def sales():
     ensure_permission("sales")
     now_info = _now_info()
     inv_number_generated = jalali_reference("INV", now_info["datetime"])
+    allow_negative = _allow_negative_sales()
 
     if request.method == "POST":
         number = (request.form.get("inv_number") or "").strip() or inv_number_generated
@@ -897,6 +973,7 @@ def sales():
 
         rows = []
         MAX_ROWS = 15
+        pending_stock = {}
         for i in range(min(len(item_ids), len(unit_prices), len(qtys))):
             iid = (item_ids[i] or "").strip()
             icode= (item_codes[i] or "").strip()
@@ -910,6 +987,15 @@ def sales():
                 item = Entity.query.filter_by(type="item", code=icode).first()
 
             if (item is not None) and item.type == "item" and q > 0 and up >= 0:
+                if not allow_negative:
+                    base_stock = float(pending_stock.get(item.id, item.stock_qty or 0.0))
+                    if base_stock - q < -1e-6:
+                        flash(f"موجودی کالا «{item.name}» برای فروش کافی نیست.", "danger")
+                        return redirect(URL_PREFIX + "/sales")
+                    pending_stock[item.id] = base_stock - q
+                else:
+                    current = float(pending_stock.get(item.id, item.stock_qty or 0.0))
+                    pending_stock[item.id] = current - q
                 rows.append({"item": item, "unit_price": up, "qty": q})
             if len(rows) >= MAX_ROWS:
                 break
@@ -1197,7 +1283,7 @@ def reports():
                 "kind": "invoice",
                 "id": inv.id,
                 "number": inv.number,
-                "date": inv.date,
+                "date": to_jdate_str(inv.date),
                 "person": inv.person.name,
                 "amount": inv.total,
             })
@@ -1221,7 +1307,7 @@ def reports():
                 "kind": d.doc_type,
                 "id": d.id,
                 "number": d.number,
-                "date": d.date,
+                "date": to_jdate_str(d.date),
                 "person": d.person.name,
                 "amount": d.amount,
                 "cheque_number": d.cheque_number,
@@ -1679,19 +1765,57 @@ def settings_stub():
     admin_required()
     current_key, current_label = _pos_device_config()
     if request.method == "POST":
-        key = (request.form.get("pos_device") or "none").strip()
-        if key not in dict(POS_DEVICE_CHOICES):
-            flash("دستگاه انتخاب‌شده نامعتبر است.", "danger")
-            return redirect(URL_PREFIX + "/settings")
-        Setting.set("pos_device", key)
-        db.session.commit()
-        flash("تنظیمات ذخیره شد.", "success")
+        form_id = (request.form.get("form_id") or "pos").strip().lower()
+        if form_id == "pos":
+            key = (request.form.get("pos_device") or "none").strip()
+            if key not in dict(POS_DEVICE_CHOICES):
+                flash("دستگاه انتخاب‌شده نامعتبر است.", "danger")
+                return redirect(URL_PREFIX + "/settings")
+            Setting.set("pos_device", key)
+            db.session.commit()
+            flash("تنظیمات ذخیره شد.", "success")
+        elif form_id == "ui":
+            theme = (request.form.get("ui_theme") or "light").strip().lower()
+            sort_key = (request.form.get("search_sort") or _search_sort_key()).strip().lower()
+            price_mode = (request.form.get("price_display_mode") or _price_display_mode()).strip().lower()
+            allow_negative = request.form.get("allow_negative_sales") == "on"
+            widget_keys = request.form.getlist("dashboard_widgets")
+
+            valid_themes = {k for k, _ in THEME_CHOICES}
+            if theme not in valid_themes:
+                theme = _ui_theme_key()
+
+            valid_sorts = {k for k, _ in SEARCH_SORT_CHOICES}
+            if sort_key not in valid_sorts:
+                sort_key = _search_sort_key()
+
+            valid_price = {k for k, _ in PRICE_DISPLAY_MODES}
+            if price_mode not in valid_price:
+                price_mode = _price_display_mode()
+
+            valid_widgets = {k for k, _ in DASHBOARD_WIDGET_CHOICES}
+            widgets_payload = [w for w in widget_keys if w in valid_widgets]
+            if not widgets_payload:
+                widgets_payload = list(valid_widgets)
+
+            Setting.set("ui_theme", theme)
+            Setting.set("search_sort", sort_key)
+            Setting.set("price_display_mode", price_mode)
+            Setting.set("allow_negative_sales", "on" if allow_negative else "off")
+            Setting.set("dashboard_widgets", json.dumps(widgets_payload, ensure_ascii=False))
+            db.session.commit()
+            flash("تنظیمات ظاهری و جستجو ذخیره شد.", "success")
         return redirect(URL_PREFIX + "/settings")
     return render_template(
         "settings.html",
         prefix=URL_PREFIX,
         pos_choices=POS_DEVICE_CHOICES,
         selected_pos=current_key,
+        selected_theme=_ui_theme_key(),
+        search_sort_selected=_search_sort_key(),
+        price_mode_selected=_price_display_mode(),
+        dashboard_widgets_selected=_dashboard_widgets(),
+        allow_negative_selected=_allow_negative_sales(),
     )
 
 @app.route(URL_PREFIX + "/admin", methods=["GET"])
@@ -1837,10 +1961,34 @@ def admin_cashboxes():
         CashBox.query.order_by(CashBox.kind.desc(), CashBox.is_active.desc(), CashBox.name.asc())
         .all()
     )
+    totals_rows = (
+        db.session.query(
+            CashDoc.cashbox_id,
+            CashDoc.doc_type,
+            func.coalesce(func.sum(CashDoc.amount), 0.0),
+        )
+        .filter(CashDoc.cashbox_id.isnot(None))
+        .group_by(CashDoc.cashbox_id, CashDoc.doc_type)
+        .all()
+    )
+    totals_map = {}
+    for box_id, doc_type, total in totals_rows:
+        if box_id not in totals_map:
+            totals_map[box_id] = {"receive": 0.0, "payment": 0.0}
+        totals_map[box_id][doc_type] = float(total or 0.0)
+    grand_net = 0.0
+    for box in boxes:
+        meta = totals_map.get(box.id, {"receive": 0.0, "payment": 0.0})
+        net = meta.get("receive", 0.0) - meta.get("payment", 0.0)
+        if box.is_active:
+            grand_net += net
+    grand_net = float(grand_net)
     return render_template(
         "admin/cashboxes.html",
         prefix=URL_PREFIX,
         boxes=boxes,
+        cash_totals=totals_map,
+        cash_grand_total=grand_net,
     )
 
 
@@ -1937,6 +2085,11 @@ def api_now():
 def api_search():
     q_raw = (request.args.get("q") or "").strip()
     kind = (request.args.get("kind") or "").strip().lower()
+    sort_key = (request.args.get("sort") or _search_sort_key()).strip().lower()
+    valid_sort_keys = {k for k, _ in SEARCH_SORT_CHOICES}
+    if sort_key not in valid_sort_keys:
+        sort_key = _search_sort_key()
+    price_mode = _price_display_mode()
 
     try:
         limit = int(request.args.get("limit", 10))
@@ -1957,10 +2110,16 @@ def api_search():
         try:
             f = float(val)
             if abs(f - int(f)) < 1e-6:
-                return f"{int(f):,}"
-            return f"{f:,.2f}".rstrip("0").rstrip(".")
+                return fa_digits(f"{int(f):,}")
+            return fa_digits(f"{f:,.2f}".rstrip("0").rstrip("."))
         except Exception:
             return str(val)
+
+    def fmt_jalali(val):
+        try:
+            return fa_digits(to_jdate_str(val)) if val else "—"
+        except Exception:
+            return "—"
 
     q_number = try_float(q_raw)
     term = f"%{q_raw}%" if q_raw else None
@@ -2004,6 +2163,7 @@ def api_search():
     def limit_left() -> int:
         return max(0, limit - len(results))
 
+    item_rows = []
     if "item" in ordered_targets:
         remaining = limit_left()
         if remaining:
@@ -2016,12 +2176,40 @@ def api_search():
                         Entity.serial_no.ilike(term),
                     )
                 )
-            rows = (
-                query.order_by(Entity.level.asc(), Entity.code.asc())
-                .limit(remaining)
-                .all()
-            )
-            for e in rows:
+            if sort_key == "code":
+                query = query.order_by(Entity.code.asc())
+            elif sort_key == "name":
+                query = query.order_by(Entity.name.asc())
+            elif sort_key == "balance":
+                query = query.order_by(Entity.stock_qty.desc(), Entity.name.asc())
+            else:  # recent
+                query = query.order_by(Entity.updated_at.desc(), Entity.id.desc())
+
+            item_rows = query.limit(remaining).all()
+
+            price_map = {}
+            if item_rows:
+                item_ids = [it.id for it in item_rows]
+                if price_mode == "average":
+                    avg_rows = (
+                        db.session.query(InvoiceLine.item_id, func.avg(InvoiceLine.unit_price))
+                        .filter(InvoiceLine.item_id.in_(item_ids))
+                        .group_by(InvoiceLine.item_id)
+                        .all()
+                    )
+                    price_map = {iid: float(avg or 0.0) for iid, avg in avg_rows}
+                else:
+                    ph_rows = (
+                        db.session.query(PriceHistory)
+                        .filter(PriceHistory.item_id.in_(item_ids))
+                        .order_by(PriceHistory.item_id.asc(), PriceHistory.updated_at.desc())
+                        .all()
+                    )
+                    for ph in ph_rows:
+                        if ph.item_id not in price_map:
+                            price_map[ph.item_id] = float(ph.last_price or 0.0)
+
+            for e in item_rows:
                 meta_parts = []
                 if e.unit:
                     meta_parts.append(e.unit)
@@ -2029,13 +2217,16 @@ def api_search():
                     meta_parts.append(f"موجودی: {fmt_number(e.stock_qty)}")
                 if e.serial_no:
                     meta_parts.append(e.serial_no)
+                if price_map.get(e.id):
+                    price_label = "میانگین" if price_mode == "average" else "آخرین"
+                    meta_parts.append(f"{price_label} قیمت: {fmt_number(price_map[e.id])}")
                 results.append({
                     "id": e.id,
                     "type": "item",
                     "code": e.code or "",
                     "name": e.name or "",
-                    "stock": float(e.stock_qty or 0.0) if e.stock_qty is not None else None,
-                    "price": None,
+                    "stock": fmt_number(e.stock_qty) if e.stock_qty is not None else None,
+                    "price": fmt_number(price_map.get(e.id)) if price_map.get(e.id) is not None else None,
                     "extra": e.unit or "",
                     "meta": " • ".join(meta_parts) if meta_parts else "",
                 })
@@ -2053,11 +2244,16 @@ def api_search():
                     Entity.unit.ilike(term),
                 )
             )
-        rows = (
-            query.order_by(Entity.level.asc(), Entity.code.asc())
-            .limit(remaining)
-            .all()
-        )
+        if sort_key == "name":
+            query = query.order_by(Entity.name.asc())
+        elif sort_key == "code":
+            query = query.order_by(Entity.code.asc())
+        elif sort_key == "balance":
+            query = query.order_by(Entity.balance.desc(), Entity.name.asc())
+        else:
+            query = query.order_by(Entity.updated_at.desc(), Entity.id.desc())
+
+        rows = query.limit(remaining).all()
         for e in rows:
             meta_parts = []
             if e.unit:
@@ -2068,7 +2264,7 @@ def api_search():
                 "type": "person",
                 "code": e.code or "",
                 "name": e.name or "",
-                "balance": float(e.balance or 0.0),
+                "balance": fmt_number(e.balance or 0.0),
                 "extra": e.unit or "",
                 "meta": " • ".join(meta_parts),
             })
@@ -2086,15 +2282,18 @@ def api_search():
             conds.append(Invoice.total == q_number)
         if conds:
             query = query.filter(or_(*conds))
-        rows = (
-            query.order_by(Invoice.date.desc(), Invoice.number.desc())
-            .limit(remaining)
-            .all()
-        )
+        if sort_key == "code":
+            query = query.order_by(Invoice.number.asc())
+        elif sort_key == "name":
+            query = query.join(Entity, Invoice.person_id == Entity.id).order_by(Entity.name.asc())
+        else:
+            query = query.order_by(Invoice.date.desc(), Invoice.number.desc())
+
+        rows = query.limit(remaining).all()
         for inv in rows:
             meta_parts = []
             if inv.date:
-                meta_parts.append(inv.date.strftime("%Y-%m-%d"))
+                meta_parts.append(fmt_jalali(inv.date))
             if inv.total is not None:
                 meta_parts.append(f"مبلغ: {fmt_number(inv.total)}")
             results.append({
@@ -2133,20 +2332,29 @@ def api_search():
         if cheque_only:
             query = query.filter(func.lower(func.coalesce(CashDoc.method, "")) == "cheque")
 
-        rows = (
-            query.order_by(CashDoc.date.desc(), CashDoc.number.desc())
-            .limit(remaining)
-            .all()
-        )
+        if sort_key == "code":
+            query = query.order_by(CashDoc.number.asc())
+        elif sort_key == "name":
+            query = query.join(Entity, CashDoc.person_id == Entity.id).order_by(Entity.name.asc())
+        elif sort_key == "balance":
+            query = query.order_by(CashDoc.amount.desc(), CashDoc.date.desc())
+        else:
+            query = query.order_by(CashDoc.date.desc(), CashDoc.number.desc())
+
+        rows = query.limit(remaining).all()
         for doc in rows:
             if doc.doc_type not in targets and len(targets) != len(default_targets):
                 continue
             meta_parts = []
             if doc.date:
-                meta_parts.append(doc.date.strftime("%Y-%m-%d"))
+                meta_parts.append(fmt_jalali(doc.date))
             meta_parts.append(f"مبلغ: {fmt_number(doc.amount)}")
             if doc.cheque_number:
-                meta_parts.append(f"چک: {doc.cheque_number}")
+                meta_parts.append(f"چک: {fa_digits(doc.cheque_number)}")
+            if doc.cheque_due_date:
+                meta_parts.append(f"سررسید: {fmt_jalali(doc.cheque_due_date)}")
+            if doc.cashbox:
+                meta_parts.append(f"صندوق: {doc.cashbox.name}")
             results.append({
                 "id": doc.id,
                 "type": doc.doc_type,

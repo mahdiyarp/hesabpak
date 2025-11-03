@@ -7,7 +7,7 @@
   <div class="overlay-shield" aria-hidden="true"></div>
   <h2>🧾 فاکتور فروش</h2>
 
-  <form method="post" action="{{ prefix }}/sales" id="sale-form" novalidate>
+  <form method="post" action="{{ prefix }}/sales" id="sale-form" novalidate data-persist="true" data-persist-key="sales">
     <input type="hidden" name="person_token" id="person_token">
     <input type="hidden" name="rows" id="rows" value="0">
 

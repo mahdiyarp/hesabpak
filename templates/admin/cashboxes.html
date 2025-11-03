@@ -51,17 +51,24 @@
             <th>نوع</th>
             <th>بانک</th>
             <th>شماره حساب/کارت</th>
+            <th>جمع دریافتی</th>
+            <th>جمع پرداختی</th>
+            <th>خالص</th>
             <th>وضعیت</th>
             <th class="center">عملیات</th>
           </tr>
         </thead>
         <tbody>
           {% for box in boxes %}
+          {% set totals = cash_totals.get(box.id, {'receive':0.0,'payment':0.0}) %}
           <tr class="{{ 'muted' if not box.is_active else '' }}">
             <td>{{ box.name }}</td>
             <td>{{ 'بانکی' if box.kind=='bank' else 'نقدی' }}</td>
             <td>{{ box.bank_name or '—' }}</td>
             <td class="ltr">{{ box.account_no or '—' }}</td>
+            <td>{{ totals.receive|sep }}</td>
+            <td>{{ totals.payment|sep }}</td>
+            <td class="{{ 'pos' if totals.receive - totals.payment >= 0 else 'neg' }}">{{ (totals.receive - totals.payment)|sep }}</td>
             <td>{{ 'فعال' if box.is_active else 'غیرفعال' }}</td>
             <td class="center">
               {% if box.is_active %}
@@ -75,6 +82,12 @@
           </tr>
           {% endfor %}
         </tbody>
+        <tfoot>
+          <tr>
+            <td colspan="6" style="text-align:left;">جمع خالص صندوق‌های فعال</td>
+            <td colspan="3" class="{{ 'pos' if cash_grand_total >= 0 else 'neg' }}">{{ cash_grand_total|sep }}</td>
+          </tr>
+        </tfoot>
       </table>
     </div>
     <p class="muted" style="font-size:12px;margin-top:10px;">در صورت استفاده صندوق در اسناد گذشته، حذف فیزیکی انجام نمی‌شود و صندوق غیرفعال می‌گردد.</p>
