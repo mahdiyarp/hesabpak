@@ -32,6 +32,7 @@ from utils.date_utils import (
 
 # ----------------- Config -----------------
 load_dotenv()
+PROJECT_ROOT = Path(__file__).resolve().parent
 PORT = int(os.environ.get("PORT", "8000"))
 SECRET_KEY = os.environ.get("SECRET_KEY", "change-me-please")
 URL_PREFIX = os.environ.get("URL_PREFIX", "") or ""   # مثلا: /hesabpak
@@ -648,6 +649,24 @@ AI_RESPONSE_SCHEMA = {
                 },
                 "required": ["kind", "partner", "items"],
             },
+            "actions": {
+                "type": "array",
+                "default": [],
+                "items": {
+                    "type": "object",
+                    "additionalProperties": False,
+                    "properties": {
+                        "operation": {
+                            "type": "string",
+                            "enum": ["write_file", "append_file", "delete_path"],
+                        },
+                        "path": {"type": "string"},
+                        "content": {"type": ["string", "null"]},
+                        "description": {"type": ["string", "null"]},
+                    },
+                    "required": ["operation", "path"],
+                },
+            },
         },
         "required": ["reply", "needs_confirmation"],
     },
@@ -713,6 +732,83 @@ def _build_openai_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any
         prepared.append({"role": role, "content": content or [{"type": "text", "text": text or ""}]})
     return prepared
 
+
+def _resolve_project_path(rel_path: str) -> Path:
+    rel_path = (rel_path or "").strip()
+    if not rel_path:
+        raise ValueError("مسیر فایل مشخص نشده است.")
+    rel = Path(rel_path)
+    if rel.is_absolute():
+        raise ValueError("مسیر باید نسبی باشد.")
+    target = (PROJECT_ROOT / rel).resolve()
+    if PROJECT_ROOT not in target.parents and target != PROJECT_ROOT:
+        raise ValueError("امکان دسترسی به مسیر خارج از پروژه وجود ندارد.")
+    return target
+
+
+def _apply_assistant_actions(actions: List[Dict[str, Any]]) -> Dict[str, Any]:
+    summary = {"applied": 0, "failed": 0, "messages": [], "errors": []}
+    for action in actions:
+        if not isinstance(action, dict):
+            summary["failed"] += 1
+            summary["errors"].append("ساختار عملیات نامعتبر است.")
+            continue
+        operation = (action.get("operation") or action.get("type") or "").strip().lower()
+        rel_path = (action.get("path") or "").strip()
+        description = (action.get("description") or "").strip()
+        label = description or rel_path or "عملیات فایل"
+        if not operation:
+            summary["failed"] += 1
+            summary["errors"].append(f"{label}: نوع عملیات مشخص نشده است.")
+            continue
+        if not rel_path:
+            summary["failed"] += 1
+            summary["errors"].append(f"{label}: مسیر فایل مشخص نیست.")
+            continue
+        try:
+            target = _resolve_project_path(rel_path)
+        except Exception as exc:
+            summary["failed"] += 1
+            summary["errors"].append(f"{label}: {exc}")
+            continue
+
+        try:
+            if operation == "write_file":
+                content = action.get("content")
+                if not isinstance(content, str):
+                    raise ValueError("محتوای فایل موجود نیست.")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_text(content, encoding="utf-8")
+                summary["applied"] += 1
+                message = description or f"فایل «{rel_path}» بروزرسانی شد."
+            elif operation == "append_file":
+                content = action.get("content")
+                if not isinstance(content, str):
+                    raise ValueError("محتوای فایل موجود نیست.")
+                target.parent.mkdir(parents=True, exist_ok=True)
+                with target.open("a", encoding="utf-8") as fh:
+                    fh.write(content)
+                summary["applied"] += 1
+                message = description or f"محتوا به فایل «{rel_path}» افزوده شد."
+            elif operation == "delete_path":
+                if target.is_dir():
+                    raise ValueError("حذف پوشه مجاز نیست.")
+                if target.exists():
+                    target.unlink()
+                summary["applied"] += 1
+                message = description or f"فایل «{rel_path}» حذف شد."
+            else:
+                raise ValueError(f"عملیات ناشناخته: {operation}")
+
+            summary["messages"].append(message)
+            app.logger.info("AI_ACTION %s %s", operation.upper(), rel_path)
+        except Exception as exc:
+            summary["failed"] += 1
+            summary["errors"].append(f"{label}: {exc}")
+            app.logger.exception("AI_ACTION_FAILED operation=%s path=%s", operation or "?", rel_path)
+    return summary
+
+
 def _call_openai_assistant(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
     api_key = _openai_api_key()
     if not api_key:
@@ -727,6 +823,10 @@ def _call_openai_assistant(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
         " به زبان فارسی بدهید و در صورت ابهام، مواردی که نیاز به تأیید دارند را مشخص کنید."
         " اگر تصویر فاکتور دریافت کردید مقادیر تاریخ، شماره فاکتور، نام خریدار/فروشنده و"
         " اقلام را با قیمت و تعداد استخراج کنید. در صورت نبود قیمت، مقدار null قرار دهید."
+        " در صورتی که کاربر درخواست ویرایش رابط کاربری یا کد برنامه را داشت، ابتدا راهکار"
+        " را توضیح دهید و سپس در فیلد actions فهرستی از عملیات فایل را ارائه کنید. برای"
+        " عملیات write_file محتوای کامل فایل هدف را ارسال کنید و مسیرها را نسبت به ریشه"
+        " پروژه بنویسید."
     )
 
     request_messages = [
@@ -740,10 +840,31 @@ def _call_openai_assistant(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
         response_format={"type": "json_schema", "json_schema": AI_RESPONSE_SCHEMA},
     )
 
+    content: Optional[str] = None
     try:
-        content = response.output[0].content[0].text  # type: ignore[attr-defined]
-    except Exception as exc:
-        raise RuntimeError(f"ساختار پاسخ نامعتبر است: {exc}")
+        output_blocks = getattr(response, "output", None) or []
+        if output_blocks:
+            first_block = output_blocks[0]
+            if isinstance(first_block, dict):
+                block_content = first_block.get("content") or []
+            else:
+                block_content = getattr(first_block, "content", None) or []
+            for part in block_content:
+                if isinstance(part, dict):
+                    maybe_text = part.get("text")
+                else:
+                    maybe_text = getattr(part, "text", None)
+                if maybe_text:
+                    content = maybe_text
+                    break
+    except Exception:
+        logging.exception("failed to parse response.output for assistant reply")
+
+    if not content:
+        content = getattr(response, "output_text", None)
+
+    if not content:
+        raise RuntimeError("ساختار پاسخ نامعتبر است.")
 
     try:
         return json.loads(content)
@@ -2366,6 +2487,15 @@ def assistant_chat():
                 },
             )
 
+    actions_summary = None
+    actions_payload = result.get("actions") if isinstance(result.get("actions"), list) else []
+    if actions_payload:
+        actions_summary = _apply_assistant_actions(actions_payload)
+        if actions_summary.get("errors"):
+            app.logger.warning(
+                "AI_ACTION_ERRORS count=%s", len(actions_summary.get("errors") or [])
+            )
+
     response = {
         "status": "ok",
         "reply": reply_text,
@@ -2377,6 +2507,8 @@ def assistant_chat():
         "uncertain_fields": result.get("uncertain_fields", []),
         "follow_up": result.get("follow_up"),
         "apply_error": apply_error,
+        "actions_summary": actions_summary,
+        "actions_applied": bool(actions_summary and actions_summary.get("applied")),
     }
     return jsonify(response)
 
