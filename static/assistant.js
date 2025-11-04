@@ -214,6 +214,23 @@
         history.push({ role: 'assistant', text: data.follow_up, attachments: [] });
       }
 
+      if(data.actions_summary){
+        const summary = data.actions_summary;
+        if(Array.isArray(summary.messages)){
+          summary.messages.forEach(msg => {
+            appendMessage('assistant', msg);
+            history.push({ role: 'assistant', text: msg, attachments: [] });
+          });
+        }
+        if(Array.isArray(summary.errors)){
+          summary.errors.forEach(err => {
+            const text = `خطا در اعمال تغییرات: ${err}`;
+            appendMessage('assistant', text);
+            history.push({ role: 'assistant', text, attachments: [] });
+          });
+        }
+      }
+
     }catch(err){
       appendMessage('assistant', err.message || 'خطا در ارتباط با سرور');
     }finally{
