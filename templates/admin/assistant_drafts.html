@@ -1,0 +1,26 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<h2>پیش‌نویس‌های دستیار</h2>
+<p><a class="btn btn-secondary" href="{{ prefix }}/admin/modules">تنظیمات ماژول</a></p>
+{% if drafts %}
+<table class="table table-sm table-striped">
+<thead><tr><th>#</th><th>نوع</th><th>ایجادکننده</th><th>زمان</th><th>اقدامات</th></tr></thead>
+<tbody>
+{% for d in drafts %}
+<tr>
+  <td>{{ loop.index0 }}</td>
+  <td>{{ d.detected_kind or d.kind or '—' }}</td>
+  <td>{{ d.created_by or '—' }}</td>
+  <td>{{ d.ts or '—' }}</td>
+  <td>
+    <a class="btn btn-sm btn-outline-primary" href="{{ prefix }}/admin/assistant-drafts/{{ d._idx }}">مشاهده</a>
+  </td>
+</tr>
+{% endfor %}
+</tbody>
+</table>
+{% else %}
+<p>هیچ پیش‌نویسی یافت نشد.</p>
+{% endif %}
+{% endblock %}

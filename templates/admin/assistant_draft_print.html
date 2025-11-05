@@ -1,0 +1,13 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<div class="container">
+  <h2>پرینت پیش‌نویس</h2>
+  <p><strong>نوع:</strong> {{ draft.detected_kind or draft.kind or '—' }}</p>
+  <p><strong>ایجاد‌کننده:</strong> {{ draft.created_by or '—' }} &nbsp; <strong>زمان:</strong> {{ draft.ts or '—' }}</p>
+  <hr>
+  <pre style="white-space:pre-wrap; font-size: 14px;">{{ draft.text or draft.extracted_text or '' }}</pre>
+  <hr>
+  <p><button class="btn btn-primary" onclick="window.print();">چاپ</button> <a class="btn btn-secondary" href="{{ prefix }}/admin/assistant-drafts">بازگشت</a></p>
+</div>
+{% endblock %}

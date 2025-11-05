@@ -1,8 +1,56 @@
 {
   "users": [
     {
+      "username": "1",
+      "password": "1",
+      "role": "admin",
+      "permissions": [
+        "admin",
+        "assistant",
+        "dashboard",
+        "developer",
+        "entities",
+        "payment",
+        "purchase",
+        "receive",
+        "reports",
+        "sales"
+      ],
+      "is_active": true
+    },
+    {
+      "username": "2",
+      "password": "2",
+      "role": "staff",
+      "permissions": [
+        "assistant",
+        "dashboard",
+        "entities",
+        "payment",
+        "purchase",
+        "receive",
+        "reports",
+        "sales"
+      ],
+      "is_active": false
+    },
+    {
       "username": "admin",
-      "password": "admin123"
+      "password": "admin123",
+      "role": "admin",
+      "permissions": [
+        "admin",
+        "assistant",
+        "dashboard",
+        "developer",
+        "entities",
+        "payment",
+        "purchase",
+        "receive",
+        "reports",
+        "sales"
+      ],
+      "is_active": true
     }
   ]
 }

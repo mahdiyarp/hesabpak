@@ -8621,3 +8621,241 @@ TypeError: Object of type date is not JSON serializable
 2025-11-05 07:02:48  INFO  USER=admin  IP=127.0.0.1  GET /static/app.js  ARGS={}
 2025-11-05 07:02:48  INFO  USER=admin  IP=127.0.0.1  GET /static/search-unified.js  ARGS={}
 2025-11-05 07:02:50  INFO  USER=admin  IP=127.0.0.1  GET /static/fonts/Yekan.woff2  ARGS={}
+2025-11-05 10:36:23  INFO  [autosave] enabled for ['Invoice', 'CashDoc']
+2025-11-05 10:36:24  INFO  [autosave] enabled for ['Invoice', 'CashDoc']
+2025-11-05 10:36:28  INFO  USER=admin  IP=127.0.0.1  GET /  ARGS={}
+2025-11-05 10:36:29  INFO  USER=admin  IP=127.0.0.1  GET /static/style.css  ARGS={}
+2025-11-05 10:36:29  INFO  USER=admin  IP=127.0.0.1  GET /static/search.css  ARGS={}
+2025-11-05 10:36:30  INFO  USER=admin  IP=127.0.0.1  GET /static/app.js  ARGS={}
+2025-11-05 10:36:31  INFO  USER=admin  IP=127.0.0.1  GET /static/search-unified.js  ARGS={}
+2025-11-05 10:36:31  INFO  USER=admin  IP=127.0.0.1  GET /static/fonts/Yekan.woff2  ARGS={}
+2025-11-05 10:36:40  INFO  USER=admin  IP=127.0.0.1  GET /reports  ARGS={}
+2025-11-05 10:36:41  INFO  USER=admin  IP=127.0.0.1  GET /static/style.css  ARGS={}
+2025-11-05 10:36:41  INFO  USER=admin  IP=127.0.0.1  GET /static/app.js  ARGS={}
+2025-11-05 10:36:41  INFO  USER=admin  IP=127.0.0.1  GET /static/search.css  ARGS={}
+2025-11-05 10:36:42  INFO  USER=admin  IP=127.0.0.1  GET /static/search-unified.js  ARGS={}
+2025-11-05 10:36:42  INFO  USER=admin  IP=127.0.0.1  GET /static/fonts/Yekan.woff2  ARGS={}
+2025-11-05 10:39:17  INFO  [autosave] enabled for ['Invoice', 'CashDoc']
+2025-11-05 10:39:18  INFO  [autosave] enabled for ['Invoice', 'CashDoc']
+2025-11-05 10:39:22  INFO  USER=admin  IP=127.0.0.1  GET /  ARGS={}
+2025-11-05 10:39:24  INFO  USER=admin  IP=127.0.0.1  GET /static/style.css  ARGS={}
+2025-11-05 10:39:24  INFO  USER=admin  IP=127.0.0.1  GET /static/search.css  ARGS={}
+2025-11-05 10:39:24  INFO  USER=admin  IP=127.0.0.1  GET /static/app.js  ARGS={}
+2025-11-05 10:39:25  INFO  USER=admin  IP=127.0.0.1  GET /static/search-unified.js  ARGS={}
+2025-11-05 10:39:26  INFO  USER=admin  IP=127.0.0.1  GET /static/fonts/Yekan.woff2  ARGS={}
+2025-11-05 10:41:39  INFO  USER=admin  IP=127.0.0.1  GET /admin  ARGS={}
+2025-11-05 10:41:40  INFO  USER=admin  IP=127.0.0.1  GET /static/app.js  ARGS={}
+2025-11-05 10:41:40  INFO  USER=admin  IP=127.0.0.1  GET /static/search.css  ARGS={}
+2025-11-05 10:41:40  INFO  USER=admin  IP=127.0.0.1  GET /static/style.css  ARGS={}
+2025-11-05 10:41:42  INFO  USER=admin  IP=127.0.0.1  GET /static/search-unified.js  ARGS={}
+2025-11-05 10:41:42  INFO  USER=admin  IP=127.0.0.1  GET /static/fonts/Yekan.woff2  ARGS={}
+2025-11-05 10:41:44  INFO  USER=admin  IP=127.0.0.1  GET /admin/users  ARGS={}
+2025-11-05 10:41:46  INFO  USER=admin  IP=127.0.0.1  GET /static/search.css  ARGS={}
+2025-11-05 10:41:46  INFO  USER=admin  IP=127.0.0.1  GET /static/app.js  ARGS={}
+2025-11-05 10:41:46  INFO  USER=admin  IP=127.0.0.1  GET /static/style.css  ARGS={}
+2025-11-05 10:41:46  INFO  USER=admin  IP=127.0.0.1  GET /static/fonts/Yekan.woff2  ARGS={}
+2025-11-05 10:41:47  INFO  USER=admin  IP=127.0.0.1  GET /static/search-unified.js  ARGS={}
+2025-11-05 10:41:59  INFO  USER=admin  IP=127.0.0.1  POST /admin/users  ARGS={}
+2025-11-05 10:41:59  INFO  USER=admin  IP=127.0.0.1  GET /admin/users  ARGS={}
+2025-11-05 10:42:00  INFO  USER=admin  IP=127.0.0.1  GET /static/search.css  ARGS={}
+2025-11-05 10:42:00  INFO  USER=admin  IP=127.0.0.1  GET /static/app.js  ARGS={}
+2025-11-05 10:42:01  INFO  USER=admin  IP=127.0.0.1  GET /static/style.css  ARGS={}
+2025-11-05 10:42:01  INFO  USER=admin  IP=127.0.0.1  GET /static/search-unified.js  ARGS={}
+2025-11-05 10:42:08  INFO  USER=admin  IP=127.0.0.1  GET /logout  ARGS={}
+2025-11-05 10:42:08  INFO  LOGOUT USER=admin IP=127.0.0.1
+2025-11-05 10:42:08  INFO  ANON  IP=127.0.0.1  GET /login  ARGS={}
+2025-11-05 10:42:09  INFO  ANON  IP=127.0.0.1  GET /static/style.css  ARGS={}
+2025-11-05 10:42:12  INFO  USER=admin  IP=127.0.0.1  POST /login  ARGS={}
+2025-11-05 10:42:13  INFO  USER=admin  IP=127.0.0.1  GET /  ARGS={}
+2025-11-05 10:42:13  INFO  ANON  IP=127.0.0.1  GET /static/style.css  ARGS={}
+2025-11-05 10:42:13  INFO  ANON  IP=127.0.0.1  GET /static/search.css  ARGS={}
+2025-11-05 10:42:13  INFO  ANON  IP=127.0.0.1  GET /static/app.js  ARGS={}
+2025-11-05 10:42:14  INFO  ANON  IP=127.0.0.1  GET /static/search-unified.js  ARGS={}
+2025-11-05 10:42:18  INFO  ANON  IP=127.0.0.1  GET /admin  ARGS={}
+2025-11-05 10:42:19  INFO  ANON  IP=127.0.0.1  GET /login  ARGS={'next': '/admin'}
+2025-11-05 10:42:19  INFO  ANON  IP=127.0.0.1  GET /static/style.css  ARGS={}
+2025-11-05 10:42:22  INFO  ANON  IP=127.0.0.1  POST /login  ARGS={'next': '/admin'}
+2025-11-05 10:42:23  INFO  ANON  IP=127.0.0.1  GET /login  ARGS={}
+2025-11-05 10:42:23  INFO  ANON  IP=127.0.0.1  GET /static/style.css  ARGS={}
+2025-11-05 10:45:00  INFO  ANON  IP=127.0.0.1  POST /login  ARGS={}
+2025-11-05 10:45:00  INFO  LOGIN  USER=1  IP=127.0.0.1
+2025-11-05 10:45:01  INFO  USER=1  IP=127.0.0.1  GET /  ARGS={}
+2025-11-05 10:45:03  INFO  USER=1  IP=127.0.0.1  GET /static/search.css  ARGS={}
+2025-11-05 10:45:03  INFO  USER=1  IP=127.0.0.1  GET /static/app.js  ARGS={}
+2025-11-05 10:45:03  INFO  USER=1  IP=127.0.0.1  GET /static/style.css  ARGS={}
+2025-11-05 10:45:04  INFO  USER=1  IP=127.0.0.1  GET /static/search-unified.js  ARGS={}
+2025-11-05 10:45:04  INFO  USER=1  IP=127.0.0.1  GET /static/fonts/Yekan.woff2  ARGS={}
+2025-11-05 10:45:10  INFO  USER=1  IP=127.0.0.1  GET /admin  ARGS={}
+2025-11-05 10:45:11  INFO  USER=1  IP=127.0.0.1  GET /static/app.js  ARGS={}
+2025-11-05 10:45:11  INFO  USER=1  IP=127.0.0.1  GET /static/search.css  ARGS={}
+2025-11-05 10:45:11  INFO  USER=1  IP=127.0.0.1  GET /static/search-unified.js  ARGS={}
+2025-11-05 10:45:11  INFO  USER=1  IP=127.0.0.1  GET /static/style.css  ARGS={}
+2025-11-05 10:45:12  INFO  USER=1  IP=127.0.0.1  GET /static/fonts/Yekan.woff2  ARGS={}
+2025-11-05 10:45:19  INFO  USER=1  IP=127.0.0.1  GET /  ARGS={}
+2025-11-05 10:45:20  INFO  USER=1  IP=127.0.0.1  GET /static/app.js  ARGS={}
+2025-11-05 10:45:21  INFO  USER=1  IP=127.0.0.1  GET /static/search.css  ARGS={}
+2025-11-05 10:45:21  INFO  USER=1  IP=127.0.0.1  GET /static/style.css  ARGS={}
+2025-11-05 10:45:21  INFO  USER=1  IP=127.0.0.1  GET /static/fonts/Yekan.woff2  ARGS={}
+2025-11-05 10:45:22  INFO  USER=1  IP=127.0.0.1  GET /static/search-unified.js  ARGS={}
+2025-11-05 10:45:24  INFO  USER=1  IP=127.0.0.1  GET /sales  ARGS={}
+2025-11-05 10:45:25  INFO  USER=1  IP=127.0.0.1  GET /static/style.css  ARGS={}
+2025-11-05 10:45:25  INFO  USER=1  IP=127.0.0.1  GET /static/search.css  ARGS={}
+2025-11-05 10:45:25  INFO  USER=1  IP=127.0.0.1  GET /static/app.js  ARGS={}
+2025-11-05 10:45:25  INFO  USER=1  IP=127.0.0.1  GET /static/sales.js  ARGS={}
+2025-11-05 10:45:25  INFO  USER=1  IP=127.0.0.1  GET /static/search-unified.js  ARGS={}
+2025-11-05 10:45:25  INFO  USER=1  IP=127.0.0.1  GET /static/fonts/Yekan.woff2  ARGS={}
+2025-11-05 10:45:30  INFO  USER=1  IP=127.0.0.1  GET /api/search  ARGS={'q': '1', 'kind': 'person', 'limit': '12'}
+2025-11-05 10:45:31  INFO  USER=1  IP=127.0.0.1  GET /api/search  ARGS={'q': '100', 'kind': 'person', 'limit': '12'}
+2025-11-05 10:45:32  INFO  USER=1  IP=127.0.0.1  GET /api/search  ARGS={'q': '10', 'kind': 'person', 'limit': '12'}
+2025-11-05 10:45:41  INFO  USER=1  IP=127.0.0.1  GET /invoice  ARGS={'kind': 'purchase'}
+2025-11-05 10:45:42  INFO  USER=1  IP=127.0.0.1  GET /static/search.css  ARGS={}
+2025-11-05 10:45:42  INFO  USER=1  IP=127.0.0.1  GET /static/style.css  ARGS={}
+2025-11-05 10:45:42  INFO  USER=1  IP=127.0.0.1  GET /static/sales.js  ARGS={}
+2025-11-05 10:45:42  INFO  USER=1  IP=127.0.0.1  GET /static/app.js  ARGS={}
+2025-11-05 10:45:42  INFO  USER=1  IP=127.0.0.1  GET /static/search-unified.js  ARGS={}
+2025-11-05 10:45:42  INFO  USER=1  IP=127.0.0.1  GET /static/fonts/Yekan.woff2  ARGS={}
+2025-11-05 10:52:14  INFO  [autosave] enabled for ['Invoice', 'CashDoc']
+2025-11-05 10:52:28  INFO  USER=1  IP=127.0.0.1  GET /invoice  ARGS={'kind': 'sales'}
+2025-11-05 10:52:30  INFO  USER=1  IP=127.0.0.1  GET /static/style.css  ARGS={}
+2025-11-05 10:52:30  INFO  USER=1  IP=127.0.0.1  GET /static/sales.js  ARGS={}
+2025-11-05 10:52:30  INFO  USER=1  IP=127.0.0.1  GET /static/search.css  ARGS={}
+2025-11-05 10:52:30  INFO  USER=1  IP=127.0.0.1  GET /static/app.js  ARGS={}
+2025-11-05 10:52:31  INFO  USER=1  IP=127.0.0.1  GET /static/fonts/Yekan.woff2  ARGS={}
+2025-11-05 10:52:31  INFO  USER=1  IP=127.0.0.1  GET /static/search-unified.js  ARGS={}
+2025-11-05 10:52:34  INFO  [autosave] enabled for ['Invoice', 'CashDoc']
+2025-11-05 10:52:36  INFO  USER=1  IP=127.0.0.1  GET /api/search  ARGS={'q': '1', 'kind': 'person', 'limit': '12'}
+2025-11-05 10:52:37  INFO  USER=1  IP=127.0.0.1  GET /api/search  ARGS={'q': '100', 'kind': 'person', 'limit': '12'}
+2025-11-05 10:52:46  INFO  [autosave] enabled for ['Invoice', 'CashDoc']
+2025-11-05 10:57:24  INFO  [autosave] enabled for ['Invoice', 'CashDoc']
+2025-11-05 10:59:23  INFO  [autosave] enabled for ['Invoice', 'CashDoc']
+2025-11-05 10:59:24  INFO  [autosave] enabled for ['Invoice', 'CashDoc']
+2025-11-05 10:59:32  INFO  USER=1  IP=127.0.0.1  GET /  ARGS={}
+2025-11-05 10:59:33  INFO  USER=1  IP=127.0.0.1  GET /static/style.css  ARGS={}
+2025-11-05 10:59:34  INFO  USER=1  IP=127.0.0.1  GET /static/search.css  ARGS={}
+2025-11-05 10:59:34  INFO  USER=1  IP=127.0.0.1  GET /static/app.js  ARGS={}
+2025-11-05 10:59:35  INFO  USER=1  IP=127.0.0.1  GET /static/search-unified.js  ARGS={}
+2025-11-05 10:59:35  INFO  USER=1  IP=127.0.0.1  GET /static/fonts/Yekan.woff2  ARGS={}
+2025-11-05 10:59:43  INFO  USER=1  IP=127.0.0.1  GET /admin  ARGS={}
+2025-11-05 10:59:43  INFO  USER=1  IP=127.0.0.1  GET /static/app.js  ARGS={}
+2025-11-05 10:59:44  INFO  USER=1  IP=127.0.0.1  GET /static/style.css  ARGS={}
+2025-11-05 10:59:44  INFO  USER=1  IP=127.0.0.1  GET /static/search.css  ARGS={}
+2025-11-05 10:59:45  INFO  USER=1  IP=127.0.0.1  GET /static/fonts/Yekan.woff2  ARGS={}
+2025-11-05 10:59:45  INFO  USER=1  IP=127.0.0.1  GET /static/search-unified.js  ARGS={}
+2025-11-05 10:59:48  INFO  USER=1  IP=127.0.0.1  GET /admin/users  ARGS={}
+2025-11-05 10:59:49  INFO  USER=1  IP=127.0.0.1  GET /static/style.css  ARGS={}
+2025-11-05 10:59:49  INFO  USER=1  IP=127.0.0.1  GET /static/search.css  ARGS={}
+2025-11-05 10:59:50  INFO  USER=1  IP=127.0.0.1  GET /static/app.js  ARGS={}
+2025-11-05 10:59:50  INFO  USER=1  IP=127.0.0.1  GET /static/search-unified.js  ARGS={}
+2025-11-05 11:00:09  INFO  USER=1  IP=127.0.0.1  POST /admin/users  ARGS={}
+2025-11-05 11:00:09  INFO  USER=1  IP=127.0.0.1  GET /admin/users  ARGS={}
+2025-11-05 11:00:10  INFO  USER=1  IP=127.0.0.1  GET /static/style.css  ARGS={}
+2025-11-05 11:00:10  INFO  USER=1  IP=127.0.0.1  GET /static/search.css  ARGS={}
+2025-11-05 11:00:10  INFO  USER=1  IP=127.0.0.1  GET /static/app.js  ARGS={}
+2025-11-05 11:00:10  INFO  USER=1  IP=127.0.0.1  GET /static/search-unified.js  ARGS={}
+2025-11-05 11:00:51  INFO  USER=1  IP=127.0.0.1  POST /admin/users  ARGS={}
+2025-11-05 11:00:52  INFO  USER=1  IP=127.0.0.1  GET /admin/users  ARGS={}
+2025-11-05 11:00:53  INFO  USER=1  IP=127.0.0.1  GET /static/search.css  ARGS={}
+2025-11-05 11:00:53  INFO  USER=1  IP=127.0.0.1  GET /static/style.css  ARGS={}
+2025-11-05 11:00:53  INFO  USER=1  IP=127.0.0.1  GET /static/app.js  ARGS={}
+2025-11-05 11:00:53  INFO  USER=1  IP=127.0.0.1  GET /static/search-unified.js  ARGS={}
+2025-11-05 11:01:07  INFO  USER=1  IP=127.0.0.1  GET /  ARGS={}
+2025-11-05 11:01:07  INFO  USER=1  IP=127.0.0.1  GET /static/search.css  ARGS={}
+2025-11-05 11:01:07  INFO  USER=1  IP=127.0.0.1  GET /static/app.js  ARGS={}
+2025-11-05 11:01:08  INFO  USER=1  IP=127.0.0.1  GET /static/search-unified.js  ARGS={}
+2025-11-05 11:01:08  INFO  USER=1  IP=127.0.0.1  GET /static/style.css  ARGS={}
+2025-11-05 11:01:08  INFO  USER=1  IP=127.0.0.1  GET /static/fonts/Yekan.woff2  ARGS={}
+2025-11-05 11:01:28  INFO  USER=1  IP=127.0.0.1  GET /reports  ARGS={}
+2025-11-05 11:01:28  INFO  USER=1  IP=127.0.0.1  GET /static/style.css  ARGS={}
+2025-11-05 11:01:28  INFO  USER=1  IP=127.0.0.1  GET /static/search.css  ARGS={}
+2025-11-05 11:01:29  INFO  USER=1  IP=127.0.0.1  GET /static/fonts/Yekan.woff2  ARGS={}
+2025-11-05 11:01:29  INFO  USER=1  IP=127.0.0.1  GET /static/app.js  ARGS={}
+2025-11-05 11:01:30  INFO  USER=1  IP=127.0.0.1  GET /static/search-unified.js  ARGS={}
+2025-11-05 11:02:28  INFO  USER=1  IP=127.0.0.1  GET /sales  ARGS={}
+2025-11-05 11:02:29  INFO  USER=1  IP=127.0.0.1  GET /static/search.css  ARGS={}
+2025-11-05 11:02:29  INFO  USER=1  IP=127.0.0.1  GET /static/sales.js  ARGS={}
+2025-11-05 11:02:29  INFO  USER=1  IP=127.0.0.1  GET /static/app.js  ARGS={}
+2025-11-05 11:02:30  INFO  USER=1  IP=127.0.0.1  GET /static/style.css  ARGS={}
+2025-11-05 11:02:30  INFO  USER=1  IP=127.0.0.1  GET /static/search-unified.js  ARGS={}
+2025-11-05 11:02:30  INFO  USER=1  IP=127.0.0.1  GET /static/fonts/Yekan.woff2  ARGS={}
+2025-11-05 11:11:47  INFO  USER=1  IP=127.0.0.1  GET /  ARGS={}
+2025-11-05 11:11:48  INFO  USER=1  IP=127.0.0.1  GET /static/style.css  ARGS={}
+2025-11-05 11:11:48  INFO  USER=1  IP=127.0.0.1  GET /static/search.css  ARGS={}
+2025-11-05 11:11:49  INFO  USER=1  IP=127.0.0.1  GET /static/app.js  ARGS={}
+2025-11-05 11:11:50  INFO  USER=1  IP=127.0.0.1  GET /static/search-unified.js  ARGS={}
+2025-11-05 11:11:50  INFO  USER=1  IP=127.0.0.1  GET /static/fonts/Yekan.woff2  ARGS={}
+2025-11-05 11:12:07  INFO  USER=1  IP=127.0.0.1  GET /cash_doc  ARGS={'kind': 'receive'}
+2025-11-05 11:12:08  INFO  USER=1  IP=127.0.0.1  GET /static/style.css  ARGS={}
+2025-11-05 11:12:08  INFO  USER=1  IP=127.0.0.1  GET /static/app.js  ARGS={}
+2025-11-05 11:12:09  INFO  USER=1  IP=127.0.0.1  GET /static/search-unified.js  ARGS={}
+2025-11-05 11:12:09  INFO  USER=1  IP=127.0.0.1  GET /static/search.css  ARGS={}
+2025-11-05 11:12:09  INFO  USER=1  IP=127.0.0.1  GET /static/fonts/Yekan.woff2  ARGS={}
+2025-11-05 11:12:12  INFO  USER=1  IP=127.0.0.1  GET /reports  ARGS={}
+2025-11-05 11:12:12  INFO  USER=1  IP=127.0.0.1  GET /static/search.css  ARGS={}
+2025-11-05 11:12:12  INFO  USER=1  IP=127.0.0.1  GET /static/style.css  ARGS={}
+2025-11-05 11:12:12  INFO  USER=1  IP=127.0.0.1  GET /static/app.js  ARGS={}
+2025-11-05 11:12:13  INFO  USER=1  IP=127.0.0.1  GET /static/search-unified.js  ARGS={}
+2025-11-05 11:12:18  INFO  USER=1  IP=127.0.0.1  GET /cash/1/edit  ARGS={}
+2025-11-05 11:12:19  INFO  USER=1  IP=127.0.0.1  GET /static/style.css  ARGS={}
+2025-11-05 11:12:19  INFO  USER=1  IP=127.0.0.1  GET /static/app.js  ARGS={}
+2025-11-05 11:12:19  INFO  USER=1  IP=127.0.0.1  GET /static/search.css  ARGS={}
+2025-11-05 11:12:20  INFO  USER=1  IP=127.0.0.1  GET /static/search-unified.js  ARGS={}
+2025-11-05 11:12:27  INFO  USER=1  IP=127.0.0.1  POST /cash/1/edit  ARGS={}
+2025-11-05 11:12:27  ERROR  autosave update failed: Object of type date is not JSON serializable
+Traceback (most recent call last):
+  File "/workspaces/hesabpak/autobackup.py", line 35, in _after_update
+    autosave_record(current_app, Model.__name__, payload.get("id") or payload.get("uuid") or "upd", payload)
+  File "/workspaces/hesabpak/utils/backup_utils.py", line 180, in autosave_record
+    json.dump(payload, f, ensure_ascii=False, indent=2)
+  File "/usr/local/python/3.12.1/lib/python3.12/json/__init__.py", line 179, in dump
+    for chunk in iterable:
+  File "/usr/local/python/3.12.1/lib/python3.12/json/encoder.py", line 432, in _iterencode
+    yield from _iterencode_dict(o, _current_indent_level)
+  File "/usr/local/python/3.12.1/lib/python3.12/json/encoder.py", line 406, in _iterencode_dict
+    yield from chunks
+  File "/usr/local/python/3.12.1/lib/python3.12/json/encoder.py", line 439, in _iterencode
+    o = _default(o)
+        ^^^^^^^^^^^
+  File "/usr/local/python/3.12.1/lib/python3.12/json/encoder.py", line 180, in default
+    raise TypeError(f'Object of type {o.__class__.__name__} '
+TypeError: Object of type date is not JSON serializable
+2025-11-05 11:12:27  INFO  USER=1  IP=127.0.0.1  GET /cash/1  ARGS={}
+2025-11-05 11:12:28  INFO  USER=1  IP=127.0.0.1  GET /static/style.css  ARGS={}
+2025-11-05 11:12:28  INFO  USER=1  IP=127.0.0.1  GET /static/search.css  ARGS={}
+2025-11-05 11:12:28  INFO  USER=1  IP=127.0.0.1  GET /static/app.js  ARGS={}
+2025-11-05 11:12:28  INFO  USER=1  IP=127.0.0.1  GET /static/search-unified.js  ARGS={}
+2025-11-05 11:12:31  INFO  USER=1  IP=127.0.0.1  GET /  ARGS={}
+2025-11-05 11:12:32  INFO  USER=1  IP=127.0.0.1  GET /static/style.css  ARGS={}
+2025-11-05 11:12:32  INFO  USER=1  IP=127.0.0.1  GET /static/search.css  ARGS={}
+2025-11-05 11:12:32  INFO  USER=1  IP=127.0.0.1  GET /static/app.js  ARGS={}
+2025-11-05 11:12:32  INFO  USER=1  IP=127.0.0.1  GET /static/search-unified.js  ARGS={}
+2025-11-05 11:12:58  INFO  [autosave] enabled for ['Invoice', 'CashDoc']
+2025-11-05 11:13:08  INFO  [autosave] enabled for ['Invoice', 'CashDoc']
+2025-11-05 11:16:30  INFO  [autosave] enabled for ['Invoice', 'CashDoc']
+2025-11-05 11:17:11  INFO  [autosave] enabled for ['Invoice', 'CashDoc']
+2025-11-05 11:17:13  INFO  [autosave] enabled for ['Invoice', 'CashDoc']
+2025-11-05 11:17:21  INFO  USER=1  IP=127.0.0.1  GET /invoice  ARGS={'kind': 'sales'}
+2025-11-05 11:17:22  INFO  USER=1  IP=127.0.0.1  GET /static/sales.js  ARGS={}
+2025-11-05 11:17:22  INFO  USER=1  IP=127.0.0.1  GET /static/style.css  ARGS={}
+2025-11-05 11:17:22  INFO  USER=1  IP=127.0.0.1  GET /static/search.css  ARGS={}
+2025-11-05 11:17:22  INFO  USER=1  IP=127.0.0.1  GET /static/app.js  ARGS={}
+2025-11-05 11:17:24  INFO  USER=1  IP=127.0.0.1  GET /static/search-unified.js  ARGS={}
+2025-11-05 11:17:24  INFO  USER=1  IP=127.0.0.1  GET /static/fonts/Yekan.woff2  ARGS={}
+2025-11-05 11:17:27  INFO  USER=1  IP=127.0.0.1  GET /api/search  ARGS={'q': '1', 'kind': 'person', 'limit': '12'}
+2025-11-05 11:17:28  INFO  USER=1  IP=127.0.0.1  GET /api/search  ARGS={'q': '10', 'kind': 'person', 'limit': '12'}
+2025-11-05 11:17:28  INFO  USER=1  IP=127.0.0.1  GET /api/search  ARGS={'q': '100', 'kind': 'person', 'limit': '12'}
+2025-11-05 11:17:31  INFO  USER=1  IP=127.0.0.1  POST /api/audit/log  ARGS={}
+2025-11-05 11:17:31  INFO  [audit] sales/person-selected by 1 (93.118.107.221)
+2025-11-05 11:17:37  INFO  USER=1  IP=127.0.0.1  GET /api/search  ARGS={'q': '1', 'kind': 'item', 'limit': '15'}
+2025-11-05 11:17:37  INFO  USER=1  IP=127.0.0.1  GET /api/search  ARGS={'q': '100', 'kind': 'item', 'limit': '15'}
+2025-11-05 11:17:41  INFO  USER=1  IP=127.0.0.1  POST /api/audit/log  ARGS={}
+2025-11-05 11:17:41  INFO  [audit] sales/line-item-selected by 1 (93.118.107.221)
+2025-11-05 11:17:45  INFO  USER=1  IP=127.0.0.1  GET /api/search  ARGS={'q': '1', 'kind': 'person', 'limit': '12'}
+2025-11-05 11:17:45  INFO  USER=1  IP=127.0.0.1  GET /api/search  ARGS={'q': '100', 'kind': 'person', 'limit': '12'}
+2025-11-05 11:17:51  INFO  USER=1  IP=127.0.0.1  GET /api/search  ARGS={'q': '1', 'kind': 'person', 'limit': '12'}
+2025-11-05 11:17:52  INFO  USER=1  IP=127.0.0.1  GET /api/search  ARGS={'q': '11', 'kind': 'person', 'limit': '12'}
+2025-11-05 11:17:52  INFO  USER=1  IP=127.0.0.1  GET /api/search  ARGS={'q': '1', 'kind': 'person', 'limit': '12'}
+2025-11-05 11:17:55  INFO  USER=1  IP=127.0.0.1  POST /api/audit/log  ARGS={}
+2025-11-05 11:17:55  INFO  [audit] sales/person-selected by 1 (93.118.107.221)
+2025-11-05 11:18:02  INFO  USER=1  IP=127.0.0.1  GET /api/search  ARGS={'q': '1', 'kind': 'person', 'limit': '12'}
+2025-11-05 11:18:04  INFO  USER=1  IP=127.0.0.1  POST /api/audit/log  ARGS={}
+2025-11-05 11:18:04  INFO  [audit] sales/person-selected by 1 (93.118.107.221)

@@ -7,7 +7,7 @@ from typing import Any, Dict, List, Optional
 from flask import Flask, render_template, redirect, request, flash, session, jsonify, abort, current_app
 from flask_login import LoginManager, login_user, logout_user, login_required, UserMixin, current_user
 from dotenv import load_dotenv
-from markupsafe import Markup
+from markupsafe import Markup, escape
 from sqlalchemy import func, or_, UniqueConstraint   # <- مهم
 
 try:
@@ -159,6 +159,10 @@ print(f"[DB] Using: {DB_PATH}")
 
 USERS_FILE = str((DB_DIR / "users.json").resolve())
 LOG_FILE   = str((DB_DIR / "activity.log").resolve())
+# assistant uploads directory
+ASSISTANT_UPLOAD_DIR = DB_DIR / "uploads" / "assistant"
+ASSISTANT_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+app.config["ASSISTANT_UPLOAD_DIR"] = str(ASSISTANT_UPLOAD_DIR)
 
 # ----------------- Logging -----------------
 class LocalTimeFormatter(logging.Formatter):
@@ -1200,6 +1204,10 @@ def _apply_cash_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
 
     amount = float(plan.get("amount") or 0.0)
 
+    # validate amount must be positive
+    if amount <= 0:
+        raise ValueError("مبلغ باید بزرگ‌تر از صفر باشد.")
+
     # create doc
     doc = CashDoc(
         doc_type=doc_type,
@@ -1308,7 +1316,7 @@ def _apply_invoice_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
     if not items_payload:
         raise ValueError("هیچ ردیف کالایی معتبر نیست.")
 
-    inv = Invoice(number=number, date=inv_date, person_id=partner_entity.id, discount=0.0, tax=0.0, total=0.0)
+    inv = Invoice(number=number, date=inv_date, person_id=partner_entity.id, kind=kind, discount=0.0, tax=0.0, total=0.0)
     db.session.add(inv)
     db.session.flush()
 
@@ -1345,6 +1353,11 @@ def _apply_invoice_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
                 item.stock_qty = float(item.stock_qty or 0.0) + qty
             except Exception:
                 item.stock_qty = 0.0 + qty
+
+    # total must be positive
+    if float(total) <= 0:
+        db.session.rollback()
+        raise ValueError("جمع کل فاکتور باید بزرگ‌تر از صفر باشد.")
 
     inv.total = total
 
@@ -1867,6 +1880,10 @@ def unified_invoice():
         discount = 0.0
         tax      = 0.0
         total    = subtotal - discount + tax
+
+        if float(total) <= 0:
+            flash("جمع کل فاکتور باید بزرگ‌تر از صفر باشد.", "danger")
+            return redirect(URL_PREFIX + f"/invoice?kind={form_kind}")
 
         if Invoice.query.filter_by(number=number).first():
             number = generate_invoice_number()
@@ -2701,7 +2718,11 @@ def cash_edit(doc_id):
     doc = CashDoc.query.get_or_404(doc_id)
     if request.method == "POST":
         try:
-            doc.amount = _to_float(request.form.get("amount"), doc.amount)
+            new_amount = _to_float(request.form.get("amount"), doc.amount)
+            if new_amount <= 0:
+                flash("مبلغ سند باید بزرگ‌تر از صفر باشد.", "danger")
+                return redirect(URL_PREFIX + f"/cash/{doc.id}/edit")
+            doc.amount = new_amount
             doc.note = (request.form.get("note") or "").strip() or None
             m = (request.form.get("method") or "").strip().lower()
             if m in ("pos","cash","bank","cheque"): doc.method = m
@@ -3256,6 +3277,214 @@ def admin_users():
         assignable_permissions=ASSIGNABLE_PERMISSIONS,
         admin_username=ADMIN_USERNAME,
     )
+
+
+@app.route(URL_PREFIX + "/admin/modules", methods=["GET", "POST"])
+@login_required
+def admin_modules():
+    admin_required()
+    # load current config from settings
+    cfg = {
+        "enable_text_commands": Setting.get("assistant.enable_text_commands", "1") == "1",
+        "enable_image_commands": Setting.get("assistant.enable_image_commands", "1") == "1",
+        "enable_auto_create": Setting.get("assistant.enable_auto_create", "0") == "1",
+    }
+    if request.method == "POST":
+        enable_text = "1" if request.form.get("enable_text_commands") == "on" else "0"
+        enable_image = "1" if request.form.get("enable_image_commands") == "on" else "0"
+        enable_auto = "1" if request.form.get("enable_auto_create") == "on" else "0"
+        Setting.set("assistant.enable_text_commands", enable_text)
+        Setting.set("assistant.enable_image_commands", enable_image)
+        Setting.set("assistant.enable_auto_create", enable_auto)
+        db.session.commit()
+        flash("تنظیمات ماژول‌ها ذخیره شد.", "success")
+        return redirect(URL_PREFIX + "/admin/modules")
+
+    return render_template("admin/module_designer.html", prefix=URL_PREFIX, config=cfg)
+
+
+@app.route(URL_PREFIX + "/admin/assistant-drafts", methods=["GET"])
+@login_required
+def admin_assistant_drafts():
+    admin_required()
+    drafts_raw = Setting.get("assistant.drafts", "[]") or "[]"
+    try:
+        drafts = json.loads(drafts_raw)
+    except Exception:
+        drafts = []
+    # add index for actions
+    for i, d in enumerate(drafts):
+        d["_idx"] = i
+    return render_template("admin/assistant_drafts.html", prefix=URL_PREFIX, drafts=drafts)
+
+
+@app.route(URL_PREFIX + "/admin/assistant-drafts/<int:idx>", methods=["GET", "POST"]) 
+@login_required
+def admin_assistant_draft_view(idx: int):
+    admin_required()
+    drafts_raw = Setting.get("assistant.drafts", "[]") or "[]"
+    try:
+        drafts = json.loads(drafts_raw)
+    except Exception:
+        drafts = []
+    if idx < 0 or idx >= len(drafts):
+        flash("پیش‌نویس پیدا نشد.", "warning")
+        return redirect(URL_PREFIX + "/admin/assistant-drafts")
+
+    draft = drafts[idx]
+
+    # handle actions
+    if request.method == "POST":
+        action = request.form.get("action")
+        if action == "delete":
+            drafts.pop(idx)
+            Setting.set("assistant.drafts", json.dumps(drafts, ensure_ascii=False))
+            db.session.commit()
+            flash("پیش‌نویس حذف شد.", "success")
+            return redirect(URL_PREFIX + "/admin/assistant-drafts")
+
+        if action == "export_csv":
+            # export this draft as CSV
+            import io, csv
+            buf = io.StringIO()
+            w = csv.writer(buf)
+            w.writerow(["field", "value"])
+            for k, v in draft.items():
+                if k.startswith("_"):
+                    continue
+                w.writerow([k, v])
+            csv_data = buf.getvalue()
+            return (csv_data, 200, {
+                'Content-Type': 'text/csv; charset=utf-8',
+                'Content-Disposition': f'attachment; filename="draft_{idx}.csv"'
+            })
+
+        if action == "export_xls":
+            # quick Excel-compatible HTML table
+            rows = []
+            for k, v in draft.items():
+                if k.startswith("_"):
+                    continue
+                rows.append(f"<tr><td>{escape(str(k))}</td><td>{escape(str(v))}</td></tr>")
+            html = """
+            <html><head><meta charset='utf-8'></head><body>
+            <table>%s</table>
+            </body></html>
+            """ % ("\n".join(rows))
+            return (html, 200, {
+                'Content-Type': 'application/vnd.ms-excel; charset=utf-8',
+                'Content-Disposition': f'attachment; filename="draft_{idx}.xls"'
+            })
+
+        if action == "print":
+            # render printable HTML
+            return render_template("admin/assistant_draft_print.html", prefix=URL_PREFIX, draft=draft)
+
+        if action == "apply":
+            # attempt to apply draft only if it's structured JSON plan
+            txt = draft.get("text") or draft.get("extracted_text") or ""
+            try:
+                payload = json.loads(txt)
+            except Exception:
+                payload = None
+
+            if not payload or not isinstance(payload, dict):
+                flash("پیش‌نویس قابل اعمال نیست — متن ساختاریافته (JSON) لازم است.", "warning")
+                return redirect(URL_PREFIX + f"/admin/assistant-drafts/{idx}")
+
+            kind = payload.get("kind") or payload.get("type")
+            try:
+                if kind == "invoice":
+                    outcome = _apply_invoice_plan(payload)
+                    flash(f"فاکتور ایجاد شد (#{outcome['invoice'].id}).", "success")
+                elif kind in ("receive", "payment"):
+                    outcome = _apply_cash_plan(payload)
+                    flash(f"اسناد نقدی ایجاد شد (id={outcome['doc'].id}).", "success")
+                else:
+                    flash("نوع سند قابل اعمال مشخص نیست.", "warning")
+            except Exception as e:
+                db.session.rollback()
+                flash(f"خطا هنگام اعمال پیش‌نویس: {str(e)}", "danger")
+            # remove draft after attempt
+            try:
+                drafts.pop(idx)
+                Setting.set("assistant.drafts", json.dumps(drafts, ensure_ascii=False))
+                db.session.commit()
+            except Exception:
+                db.session.rollback()
+
+            return redirect(URL_PREFIX + "/admin/assistant-drafts")
+
+    # GET: show view
+    return render_template("admin/assistant_draft_view.html", prefix=URL_PREFIX, draft=draft, idx=idx)
+
+
+@app.route(URL_PREFIX + "/assistant/api/parse", methods=["POST"])
+@login_required
+def assistant_parse():
+    # permissions: allow admin or assistant permission
+    ensure_permission("assistant")
+
+    text = (request.form.get("text") or "").strip()
+    file = request.files.get("image")
+    saved_path = None
+    ocr_text = ""
+    if file:
+        from werkzeug.utils import secure_filename
+        fname = secure_filename(file.filename or f"upload_{int(datetime.utcnow().timestamp())}.dat")
+        dest = Path(app.config.get("ASSISTANT_UPLOAD_DIR")) / f"{int(datetime.utcnow().timestamp())}_{fname}"
+        file.save(str(dest))
+        saved_path = str(dest)
+        # try OCR if pytesseract available
+        try:
+            import pytesseract
+            from PIL import Image
+            ocr_text = pytesseract.image_to_string(Image.open(str(dest))) or ""
+        except Exception:
+            # fallback: no OCR available
+            ocr_text = ""
+
+    # combine text + ocr_text for detection
+    combined = " ".join([t for t in [text, ocr_text] if t])
+
+    # very simple keyword heuristics (Persian/English)
+    lower = combined.lower()
+    kind = "unknown"
+    if any(k in lower for k in ["فاکتور", "invoice", "صورت حساب"]):
+        kind = "invoice"
+    elif any(k in lower for k in ["دریافت", "receipt", "receipt"]):
+        kind = "receive"
+    elif any(k in lower for k in ["پرداخت", "payment"]):
+        kind = "payment"
+    elif any(k in lower for k in ["کالا", "محصول", "item"]):
+        kind = "item"
+    elif any(k in lower for k in ["شخص", "طرف حساب", "person"]):
+        kind = "person"
+
+    # prepare a draft preview payload
+    preview = {
+        "detected_kind": kind,
+        "extracted_text": combined,
+        "saved_file": saved_path,
+    }
+
+    # If auto-create enabled, create a draft (not final commit)
+    auto_create = Setting.get("assistant.enable_auto_create", "0") == "1"
+    draft_id = None
+    if auto_create and kind in ("invoice", "receive", "payment", "item", "person"):
+        # store a minimal draft in settings as JSON list (simple approach)
+        drafts_raw = Setting.get("assistant.drafts", "[]") or "[]"
+        try:
+            drafts = json.loads(drafts_raw)
+        except Exception:
+            drafts = []
+        d = {"kind": kind, "text": combined, "file": saved_path, "created_by": getattr(current_user, "username", None), "ts": datetime.utcnow().isoformat()}
+        drafts.insert(0, d)
+        Setting.set("assistant.drafts", json.dumps(drafts, ensure_ascii=False))
+        db.session.commit()
+        draft_id = 0
+
+    return jsonify({"ok": True, "preview": preview, "draft_id": draft_id})
 
 
 @app.route(URL_PREFIX + "/admin/cashboxes", methods=["GET", "POST"])

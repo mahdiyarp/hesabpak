@@ -1,0 +1,27 @@
+{% extends 'base.html' %}
+
+{% block content %}
+<h2>مشاهده پیش‌نویس</h2>
+<p><a class="btn btn-secondary" href="{{ prefix }}/admin/assistant-drafts">بازگشت به لیست</a></p>
+<div class="card">
+  <div class="card-body">
+    <h5 class="card-title">نوع: {{ draft.detected_kind or draft.kind or 'نامشخص' }}</h5>
+    <p><strong>ایجاد‌کننده:</strong> {{ draft.created_by or '—' }} &nbsp; <strong>زمان:</strong> {{ draft.ts or '—' }}</p>
+    {% if draft.file %}
+      <p><strong>فایل:</strong> <a target="_blank" href="{{ draft.file }}">نمایش فایل</a></p>
+    {% endif %}
+    <h6>متن استخراج‌شده</h6>
+    <pre style="white-space:pre-wrap;">{{ draft.text or draft.extracted_text or '' }}</pre>
+
+    <form method="post">
+      <div class="btn-group" role="group">
+        <button name="action" value="apply" class="btn btn-success">اعمال (فقط JSON ساختاری)</button>
+        <button name="action" value="export_csv" class="btn btn-outline-primary">صادر کردن CSV</button>
+        <button name="action" value="export_xls" class="btn btn-outline-primary">صادر کردن Excel</button>
+        <button name="action" value="print" class="btn btn-outline-secondary">پرینت</button>
+        <button name="action" value="delete" class="btn btn-danger" onclick="return confirm('مطمئنی حذف شود؟');">حذف</button>
+      </div>
+    </form>
+  </div>
+</div>
+{% endblock %}

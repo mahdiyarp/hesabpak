@@ -1,0 +1,34 @@
+{% extends 'admin/dashboard.html' %}
+{% block content %}
+<h2>طراحی و ویرایش ماژول‌ها</h2>
+
+<p>از این صفحه برای فعال/غیرفعال کردن قابلیت‌های دستیار و نگاشت انواع ورودی‌ها استفاده کنید.</p>
+
+<form method="post" action="{{ prefix }}/admin/modules" id="module-designer-form">
+  <div class="card">
+    <div style="padding:12px">
+      <label><input type="checkbox" name="enable_text_commands" {% if config.enable_text_commands %}checked{% endif %}> فعال کردن فرمان‌های متنی</label><br>
+      <label><input type="checkbox" name="enable_image_commands" {% if config.enable_image_commands %}checked{% endif %}> فعال کردن آپلود عکس برای ثبت فاکتور/دریافت/پرداخت</label><br>
+      <label><input type="checkbox" name="enable_auto_create" {% if config.enable_auto_create %}checked{% endif %}> ایجاد خودکار پیش‌نویس از ورودی‌ها</label>
+    </div>
+    <div style="padding:12px; border-top:1px solid #ddd; text-align:left">
+      <button class="btn btn-primary">ذخیره تنظیمات</button>
+    </div>
+  </div>
+</form>
+
+<h3 style="margin-top:18px">نگاشت‌ها (کلمات کلیدی -> نوع سند)</h3>
+<div class="card">
+  <div style="padding:12px">
+    <p>مثال: اگر عکس شامل کلمه «فاکتور» باشد، نوع = فاکتور فروش</p>
+    <!-- آینده: لیست قابل ویرایش نگاشت‌ها -->
+    <pre style="background:#f9f9f9;padding:8px">فاکتور => invoice
+رسید => receive
+پرداخت => payment
+کالا => item
+شخص => person
+    </pre>
+  </div>
+</div>
+
+{% endblock %}
