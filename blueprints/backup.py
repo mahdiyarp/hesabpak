@@ -4,6 +4,7 @@ import json
 import shutil
 from datetime import datetime
 from pathlib import Path
+from typing import Optional
 
 from flask import Blueprint, render_template, request, send_from_directory, redirect, url_for, flash, current_app
 from flask_login import login_required, current_user
@@ -17,7 +18,7 @@ from utils.date_utils import parse_gregorian_date, parse_jalali_date, to_jdate_s
 backup_bp = Blueprint("backup", __name__, template_folder="../templates")
 
 
-def _year_key(value: str | None) -> str:
+def _year_key(value: Optional[str]) -> str:
     raw = (value or "").strip()
     if not raw:
         return "unknown"
@@ -87,7 +88,7 @@ def _save_fiscal_years(years):
     Setting.set("fiscal_years", json.dumps(years, ensure_ascii=False))
 
 
-def _find_year_entry(years, start_value: str | None):
+def _find_year_entry(years, start_value: Optional[str]):
     if not start_value:
         return None
     for item in years:
@@ -204,7 +205,7 @@ def _snapshot_current_year(years):
     return folder
 
 
-def _load_snapshot_by_start(years, start_value: str | None):
+def _load_snapshot_by_start(years, start_value: Optional[str]):
     entry = _find_year_entry(years, start_value)
     if not entry:
         return None
