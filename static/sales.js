@@ -91,7 +91,14 @@
     }
   }catch(e){console.warn('inv ref gen failed', e)}
 
-  const personWrapper = document.querySelector('.sales-module .customer-lock');
+  // customer markup differs between the old sales page (uses .customer-lock)
+  // and the unified invoice page (search-wrapper + person_results placed separately).
+  // Prefer .customer-lock when present, otherwise fall back to the closest .search-wrapper
+  // around the person_search input so selection/lock UI still works.
+  let personWrapper = document.querySelector('.sales-module .customer-lock');
+  if(!personWrapper && personSearch){
+    personWrapper = personSearch.closest('.search-wrapper');
+  }
   const personSearch = document.querySelector('#person_search');
   const personBox = document.querySelector('#person_results');
   const personToken = document.querySelector('#person_token');
@@ -118,11 +125,14 @@
   }
 
   function lockCustomer(data){
-    if(!personWrapper) return;
-    personWrapper.classList.add('locked');
+    // update visual state for both .customer-lock (sales page) and
+    // the unified invoice markup where we only have a search-wrapper
+    if(personWrapper){
+      try{ personWrapper.classList.add('locked'); }catch(e){}
+    }
     if(personSearch){
       personSearch.value = `${data.code}`;
-      personSearch.readOnly = true;
+      try{ personSearch.readOnly = true; }catch(e){}
       personSearch.classList.add('locked');
     }
     if(personHint){
@@ -132,27 +142,26 @@
     if(personUnlockBtn){
       personUnlockBtn.hidden = false;
     }
-    const indicator = personWrapper.querySelector('.lock-indicator');
-    if(indicator){
-      indicator.innerHTML = `<span>🔒 مشتری قفل شد</span>`;
-    }
+    // If there is a dedicated lock-indicator inside a .customer-lock, update it.
+    try{
+      const indicator = personWrapper ? personWrapper.querySelector('.lock-indicator') : null;
+      if(indicator){ indicator.innerHTML = `<span>🔒 مشتری قفل شد</span>`; }
+    }catch(e){/* ignore DOM quirks */}
   }
 
   function unlockCustomer(){
-    if(!personWrapper) return;
-    personWrapper.classList.remove('locked');
+    // reverse the visual lock state for both markup variants
+    if(personWrapper){ try{ personWrapper.classList.remove('locked'); }catch(e){} }
     if(personSearch){
-      personSearch.readOnly = false;
+      try{ personSearch.readOnly = false; }catch(e){}
       personSearch.classList.remove('locked');
-      personSearch.focus();
+      try{ personSearch.focus(); }catch(e){}
     }
-    if(personUnlockBtn){
-      personUnlockBtn.hidden = true;
-    }
-    const indicator = personWrapper.querySelector('.lock-indicator');
-    if(indicator){
-      indicator.textContent = '';
-    }
+    if(personUnlockBtn){ personUnlockBtn.hidden = true; }
+    try{
+      const indicator = personWrapper ? personWrapper.querySelector('.lock-indicator') : null;
+      if(indicator){ indicator.textContent = ''; }
+    }catch(e){}
   }
 
   if(personSearch){
