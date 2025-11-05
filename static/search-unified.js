@@ -27,8 +27,9 @@
   }
 
   function renderResults(box, rows, type){
-    const list = $(".search-results", box);
-    if(!rows.length){ list.innerHTML=""; list.hidden=true; return; }
+    // resolve list element (may be legacy wrapper)
+    const list = $(".search-results", box) || (box._legacyWrapper && box._legacyWrapper.querySelector('.search-results'));
+  if(!rows.length){ list.innerHTML=""; try{ list.hidden = true; list.style.display = 'none'; }catch(e){} return; }
 
     list.innerHTML = rows.map(r=>{
       const detailParts = [];
@@ -54,7 +55,23 @@
         </div>`;
     }).join("");
 
-    list.hidden = false;
+    try{ list.hidden = false; list.style.display = 'block'; }catch(e){}
+
+    // If this is a legacy wrapper (list inside arbitrary container), position
+    // the dropdown fixed at input coords so it's not clipped by parent overflow.
+    try{
+      if(box && box._legacyWrapper){
+        const inp = box._legacyWrapper.querySelector('input');
+        if(inp){
+          const rect = inp.getBoundingClientRect();
+          list.style.position = 'fixed';
+          list.style.left = `${rect.left}px`;
+          list.style.top = `${rect.bottom + 6}px`;
+          list.style.width = `${rect.width}px`;
+          list.style.zIndex = 2147483648;
+        }
+      }
+    }catch(e){}
 
     // انتخاب با موس
     $$(".res-item", list).forEach(it=>{
@@ -93,33 +110,49 @@
   }
 
   function initOne(wrap){
-    const type = wrap.getAttribute("data-type") || "item";
+    // normalize the incoming wrapper: caller may pass .search-wrap (container),
+    // .search-box (inner), or .search-wrapper (legacy per-field). Detect and
+    // unify to a `wrap` that we can use to find type/sort attrs.
+    let container = wrap;
+    if(wrap && wrap.classList && wrap.classList.contains('search-box')){
+      container = wrap.parentElement || wrap;
+    }
+    const type = (container.getAttribute && container.getAttribute("data-type")) || "item";
     // support two markup styles:
     // 1) unified: .search-box > .search-input, .search-results, .search-selected-id
     // 2) legacy: .search-wrapper > input (search input) and .search-results
-    let box = $(".search-box", wrap);
+    let box = $(".search-box", container);
     let legacy = false;
+    let sw = null;
     if(!box){
-      // try legacy structure
-      const sw = $(".search-wrapper", wrap) || $(".search-wrapper");
-      if(!sw) return;
+      // if the container itself is a legacy .search-wrapper, use it directly
+      if(container.classList && container.classList.contains('search-wrapper')){
+        sw = container;
+      }else{
+        // otherwise try to find a legacy wrapper inside this container
+        sw = $(".search-wrapper", container) || null;
+      }
+      if(!sw){
+        // nothing to init here
+        return;
+      }
       legacy = true;
       // create a small facade object to map to expected selectors
       box = document.createElement('div');
       box.className = 'search-box legacy-box';
       // attach references for later lookup
       box._legacyWrapper = sw;
-      // insert into DOM for event handling convenience
+      // append a small sentinel element so queries using box can run
       sw.appendChild(box);
     }
 
-    const input = legacy ? box._legacyWrapper.querySelector('input') : $(".search-input", box);
-    const list = legacy ? (box._legacyWrapper.querySelector('.search-results') || document.createElement('div')) : $(".search-results", box);
+  const input = legacy ? (box._legacyWrapper.querySelector('input') || box._legacyWrapper.querySelector('input[type=text]')) : $(".search-input", box);
+  const list = legacy ? (box._legacyWrapper.querySelector('.search-results') || box._legacyWrapper.querySelector('.item_results')) : $(".search-results", box);
     if(!input || !list) return;
 
     const onSearch = debounce(async ()=>{
       const q = input.value.trim();
-      if(q.length<1){ list.hidden=true; list.innerHTML=""; return; }
+  if(q.length<1){ list.innerHTML=""; try{ list.hidden=true; list.style.display='none'; }catch(e){} return; }
       const rows = await fetchResults(type, q, wrap.getAttribute('data-sort'));
       renderResults(box, rows, type);
     }, 220);
@@ -141,8 +174,8 @@
 
     document.addEventListener("click",(ev)=>{
       // if legacy wrapper, hide when clicking outside that wrapper
-      const container = legacy ? box._legacyWrapper : wrap;
-      if(!container.contains(ev.target)) list.hidden=true;
+      const containerEl = legacy ? box._legacyWrapper : container;
+      try{ if(!containerEl.contains(ev.target)) list.hidden=true; }catch(e){}
     });
   }
 
@@ -175,6 +208,7 @@
   }
 
   document.addEventListener("DOMContentLoaded", ()=>{
-    $$(".search-wrap").forEach(initOne);
+    // initialize any of the search host elements we support
+    $$(".search-wrap, .search-box, .search-wrapper").forEach(initOne);
   });
 })();

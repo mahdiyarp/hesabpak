@@ -45,6 +45,20 @@
     {% endif %}
   </div>
 </header>
+<!-- top menu (quick links) -->
+<nav class="top-menu">
+  {% set perms = user_permissions or [] %}
+  <div class="top-menu-inner">
+    {% if 'sales' in perms %}<a href="{{ prefix }}/invoice?kind=sales">فروش</a>{% endif %}
+    {% if 'purchase' in perms %}<a href="{{ prefix }}/invoice?kind=purchase">خرید</a>{% endif %}
+    {% if 'receive' in perms %}<a href="{{ prefix }}/cash_doc?kind=receive">دریافت</a>{% endif %}
+    {% if 'payment' in perms %}<a href="{{ prefix }}/cash_doc?kind=payment">پرداخت</a>{% endif %}
+    {% if 'reports' in perms %}<a href="{{ prefix }}/reports">گزارشات</a>{% endif %}
+    {% if 'assistant' in perms %}<a href="{{ prefix }}/assistant">دستیار</a>{% endif %}
+    {% if 'entities' in perms %}<a href="{{ prefix }}/entities?kind=item">ثبت کالا</a>{% endif %}
+    {% if 'admin' in perms %}<a href="{{ prefix }}/admin">مدیریت</a>{% endif %}
+  </div>
+</nav>
 
 <!-- نوار جست‌وجوی سراسری -->
 <div class="search-wrap global-search">

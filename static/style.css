@@ -1209,6 +1209,15 @@ body.theme-slate .search-results{ border-color:rgba(61,126,230,0.22); box-shadow
   max-height: 320px;
 }
 
+/* Top menu styles */
+.top-menu{ background: transparent; border-bottom: 1px solid rgba(0,0,0,0.04); }
+.top-menu-inner{ max-width: 1200px; margin: 0 auto; padding: 6px 18px; display:flex; gap:12px; align-items:center; }
+.top-menu-inner a{ color: var(--c-mid); padding: 8px 12px; border-radius: 8px; text-decoration: none; font-weight:600; }
+.top-menu-inner a:hover{ background: var(--c-accent-soft); color: var(--c-accent); }
+
+/* Ensure global search results (fixed) show above overlay */
+.search-results{ z-index: 2147483648; }
+
 /* Make invoice card wider and take available width inside module */
 .invoice-module .invoice-card {
   width: 100%;
