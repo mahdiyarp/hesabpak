@@ -94,11 +94,27 @@
 
   function initOne(wrap){
     const type = wrap.getAttribute("data-type") || "item";
-    const box  = $(".search-box", wrap);
-    if(!box) return; // ساختار نوار جستجو با نسخه عمومی متفاوت است
+    // support two markup styles:
+    // 1) unified: .search-box > .search-input, .search-results, .search-selected-id
+    // 2) legacy: .search-wrapper > input (search input) and .search-results
+    let box = $(".search-box", wrap);
+    let legacy = false;
+    if(!box){
+      // try legacy structure
+      const sw = $(".search-wrapper", wrap) || $(".search-wrapper");
+      if(!sw) return;
+      legacy = true;
+      // create a small facade object to map to expected selectors
+      box = document.createElement('div');
+      box.className = 'search-box legacy-box';
+      // attach references for later lookup
+      box._legacyWrapper = sw;
+      // insert into DOM for event handling convenience
+      sw.appendChild(box);
+    }
 
-    const input= $(".search-input", box);
-    const list = $(".search-results", box);
+    const input = legacy ? box._legacyWrapper.querySelector('input') : $(".search-input", box);
+    const list = legacy ? (box._legacyWrapper.querySelector('.search-results') || document.createElement('div')) : $(".search-results", box);
     if(!input || !list) return;
 
     const onSearch = debounce(async ()=>{
@@ -124,8 +140,38 @@
     });
 
     document.addEventListener("click",(ev)=>{
-      if(!wrap.contains(ev.target)) list.hidden=true;
+      // if legacy wrapper, hide when clicking outside that wrapper
+      const container = legacy ? box._legacyWrapper : wrap;
+      if(!container.contains(ev.target)) list.hidden=true;
     });
+  }
+
+  // Override selectResult to support populating legacy hidden inputs
+  const _origSelect = selectResult;
+  function selectResult(box, id, title){
+    // try to find a selected-id input inside the box's parent
+    try{
+      const parent = box.parentElement || box._legacyWrapper || document;
+      const sel = parent.querySelector('.search-selected-id') || parent.querySelector('.item_id') || parent.querySelector('#person_token') || parent.querySelector('input[name="person_token"]');
+      if(sel){
+        // .item_id or #person_token or .search-selected-id
+        if(sel.classList.contains('item_id')){
+          sel.value = id;
+        }else{
+          sel.value = id;
+        }
+      } else {
+        // fallback: set global #person_token if present
+        const globalPerson = document.querySelector('#person_token');
+        if(globalPerson) globalPerson.value = id;
+      }
+    }catch(e){ /* ignore */ }
+    // update visible input if available
+    try{ const inp = box.querySelector('.search-input') || (box._legacyWrapper && box._legacyWrapper.querySelector('input')); if(inp) inp.value = title || ""; }catch(e){}
+    // hide results
+    try{ const list = box.querySelector('.search-results') || (box._legacyWrapper && box._legacyWrapper.querySelector('.search-results')); if(list) list.hidden = true; }catch(e){}
+    // dispatch event for modules
+    try{ box.dispatchEvent(new CustomEvent("search:selected", { bubbles:true, detail:{ id, title } })); }catch(e){}
   }
 
   document.addEventListener("DOMContentLoaded", ()=>{
