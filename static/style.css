@@ -1169,3 +1169,73 @@ body.theme-slate .search-results{ border-color:rgba(61,126,230,0.22); box-shadow
   color: var(--c-muted);
   margin-top: 2px;
 }
+
+/* ------------------------------------------------------------------
+   Unified module wrapper
+   Apply a consistent boxed look for application modules (except heavy
+   admin pages). Modules will be centered, padded and visually grouped.
+   ------------------------------------------------------------------ */
+.module-wrap {
+  max-width: 1200px;
+  margin: 18px auto;
+  padding: 18px;
+  border-radius: 12px;
+  background: var(--c-white);
+  box-shadow: 0 8px 24px rgba(28,30,37,0.06);
+  border: 1px solid var(--c-border);
+}
+
+.module-wrap .card {
+  background: transparent;
+  box-shadow: none;
+  padding: 0;
+}
+
+/* Make inputs and tables slightly larger and more touch-friendly inside modules */
+.module-wrap .inp {
+  height: 44px;
+  font-size: 15px;
+}
+
+.module-wrap .sale-table thead th,
+.module-wrap .sale-table tbody td {
+  font-size: 14px;
+  padding: 12px 14px;
+}
+
+/* Ensure search dropdown shows above the card */
+.module-wrap .search-results {
+  z-index: 2147483647;
+  max-height: 320px;
+}
+
+/* Make invoice card wider and take available width inside module */
+.invoice-module .invoice-card {
+  width: 100%;
+  padding: 1rem;
+}
+
+@media (max-width: 900px) {
+  .module-wrap { margin: 12px; padding: 12px; }
+  .module-wrap .inp { height: 40px; }
+}
+
+/* =========================================================
+   Invoice module specific tweaks
+   Keep the invoice card wide (use full container width), increase
+   input/table sizes for readability and ensure search dropdown is
+   displayed above other elements.
+   ========================================================= */
+.invoice-module .invoice-card{
+  width: 100%;
+  max-width: none;
+  padding: 18px;
+  box-shadow: 0 14px 36px rgba(45,48,50,0.08);
+  border-radius: 14px;
+}
+.invoice-module .invoice-top .lbl{ font-size: 14px; }
+.invoice-module .inp{ height: 44px; font-size: 15px; }
+.invoice-module .sale-table thead th, .invoice-module .sale-table tbody td{ font-size: 15px; }
+.invoice-module .search-wrapper{ z-index: 2147483648; }
+.invoice-module .search-results{ max-height: 300px; }
+.invoice-module .sale-table col:first-child{ min-width: 260px; }
