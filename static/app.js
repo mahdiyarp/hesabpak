@@ -280,11 +280,8 @@ function badgeOf(t){
     formStates.set(form, !!v);
     anyDirty = Array.from(formStates.values()).some(x=>x===true);
     // toggle beforeunload handler
-    if(anyDirty){
-      window.addEventListener('beforeunload', beforeUnloadHandler);
-    } else {
-      window.removeEventListener('beforeunload', beforeUnloadHandler);
-    }
+    // NOTE: disabled beforeunload prompt by design (user requested no-browser-warning)
+    // Previously we attached beforeunload handler here; intentionally left NO-OP.
   }
 
   function beforeUnloadHandler(e){
@@ -325,26 +322,24 @@ function badgeOf(t){
     // Snapshot will be cleared on explicit reset/cancel or via server-driven hint in future.
 
     // intercept cancel buttons/links inside form (data-action="cancel" or .btn-cancel)
+    // intercept cancel buttons/links inside form (data-action="cancel" or .btn-cancel)
+    // Behavior changed: do not show confirmation prompt; just clear saved snapshot and proceed.
     form.addEventListener('click', function(ev){
       const t = ev.target.closest('[data-action="cancel"], .btn-cancel');
       if(!t) return;
-      // if form has data, confirm
       const isDirty = formStates.get(form) === true;
-      if(!isDirty) return; // allow
-      ev.preventDefault();
-      const ok = confirm('فرم پر شده است و تغییرات ذخیره نشده‌اند. آیا می‌خواهید لغو کنید و اطلاعات فرم پاک شوند؟');
-      if(ok){
+      if(isDirty){
         try{ sessionStorage.removeItem(key); setDirty(form, false); }catch(e){}
-        // if it's a link, follow href
-        if(t.tagName.toLowerCase() === 'a' && t.href){ window.location.href = t.href; }
-        // if it's a button of type reset, perform reset and allow default
-        if(t.tagName.toLowerCase() === 'button' && (t.type || '').toLowerCase() === 'reset'){
-          form.reset();
-        }
-        // otherwise if data-target provided, navigate
-        const href = t.getAttribute('data-href') || t.getAttribute('href');
-        if(href){ window.location.href = href; }
       }
+      // proceed with default action: follow link, reset, or navigate as expected
+      // if it's a link, follow href
+      if(t.tagName.toLowerCase() === 'a' && t.href){ ev.preventDefault(); window.location.href = t.href; }
+      // if it's a button of type reset, perform reset
+      if(t.tagName.toLowerCase() === 'button' && (t.type || '').toLowerCase() === 'reset'){
+        form.reset();
+      }
+      const href = t.getAttribute('data-href') || t.getAttribute('href');
+      if(href){ ev.preventDefault(); window.location.href = href; }
     });
 
     // allow explicit reset clears
