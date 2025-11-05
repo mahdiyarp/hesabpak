@@ -22,7 +22,11 @@
   <div class="stats-grid">
     <div class="stat-card">
       <span class="stat-title">مبلغ فروش امروز</span>
-      <span class="stat-value">{{ today_stats.invoice_total|sep }} <span class="unit">تومان</span></span>
+      <span class="stat-value">{{ today_stats.sales_total|sep }} <span class="unit">تومان</span></span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-title">مبلغ خرید امروز</span>
+      <span class="stat-value">{{ today_stats.purchase_total|sep }} <span class="unit">تومان</span></span>
     </div>
     <div class="stat-card">
       <span class="stat-title">جمع دریافتی امروز</span>
@@ -57,6 +61,7 @@
   <div class="balances-card card">
     <h2>موجودی صندوق‌ها</h2>
     <div class="table-wrapper">
+      {% if cash_balances and cash_balances|length > 0 %}
       <table>
         <thead>
           <tr>
@@ -77,6 +82,9 @@
           {% endfor %}
         </tbody>
       </table>
+      {% else %}
+      <div class="empty-state">هیچ صندوقی ثبت نشده است. برای مدیریت صندوق‌ها به بخش مدیریت صندوق‌ها مراجعه کنید.</div>
+      {% endif %}
     </div>
   </div>
   {% endif %}
@@ -156,6 +164,17 @@
       data: {
         labels: chartData.labels,
         datasets: [
+          {
+            type: 'line',
+            label: 'مبلغ خرید',
+            data: chartData.purchaseTotals || [],
+            borderColor: '#DD6B5A',
+            backgroundColor: 'rgba(221,107,90,0.08)',
+            borderWidth: 2,
+            tension: 0.35,
+            yAxisID: 'y',
+            fill: true,
+          },
           {
             type: 'line',
             label: 'مبلغ فروش',

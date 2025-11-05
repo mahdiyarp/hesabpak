@@ -211,13 +211,16 @@ function badgeOf(t){
 
 // =============== Form persistence (per-page, sessionStorage) ===============
 (function(){
-  const forms = $all('form[data-persist="true"]');
+  // By default persist all forms unless explicitly disabled with data-persist="false".
+  const forms = $all('form:not([data-persist="false"])');
   if(!forms.length) return;
   if(typeof window.sessionStorage === 'undefined') return;
 
   function storageKey(form){
     const custom = form.getAttribute('data-persist-key');
-    return `hp:persist:${custom || window.location.pathname}`;
+    // include action or id to distinguish multiple forms on same path
+    const ident = custom || form.getAttribute('id') || form.getAttribute('name') || window.location.pathname;
+    return `hp:persist:${ident}`;
   }
 
   function collect(form){
@@ -225,7 +228,13 @@ function badgeOf(t){
     Array.from(form.elements).forEach(el => {
       if(!el.name || el.disabled) return;
       if(el.type === 'password') return;
-      if(el.name.endsWith('[]')) return;
+      // keep array-like values as joined string; restoration preserves simple use-cases
+      if(el.name.endsWith('[]')){
+        // gather all elements with same name
+        const vals = Array.from(form.elements).filter(x=>x.name===el.name && !x.disabled).map(x=> x.type==='checkbox'? (x.checked?x.value:null) : x.value).filter(Boolean);
+        data[el.name] = vals;
+        return;
+      }
       if(el.type === 'checkbox'){
         data[el.name] = el.checked;
       }else if(el.type === 'radio'){
@@ -242,6 +251,17 @@ function badgeOf(t){
     Array.from(form.elements).forEach(el => {
       if(!el.name || !(el.name in data)) return;
       const val = data[el.name];
+      if(Array.isArray(val)){
+        if(el.name.endsWith('[]')){
+          // set first matching element values; for more complex cases apps can opt-out
+          if(el.type === 'checkbox' || el.type === 'radio'){
+            el.checked = val.indexOf(el.value) !== -1;
+          }else{
+            el.value = val[0] || '';
+          }
+          return;
+        }
+      }
       if(el.type === 'checkbox'){
         el.checked = !!val;
       }else if(el.type === 'radio'){
@@ -252,24 +272,109 @@ function badgeOf(t){
     });
   }
 
+  // track overall dirty state across forms to warn on unload
+  let anyDirty = false;
+  const formStates = new Map();
+
+  function setDirty(form, v){
+    formStates.set(form, !!v);
+    anyDirty = Array.from(formStates.values()).some(x=>x===true);
+    // toggle beforeunload handler
+    if(anyDirty){
+      window.addEventListener('beforeunload', beforeUnloadHandler);
+    } else {
+      window.removeEventListener('beforeunload', beforeUnloadHandler);
+    }
+  }
+
+  function beforeUnloadHandler(e){
+    // Standard browser confirmation
+    const msg = 'فرم پر شده ذخیره نشده است. آیا مطمئن هستید که از صفحه خارج می‌شوید؟';
+    (e || window.event).returnValue = msg; // Gecko + IE
+    return msg; // Webkit, Safari, Chrome
+  }
+
   forms.forEach(form => {
+    // skip forms that explicitly opt out
+    if(form.getAttribute('data-persist') === 'false') return;
     const key = storageKey(form);
     try {
       const saved = sessionStorage.getItem(key);
-      if(saved){ restore(form, JSON.parse(saved)); }
+      if(saved){ restore(form, JSON.parse(saved)); setDirty(form, true); }
     } catch(err){ console.warn('restore form failed', err); }
 
     const handler = () => {
       try {
         const snapshot = collect(form);
         sessionStorage.setItem(key, JSON.stringify(snapshot));
+        // if any field has value mark dirty
+        const hasValue = Object.keys(snapshot).some(k=>{
+          const v = snapshot[k];
+          if(v === null || v === undefined) return false;
+          if(Array.isArray(v)) return v.length>0;
+          if(typeof v === 'boolean') return v === true;
+          return String(v||'').trim().length>0;
+        });
+        setDirty(form, hasValue);
       } catch(err){ console.warn('persist form failed', err); }
     };
     form.addEventListener('input', handler);
     form.addEventListener('change', handler);
-    form.addEventListener('submit', () => {
-      try { sessionStorage.removeItem(key); } catch(err){ /* ignore */ }
+
+    // NOTE: Do NOT clear on submit so values persist if server-side validation fails.
+    // Snapshot will be cleared on explicit reset/cancel or via server-driven hint in future.
+
+    // intercept cancel buttons/links inside form (data-action="cancel" or .btn-cancel)
+    form.addEventListener('click', function(ev){
+      const t = ev.target.closest('[data-action="cancel"], .btn-cancel');
+      if(!t) return;
+      // if form has data, confirm
+      const isDirty = formStates.get(form) === true;
+      if(!isDirty) return; // allow
+      ev.preventDefault();
+      const ok = confirm('فرم پر شده است و تغییرات ذخیره نشده‌اند. آیا می‌خواهید لغو کنید و اطلاعات فرم پاک شوند؟');
+      if(ok){
+        try{ sessionStorage.removeItem(key); setDirty(form, false); }catch(e){}
+        // if it's a link, follow href
+        if(t.tagName.toLowerCase() === 'a' && t.href){ window.location.href = t.href; }
+        // if it's a button of type reset, perform reset and allow default
+        if(t.tagName.toLowerCase() === 'button' && (t.type || '').toLowerCase() === 'reset'){
+          form.reset();
+        }
+        // otherwise if data-target provided, navigate
+        const href = t.getAttribute('data-href') || t.getAttribute('href');
+        if(href){ window.location.href = href; }
+      }
     });
+
+    // allow explicit reset clears
+    form.addEventListener('reset', ()=>{
+      try{ sessionStorage.removeItem(key); setDirty(form, false); }catch(e){}
+    });
+  });
+
+})();
+
+// =============== Basic client-side validation for required person selection ===============
+(function(){
+  const forms = $all('form');
+  if(!forms.length) return;
+  forms.forEach(form => {
+    form.addEventListener('submit', function(ev){
+      // if form explicitly opts out
+      if(form.getAttribute('data-validate-person') === 'false') return;
+      // detect hidden person fields by common names
+      const personField = form.querySelector('input[name="person_token"], input[name="person_id"], input[name="person"]');
+      if(!personField) return; // not a person-bound form
+      const val = (personField.value || '').trim();
+      const isNumericId = /^\d+$/.test(val);
+      if(!val || !isNumericId){
+        ev.preventDefault();
+        alert('لطفاً طرف حساب معتبر انتخاب کنید.');
+        try { personField.focus(); } catch(e){}
+        return false;
+      }
+    }, true);
   });
 })();
 

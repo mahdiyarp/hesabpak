@@ -11,7 +11,7 @@
   <!-- مقدار prefix را امن به JS بده؛ اگر تهی بود "" -->
   <script>
     (function(){
-      var p = {{ (prefix or "")|tojson }};
+      var p = {{ (prefix or "")|tojson|safe }};
       // هر حالت خراب را خنثی کن
       if(!p || p === "undefined" || p === "/undefined") p = "";
       // نگذاریم اسلش اضافه/کم بیفتد
@@ -21,7 +21,7 @@
   </script>
   <script>
   window.IS_ADMIN = {{ 'true' if is_admin else 'false' }};
-  window.USER_PERMISSIONS = {{ (user_permissions or [])|tojson }};
+  window.USER_PERMISSIONS = {{ (user_permissions or [])|tojson|safe }};
   </script>
   <script defer src="{{ prefix }}/static/search-unified.js"></script>
 
@@ -89,16 +89,16 @@
 <nav class="mobile-menu" style="padding:0 12px;">
   {% set perms = user_permissions or [] %}
   {% if 'sales' in perms %}
-  <a class="menu-item" href="{{ prefix }}/sales"><span class="icon">🧾</span><span class="label">فروش</span><span class="chev">›</span></a>
+  <a class="menu-item" href="{{ prefix }}/invoice?kind=sales"><span class="icon">🧾</span><span class="label">فروش</span><span class="chev">›</span></a>
   {% endif %}
   {% if 'receive' in perms %}
-  <a class="menu-item" href="{{ prefix }}/receive"><span class="icon">➕</span><span class="label">دریافت</span><span class="chev">›</span></a>
+  <a class="menu-item" href="{{ prefix }}/cash_doc?kind=receive"><span class="icon">➕</span><span class="label">دریافت</span><span class="chev">›</span></a>
   {% endif %}
   {% if 'purchase' in perms %}
-  <a class="menu-item" href="{{ prefix }}/purchase"><span class="icon">🛒</span><span class="label">خرید</span><span class="chev">›</span></a>
+  <a class="menu-item" href="{{ prefix }}/invoice?kind=purchase"><span class="icon">🛒</span><span class="label">خرید</span><span class="chev">›</span></a>
   {% endif %}
   {% if 'payment' in perms %}
-  <a class="menu-item" href="{{ prefix }}/payment"><span class="icon">➖</span><span class="label">پرداخت</span><span class="chev">›</span></a>
+  <a class="menu-item" href="{{ prefix }}/cash_doc?kind=payment"><span class="icon">➖</span><span class="label">پرداخت</span><span class="chev">›</span></a>
   {% endif %}
   {% if 'reports' in perms %}
   <a class="menu-item" href="{{ prefix }}/reports"><span class="icon">📊</span><span class="label">گزارشات</span><span class="chev">›</span></a>

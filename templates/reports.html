@@ -3,18 +3,60 @@
 
 <h2>گزارشات</h2>
 
-<form method="get" action="" class="filters">
-  <input class="inp" name="q" value="{{ q or '' }}" placeholder="شماره فاکتور/سند، نام یا کد طرف حساب یا شماره چک" style="max-width:260px">
-  <select class="inp" name="type" style="max-width:160px">
-    <option value="all"     {{ 'selected' if (typ or 'all')=='all' }}>همه</option>
-    <option value="invoice" {{ 'selected' if typ=='invoice' }}>فاکتور فروش</option>
-    <option value="receive" {{ 'selected' if typ=='receive' }}>دریافت</option>
-    <option value="payment" {{ 'selected' if typ=='payment' }}>پرداخت</option>
+<form method="get" action="" class="filters" data-persist="true" data-persist-key="reports">
+  <input class="inp" name="q" value="{{ q or '' }}" placeholder="شماره، نام/کد طرف حساب، شماره چک" style="max-width:260px">
+  <select class="inp" name="type" style="max-width:180px">
+    <option value="all"      {{ 'selected' if (typ or 'all')=='all' }}>همه اسناد</option>
+    <option value="invoice"  {{ 'selected' if typ=='invoice' }}>فاکتور (فروش و خرید)</option>
+    <option value="sales"    {{ 'selected' if typ=='sales' }}>فاکتور فروش</option>
+    <option value="purchase" {{ 'selected' if typ=='purchase' }}>فاکتور خرید</option>
+    <option value="receive"  {{ 'selected' if typ=='receive' }}>دریافت وجه</option>
+    <option value="payment"  {{ 'selected' if typ=='payment' }}>پرداخت وجه</option>
+    <option value="cheque"   {{ 'selected' if typ=='cheque' }}>فقط چک‌ها</option>
   </select>
-  <input class="inp" type="date" name="from" value="{{ dfrom or '' }}" style="max-width:160px">
-  <input class="inp" type="date" name="to"   value="{{ dto   or '' }}" style="max-width:160px">
+  <!-- Jalali visible inputs and hidden Gregorian targets -->
+  <input class="inp" id="from_jalali" data-jalali-input data-jalali-target="from" placeholder="از تاریخ (شمسی)" style="max-width:160px" autocomplete="off">
+  <input type="hidden" name="from" id="from" value="{{ dfrom or '' }}">
+  <input class="inp" id="to_jalali" data-jalali-input data-jalali-target="to" placeholder="تا تاریخ (شمسی)" style="max-width:160px" autocomplete="off">
+  <input type="hidden" name="to" id="to" value="{{ dto or '' }}">
+
+  <input class="inp" name="amount_min" value="{{ amount_min or '' }}" placeholder="حداقل مبلغ" style="max-width:120px">
+  <input class="inp" name="amount_max" value="{{ amount_max or '' }}" placeholder="حداکثر مبلغ" style="max-width:120px">
+
+  <select class="inp" name="method" style="max-width:140px">
+    <option value=""       {{ 'selected' if (method or '')=='' }}>همه روش‌ها</option>
+    <option value="cash"   {{ 'selected' if method=='cash' }}>نقدی</option>
+    <option value="pos"    {{ 'selected' if method=='pos' }}>پوز</option>
+    <option value="bank"   {{ 'selected' if method=='bank' }}>بانک</option>
+    <option value="cheque" {{ 'selected' if method=='cheque' }}>چک</option>
+  </select>
+
+  <select class="inp" name="cashbox_id" style="max-width:200px">
+    <option value="">همه صندوق‌ها</option>
+    {% for box in cashboxes %}
+      <option value="{{ box.id }}" {{ 'selected' if (cashbox_id|default(''))== (box.id|string) }}>
+        {{ box.name }}{% if box.kind=='bank' and box.bank_name %} — {{ box.bank_name }}{% endif %}
+      </option>
+    {% endfor %}
+  </select>
+
+  <select class="inp" name="per_page" style="max-width:120px">
+    {% set p = per_page|default(100) %}
+    <option value="20"    {{ 'selected' if p==20 }}>۲۰</option>
+    <option value="50"    {{ 'selected' if p==50 }}>۵۰</option>
+    <option value="100"   {{ 'selected' if p==100 }}>۱۰۰</option>
+    <option value="200"   {{ 'selected' if p==200 }}>۲۰۰</option>
+  </select>
+
   <button class="btn-primary" style="width:auto;padding:0 16px">جستجو</button>
 </form>
+
+<div class="stats-grid" style="margin-top:8px">
+  <div class="stat-card"><span class="stat-title">جمع فروش</span><span class="stat-value">{{ (totals.sales or 0)|sep }} <span class="unit">تومان</span></span></div>
+  <div class="stat-card"><span class="stat-title">جمع خرید</span><span class="stat-value">{{ (totals.purchase or 0)|sep }} <span class="unit">تومان</span></span></div>
+  <div class="stat-card"><span class="stat-title">جمع دریافتی</span><span class="stat-value">{{ (totals.receive or 0)|sep }} <span class="unit">تومان</span></span></div>
+  <div class="stat-card"><span class="stat-title">جمع پرداختی</span><span class="stat-value">{{ (totals.payment or 0)|sep }} <span class="unit">تومان</span></span></div>
+</div>
 
 {% if rows and rows|length %}
 <div class="table-responsive">
@@ -26,13 +68,19 @@
         <th>تاریخ</th>
         <th>طرف حساب</th>
         <th>مبلغ/جمع</th>
+        <th>وضعیت طرف حساب</th>
         <th class="center">عملیات</th>
       </tr>
     </thead>
     <tbody>
       {% for r in rows %}
-        {% set label = 'فاکتور' if r.kind=='invoice' else ('دریافت' if r.kind=='receive' else ('پرداخت' if r.kind=='payment' else r.kind)) %}
-        {% set view  = prefix ~ '/invoice/' ~ r.id if r.kind=='invoice' else prefix ~ '/cash/' ~ r.id %}
+        {% if r.kind == 'invoice' %}
+          {% set label = 'فاکتور ' ~ ('فروش' if r.invoice_kind=='sales' else 'خرید') %}
+          {% set view  = prefix ~ '/invoice/' ~ r.id %}
+        {% else %}
+          {% set label = ('دریافت' if r.kind=='receive' else ('پرداخت' if r.kind=='payment' else r.kind)) %}
+          {% set view  = prefix ~ '/cash/' ~ r.id %}
+        {% endif %}
         {% set edit  = view ~ '/edit' %}
         <tr>
           <td>{{ label }}</td>
@@ -45,9 +93,21 @@
               </div>
             {% endif %}
           </td>
-        <td>{{ r.date|fa_digits }}</td>
-        <td>{{ r.person }}</td>
-        <td>{{ r.amount|sep }}</td>
+          <td>{{ r.date|fa_digits }}</td>
+          <td>
+            {{ r.person }}
+            {% if r.person_balance is defined and r.person_balance is not none %}
+              <div class="muted" style="font-size:12px;margin-top:4px;">مانده: {{ r.person_balance|int|fa_digits }}</div>
+            {% endif %}
+          </td>
+          <td>{{ r.amount|sep }}</td>
+          <td>
+            {% if r.person_balance is defined %}
+              {{ (r.person_balance >= 0) | ternary('بستانکار', 'بدهکار') }}
+            {% else %}
+              —
+            {% endif %}
+          </td>
           <td class="center">
             <div class="ops">
               <a href="{{ view }}">مشاهده</a>
@@ -58,6 +118,20 @@
       {% endfor %}
     </tbody>
   </table>
+</div>
+
+<div class="pager" style="display:flex;gap:8px;align-items:center;justify-content:center;margin-top:10px;">
+  {% if has_prev %}
+    <a class="btn" href="?{{ request.query_string.decode('utf-8')|replace('page=' ~ page, 'page=' ~ (page-1)) }}">← قبلی</a>
+  {% else %}
+    <span class="btn" style="opacity:0.5;pointer-events:none;">← قبلی</span>
+  {% endif %}
+  <span class="muted">صفحه {{ page|fa_digits }}</span>
+  {% if has_next %}
+    <a class="btn" href="?{{ request.query_string.decode('utf-8')|replace('page=' ~ page, 'page=' ~ (page+1)) if 'page=' in request.query_string.decode('utf-8') else (request.query_string.decode('utf-8') ~ ('&' if request.query_string else '') ~ 'page=' ~ (page+1)) }}">بعدی →</a>
+  {% else %}
+    <span class="btn" style="opacity:0.5;pointer-events:none;">بعدی →</span>
+  {% endif %}
 </div>
 {% else %}
   <div class="card">موردی یافت نشد.</div>

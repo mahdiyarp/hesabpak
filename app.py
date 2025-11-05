@@ -19,7 +19,7 @@ from extensions import db
 from utils.backup_utils import ensure_dirs, autosave_record
 from blueprints.backup import backup_bp
 from autobackup import init_autobackup, register_autobackup_for
-from models.backup_models import Setting, BackupLog
+from models.backup_models import Setting, BackupLog, UserSettings
 from utils.num_words_fa import amount_to_toman_words
 from utils.date_utils import (
     to_jdate_str,
@@ -210,6 +210,7 @@ class Invoice(db.Model):
     number    = db.Column(db.String(32), nullable=False, unique=True)
     date      = db.Column(db.Date, nullable=False)
     person_id = db.Column(db.Integer, db.ForeignKey("entities.id"), nullable=False)  # فقط type=person
+    kind      = db.Column(db.String(16), nullable=False, default="sales")  # sales | purchase
     discount  = db.Column(db.Float, nullable=False, default=0.0)
     tax       = db.Column(db.Float, nullable=False, default=0.0)
     total     = db.Column(db.Float, nullable=False, default=0.0)
@@ -282,6 +283,17 @@ class AuditEvent(db.Model):
     context    = db.Column(db.String(64), nullable=False)
     action     = db.Column(db.String(64), nullable=False)
     payload    = db.Column(db.Text, nullable=True)
+
+
+class SiteView(db.Model):
+    __tablename__ = "site_views"
+    id = db.Column(db.Integer, primary_key=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.now, index=True)
+    ip = db.Column(db.String(64), nullable=True)
+    path = db.Column(db.String(255), nullable=False)
+    method = db.Column(db.String(8), nullable=False)
+    user = db.Column(db.String(64), nullable=True)
+
 
 # --- Backup wiring (once) ---
 ensure_dirs(app)
@@ -649,6 +661,23 @@ AI_RESPONSE_SCHEMA = {
                 },
                 "required": ["kind", "partner", "items"],
             },
+            "cash": {
+                "type": ["null", "object"],
+                "additionalProperties": False,
+                "properties": {
+                    "doc_type": {"type": "string", "enum": ["receive", "payment", "unknown"], "default": "unknown"},
+                    "number": {"type": ["string", "null"]},
+                    "date": {"type": ["string", "null"]},
+                    "person": {"type": ["null", "object"], "properties": {"name": {"type": "string"}, "code": {"type": ["string", "null"]}}, "required": ["name"]},
+                    "amount": {"type": "number"},
+                    "method": {"type": ["string", "null"]},
+                    "bank_account": {"type": ["string", "null"]},
+                    "bank_name": {"type": ["string", "null"]},
+                    "cheque_number": {"type": ["string", "null"]},
+                    "cheque_due": {"type": ["string", "null"]}
+                },
+                "required": ["amount", "person"]
+            },
             "actions": {
                 "type": "array",
                 "default": [],
@@ -712,7 +741,7 @@ def _build_openai_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any
         attachments = msg.get("attachments") or []
         content: List[Dict[str, Any]] = []
         if text:
-            content.append({"type": "text", "text": text})
+            content.append({"type": "input_text", "text": text})
         for att in attachments:
             atype = (att.get("type") or "").strip().lower()
             if atype != "image":
@@ -726,10 +755,14 @@ def _build_openai_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any
                 base64.b64decode(data, validate=True)
             except Exception:
                 continue
-            content.append({"type": "input_image", "image_base64": data, "mime_type": mime})
+            # The Responses API variant in some deployments expects an image URL
+            # rather than a bespoke 'image_base64' field. Use a data: URL which
+            # is widely supported as an image_url fallback.
+            content.append({"type": "input_image", "image_url": f"data:{mime};base64,{data}"})
         if not content and not text:
             continue
-        prepared.append({"role": role, "content": content or [{"type": "text", "text": text or ""}]})
+        # attach the prepared content for this message
+        prepared.append({"role": role, "content": content or [{"type": "input_text", "text": text or ""}]})
     return prepared
 
 
@@ -810,35 +843,68 @@ def _apply_assistant_actions(actions: List[Dict[str, Any]]) -> Dict[str, Any]:
 
 
 def _call_openai_assistant(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
-    api_key = _openai_api_key()
+    # دریافت تنظیمات شخصی کاربر
+    username = getattr(current_user, "username", "admin")
+    user_settings = UserSettings.get_for_user(username)
+    
+    # استفاده از کلید API شخصی یا سراسری
+    api_key = user_settings.openai_api_key if user_settings.openai_api_key else _openai_api_key()
     if not api_key:
         raise RuntimeError("کلید API تنظیم نشده است.")
     if OpenAI is None:
         raise RuntimeError("کتابخانه openai نصب نشده است.")
 
+    # استفاده از مدل شخصی یا پیش‌فرض
+    model = user_settings.openai_model if user_settings.openai_model else _assistant_model()
+    
+    # استفاده از دستورالعمل سیستمی شخصی یا پیش‌فرض
+    if user_settings.system_prompt:
+        system_prompt = user_settings.system_prompt
+    else:
+        system_prompt = (
+            "شما دستیار هوشمند حساب‌پاک هستید. وظیفه شما استخراج اطلاعات فاکتورهای خرید و فروش"
+            " از متن یا تصویر و هدایت کاربر برای ثبت آن‌ها در سیستم است. همواره پاسخ نهایی را"
+            " به زبان فارسی بدهید و در صورت ابهام، مواردی که نیاز به تأیید دارند را مشخص کنید."
+            " اگر تصویر فاکتور دریافت کردید مقادیر تاریخ، شماره فاکتور، نام خریدار/فروشنده و"
+            " اقلام را با قیمت و تعداد استخراج کنید. در صورت نبود قیمت، مقدار null قرار دهید."
+            " در صورتی که کاربر درخواست ویرایش رابط کاربری یا کد برنامه را داشت، ابتدا راهکار"
+            " را توضیح دهید و سپس در فیلد actions فهرستی از عملیات فایل را ارائه کنید. برای"
+            " عملیات write_file محتوای کامل فایل هدف را ارسال کنید و مسیرها را نسبت به ریشه"
+            " پروژه بنویسید."
+        )
+
     client = OpenAI(api_key=api_key)
-    system_prompt = (
-        "شما دستیار هوشمند حساب‌پاک هستید. وظیفه شما استخراج اطلاعات فاکتورهای خرید و فروش"
-        " از متن یا تصویر و هدایت کاربر برای ثبت آن‌ها در سیستم است. همواره پاسخ نهایی را"
-        " به زبان فارسی بدهید و در صورت ابهام، مواردی که نیاز به تأیید دارند را مشخص کنید."
-        " اگر تصویر فاکتور دریافت کردید مقادیر تاریخ، شماره فاکتور، نام خریدار/فروشنده و"
-        " اقلام را با قیمت و تعداد استخراج کنید. در صورت نبود قیمت، مقدار null قرار دهید."
-        " در صورتی که کاربر درخواست ویرایش رابط کاربری یا کد برنامه را داشت، ابتدا راهکار"
-        " را توضیح دهید و سپس در فیلد actions فهرستی از عملیات فایل را ارائه کنید. برای"
-        " عملیات write_file محتوای کامل فایل هدف را ارسال کنید و مسیرها را نسبت به ریشه"
-        " پروژه بنویسید."
-    )
 
     request_messages = [
-        {"role": "system", "content": [{"type": "text", "text": system_prompt}]}
+        {"role": "system", "content": [{"type": "input_text", "text": system_prompt}]}
     ] + _build_openai_messages(messages)
 
-    response = client.responses.create(
-        model=_assistant_model(),
-        input=request_messages,
-        max_output_tokens=800,
-        response_format={"type": "json_schema", "json_schema": AI_RESPONSE_SCHEMA},
-    )
+    # استفاده از temperature شخصی
+    temperature = user_settings.temperature if user_settings.temperature is not None else 0.7
+    
+    # استفاده از max_tokens شخصی یا پیش‌فرض
+    max_tokens = user_settings.max_tokens if user_settings.max_tokens else 800
+
+    # Try to request a JSON-schema formatted response when supported.
+    # Some installed versions of the OpenAI Python client don't accept the
+    # `response_format` keyword and will raise TypeError. In that case fall
+    # back to calling without it and parse the plain text output.
+    try:
+        response = client.responses.create(
+            model=model,
+            input=request_messages,
+            max_output_tokens=max_tokens,
+            temperature=temperature,
+            response_format={"type": "json_schema", "json_schema": AI_RESPONSE_SCHEMA},
+        )
+    except TypeError:
+        app.logger.warning("OpenAI client.responses.create() doesn't support 'response_format'; falling back to plain response")
+        response = client.responses.create(
+            model=model,
+            input=request_messages,
+            max_output_tokens=max_tokens,
+            temperature=temperature,
+        )
 
     content: Optional[str] = None
     try:
@@ -850,26 +916,58 @@ def _call_openai_assistant(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
             else:
                 block_content = getattr(first_block, "content", None) or []
             for part in block_content:
+                # parts can be dicts or objects depending on client
                 if isinstance(part, dict):
-                    maybe_text = part.get("text")
+                    maybe_text = part.get("text") or part.get("content")
                 else:
-                    maybe_text = getattr(part, "text", None)
+                    maybe_text = getattr(part, "text", None) or getattr(part, "content", None)
                 if maybe_text:
                     content = maybe_text
                     break
     except Exception:
-        logging.exception("failed to parse response.output for assistant reply")
+        app.logger.exception("failed to parse response.output for assistant reply")
 
     if not content:
         content = getattr(response, "output_text", None)
 
     if not content:
-        raise RuntimeError("ساختار پاسخ نامعتبر است.")
+        app.logger.warning("empty response from OpenAI assistant")
+        # Return a minimal fallback reply instead of raising, so caller can show
+        # the assistant's lack of content gracefully.
+        return {"reply": "", "needs_confirmation": False}
 
+    # Try to parse JSON first. If it fails, attempt to extract a JSON substring
+    # from the response text (common when the assistant includes explanation)
     try:
         return json.loads(content)
     except Exception as exc:
-        raise RuntimeError(f"امکان خواندن پاسخ وجود ندارد: {exc}")
+        app.logger.warning("failed to json-decode assistant content, trying to extract JSON: %s", exc)
+        # Try to find a JSON object or array in the text
+        try:
+            import re
+
+            m = re.search(r"(\{.*\}|\[.*\])", content, re.DOTALL)
+            if m:
+                candidate = m.group(1)
+                try:
+                    return json.loads(candidate)
+                except Exception as exc2:
+                    app.logger.warning("extracted JSON still invalid: %s", exc2)
+        except Exception:
+            app.logger.exception("error while trying to extract JSON from assistant content")
+
+        # As a last resort, return the plain text as the assistant reply so the
+        # application can continue (the UI will show the text). Include a few
+        # safe defaults for other expected fields.
+        app.logger.warning("Returning plain-text assistant reply as fallback; raw content: %s", content)
+        return {
+            "reply": content,
+            "needs_confirmation": False,
+            "follow_up": None,
+            "uncertain_fields": [],
+            "actions": [],
+            "invoice": None,
+        }
 
 def _parse_invoice_date(raw: Optional[str]) -> Optional[date]:
     if not raw:
@@ -1006,6 +1104,132 @@ def _prepare_invoice_plan(invoice_data: Dict[str, Any]) -> Dict[str, Any]:
         }
 
     return plan
+
+
+def _prepare_cash_plan(cash_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize assistant-provided cash/transfer payload into an internal plan."""
+    doc_type = (cash_data.get("doc_type") or "unknown").strip().lower()
+    if doc_type not in ("receive", "payment"):
+        doc_type = "unknown"
+
+    person_payload = cash_data.get("person") or {}
+    person_info = _resolve_entity("person", person_payload)
+
+    amount = _to_float(cash_data.get("amount"), 0.0)
+    number = (cash_data.get("number") or "").strip()
+    parsed_date = _parse_invoice_date(cash_data.get("date"))
+    method = (cash_data.get("method") or "").strip().lower() or None
+    bank_account = (cash_data.get("bank_account") or "").strip() or None
+    bank_name = (cash_data.get("bank_name") or "").strip() or None
+    cheque_number = (cash_data.get("cheque_number") or "").strip() or None
+    cheque_due = _parse_invoice_date(cash_data.get("cheque_due"))
+
+    plan = {
+        "doc_type": doc_type,
+        "number": number or None,
+        "date": parsed_date.isoformat() if parsed_date else None,
+        "person": {
+            "name": person_info["name"],
+            "code": person_info["code"] or None,
+            "entity_id": person_info["entity"].id if person_info["entity"] else None,
+            "exists": bool(person_info["entity"]),
+        },
+        "amount": float(amount or 0.0),
+        "method": method,
+        "bank_account": bank_account,
+        "bank_name": bank_name,
+        "cheque_number": cheque_number,
+        "cheque_due": cheque_due.isoformat() if cheque_due else None,
+    }
+
+    if not person_info["entity"]:
+        plan["missing_person"] = {"name": person_info["name"], "code": person_info["code"] or None}
+
+    return plan
+
+
+def _apply_cash_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
+    """Apply a prepared cash plan: create CashDoc and update balances."""
+    doc_type = (plan.get("doc_type") or "unknown").strip().lower()
+    if doc_type not in ("receive", "payment"):
+        # default to receive for positive amounts if unspecified
+        doc_type = "receive" if float(plan.get("amount") or 0.0) >= 0 else "payment"
+
+    person_entity = None
+    if plan.get("person") and plan["person"].get("entity_id"):
+        person_entity = Entity.query.get(int(plan["person"]["entity_id"]))
+    if not person_entity:
+        # create or fetch by name/code
+        pname = plan.get("person", {}).get("name") or ""
+        pcode = plan.get("person", {}).get("code") or ""
+        person_info = _resolve_entity("person", {"name": pname, "code": pcode})
+        if person_info.get("entity"):
+            person_entity = person_info["entity"]
+        else:
+            # create person
+            person_entity = _ensure_entity("person", {"name": pname, "code": pcode or None})
+
+    # find matching cashbox by account_no, iban, or bank name
+    cb = None
+    acct = (plan.get("bank_account") or "")
+    bname = (plan.get("bank_name") or "")
+    if acct:
+        cb = CashBox.query.filter((CashBox.account_no == acct) | (CashBox.iban == acct)).filter(CashBox.is_active == True).first()
+    if not cb and bname:
+        cb = CashBox.query.filter(CashBox.bank_name == bname, CashBox.is_active == True).first()
+
+    # if method indicates cheque, set cheque fields
+    cheque_number = plan.get("cheque_number")
+    cheque_due = None
+    if plan.get("cheque_due"):
+        try:
+            cheque_due = parse_gregorian_date(plan.get("cheque_due"), allow_none=True) or parse_jalali_date(plan.get("cheque_due"), allow_none=True)
+        except Exception:
+            cheque_due = None
+
+    # generate number if missing
+    number = plan.get("number") or None
+    if not number:
+        number = jalali_reference("RCV" if doc_type=="receive" else "PAY", datetime.utcnow())
+
+    date_val = None
+    if plan.get("date"):
+        date_val = parse_gregorian_date(plan.get("date"), allow_none=True) or parse_jalali_date(plan.get("date"), allow_none=True)
+    if date_val is None:
+        date_val = datetime.utcnow().date()
+
+    amount = float(plan.get("amount") or 0.0)
+
+    # create doc
+    doc = CashDoc(
+        doc_type=doc_type,
+        number=number,
+        date=date_val,
+        person_id=person_entity.id if person_entity else None,
+        amount=amount,
+        method=plan.get("method"),
+        note=None,
+        cashbox_id=cb.id if cb else None,
+        cheque_number=cheque_number or None,
+        cheque_due_date=cheque_due,
+    )
+    db.session.add(doc)
+
+    # update person's balance same as receive/payment handlers
+    try:
+        if doc_type == "receive":
+            person_entity.balance = float(person_entity.balance or 0.0) - float(amount)
+        else:
+            person_entity.balance = float(person_entity.balance or 0.0) + float(amount)
+    except Exception:
+        # best-effort
+        if doc_type == "receive":
+            person_entity.balance = -float(amount)
+        else:
+            person_entity.balance = float(amount)
+
+    db.session.commit()
+    return {"doc": doc, "person": person_entity, "cashbox": cb}
 
 def _ensure_entity(kind: str, data: Dict[str, Any]) -> Entity:
     name = (data.get("name") or "").strip()
@@ -1154,6 +1378,15 @@ def _find_entity_by_code_or_id(kind: str, code_or_id: str):
 def _req_log():
     if current_user.is_authenticated:
         app.logger.info(f"USER={current_user.username}  IP={request.remote_addr}  {request.method} {request.path}  ARGS={dict(request.args)}")
+    else:
+        app.logger.info(f"ANON  IP={request.remote_addr}  {request.method} {request.path}  ARGS={dict(request.args)}")
+    # record site view for analytics
+    try:
+        sv = SiteView(ip=request.headers.get('X-Forwarded-For', request.remote_addr or ''), path=request.path, method=request.method, user=(getattr(current_user, 'username', None) if current_user and getattr(current_user, 'is_authenticated', False) else None))
+        db.session.add(sv)
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
 
 def _level_by_code(code: str) -> int:
     L = len(code or "")
@@ -1231,7 +1464,18 @@ def index():
         .first()
     ) or (0, 0.0)
     today_invoice_count = int(inv_stats[0] or 0)
+    # split today's totals into sales vs purchases using number prefix heuristic
     today_invoice_total = float(inv_stats[1] or 0.0)
+    today_sales_total = float(
+        db.session.query(func.coalesce(func.sum(Invoice.total), 0.0))
+        .filter(Invoice.date == today, Invoice.kind == 'sales')
+        .scalar() or 0.0
+    )
+    today_purchase_total = float(
+        db.session.query(func.coalesce(func.sum(Invoice.total), 0.0))
+        .filter(Invoice.date == today, Invoice.kind == 'purchase')
+        .scalar() or 0.0
+    )
 
     def _sum_cash(doc_type, dt=today):
         return float(
@@ -1244,35 +1488,24 @@ def index():
     today_receives_total = _sum_cash("receive")
     today_payments_total = _sum_cash("payment")
 
-    method_balances = []
-    for method, label in CASH_METHOD_LABELS.items():
-        receive_sum = float(
-            db.session.query(func.coalesce(func.sum(CashDoc.amount), 0.0))
-            .filter(
-                CashDoc.doc_type == "receive",
-                func.lower(func.coalesce(CashDoc.method, "")) == method,
-            )
-            .scalar()
-            or 0.0
-        )
-        payment_sum = float(
-            db.session.query(func.coalesce(func.sum(CashDoc.amount), 0.0))
-            .filter(
-                CashDoc.doc_type == "payment",
-                func.lower(func.coalesce(CashDoc.method, "")) == method,
-            )
-            .scalar()
-            or 0.0
-        )
-        method_balances.append(
-            {
-                "method": method,
-                "label": label,
-                "receive": receive_sum,
-                "payment": payment_sum,
-                "balance": receive_sum - payment_sum,
-            }
-        )
+    # Dashboard: show a single aggregated row for all active cashboxes (unified view)
+    active_ids = [b.id for b in CashBox.query.filter_by(is_active=True).all()]
+    q_recv = db.session.query(func.coalesce(func.sum(CashDoc.amount), 0.0)).filter(CashDoc.doc_type == "receive")
+    q_pay  = db.session.query(func.coalesce(func.sum(CashDoc.amount), 0.0)).filter(CashDoc.doc_type == "payment")
+    if active_ids:
+        q_recv = q_recv.filter(CashDoc.cashbox_id.in_(active_ids))
+        q_pay  = q_pay.filter(CashDoc.cashbox_id.in_(active_ids))
+    receive_sum = float(q_recv.scalar() or 0.0)
+    payment_sum = float(q_pay.scalar() or 0.0)
+    method_balances = [
+        {
+            "method": "all",
+            "label": "همه صندوق‌ها",
+            "receive": receive_sum,
+            "payment": payment_sum,
+            "balance": receive_sum - payment_sum,
+        }
+    ]
 
     due_date_expr = func.coalesce(CashDoc.cheque_due_date, CashDoc.date)
     upcoming_receive_cheques = (
@@ -1311,19 +1544,25 @@ def index():
     chart_days = [today - timedelta(days=i) for i in range(6, -1, -1)]
     chart_labels = [to_jdate_str(d) for d in chart_days]
 
-    sales_rows = (
-        db.session.query(
-            Invoice.date,
-            func.count(Invoice.id),
-            func.coalesce(func.sum(Invoice.total), 0.0),
-        )
+    # build per-day sales and purchase totals and invoice counts
+    inv_rows = (
+        db.session.query(Invoice.date, Invoice.kind, func.coalesce(Invoice.total, 0.0))
         .filter(Invoice.date >= chart_days[0], Invoice.date <= today)
-        .group_by(Invoice.date)
-        .order_by(Invoice.date)
         .all()
     )
-    sales_total_map = {row[0]: float(row[2] or 0.0) for row in sales_rows}
-    sales_count_map = {row[0]: int(row[1] or 0) for row in sales_rows}
+    sales_total_map = {}
+    purchase_total_map = {}
+    sales_count_map = {}
+    for dt, kind, total in inv_rows:
+        try:
+            total_val = float(total or 0.0)
+        except Exception:
+            total_val = 0.0
+        if (kind or '') == 'sales':
+            sales_total_map[dt] = float(sales_total_map.get(dt, 0.0) + total_val)
+            sales_count_map[dt] = int(sales_count_map.get(dt, 0) + 1)
+        else:
+            purchase_total_map[dt] = float(purchase_total_map.get(dt, 0.0) + total_val)
 
     cash_rows = (
         db.session.query(
@@ -1346,6 +1585,7 @@ def index():
             payment_map[dt] = total_val
 
     chart_sales_totals = [sales_total_map.get(day, 0.0) for day in chart_days]
+    chart_purchase_totals = [purchase_total_map.get(day, 0.0) for day in chart_days]
     chart_invoice_counts = [sales_count_map.get(day, 0) for day in chart_days]
     chart_receives_totals = [receive_map.get(day, 0.0) for day in chart_days]
     chart_payments_totals = [payment_map.get(day, 0.0) for day in chart_days]
@@ -1357,6 +1597,8 @@ def index():
         today_stats={
             "invoice_count": today_invoice_count,
             "invoice_total": today_invoice_total,
+            "sales_total": today_sales_total,
+            "purchase_total": today_purchase_total,
             "receives_total": today_receives_total,
             "payments_total": today_payments_total,
             "net_cash": today_receives_total - today_payments_total,
@@ -1367,6 +1609,7 @@ def index():
         chart_data={
             "labels": chart_labels,
             "salesTotals": chart_sales_totals,
+            "purchaseTotals": chart_purchase_totals,
             "invoiceCounts": chart_invoice_counts,
             "receivesTotals": chart_receives_totals,
             "paymentsTotals": chart_payments_totals,
@@ -1523,16 +1766,48 @@ def developer_console():
         return redirect(URL_PREFIX + "/developer")
     return render_template("developer.html", prefix=URL_PREFIX)
 
-# ----------------- Sales -----------------
-@app.route(URL_PREFIX + "/sales", methods=["GET", "POST"])
+# ----------------- Unified Invoice (Sales & Purchase) -----------------
+@app.route(URL_PREFIX + "/invoice", methods=["GET", "POST"])
+@app.route(URL_PREFIX + "/sales", methods=["GET", "POST"])  # backward compatibility
+@app.route(URL_PREFIX + "/purchase", methods=["GET", "POST"])  # backward compatibility
 @login_required
-def sales():
-    ensure_permission("sales")
+def unified_invoice():
+    # Determine invoice kind from query param or route
+    kind = (request.args.get("kind") or "sales").strip().lower()
+    if kind not in ("sales", "purchase"):
+        kind = "sales"
+    
+    # Check permission
+    if kind == "sales":
+        ensure_permission("sales")
+    else:
+        ensure_permission("purchase")
+    
     now_info = _now_info()
-    inv_number_generated = jalali_reference("INV", now_info["datetime"])
+    
+    # Generate invoice number
+    if kind == "sales":
+        inv_number_generated = jalali_reference("INV", now_info["datetime"])
+    else:
+        # Purchase number logic
+        nums = []
+        for (num,) in db.session.query(Invoice.number).filter(Invoice.kind == "purchase").all():
+            s = (num or "").strip()
+            if s.isdigit():
+                try:
+                    nums.append(int(s))
+                except:
+                    pass
+        inv_number_generated = str(max(nums) + 1) if nums else "1"
+    
     allow_negative = _allow_negative_sales()
 
     if request.method == "POST":
+        # Get kind from form
+        form_kind = (request.form.get("invoice_kind") or kind).strip().lower()
+        if form_kind not in ("sales", "purchase"):
+            form_kind = kind
+        
         number = (request.form.get("inv_number") or "").strip() or inv_number_generated
         inv_date = parse_gregorian_date(request.form.get("inv_date_greg"))
 
@@ -1545,8 +1820,9 @@ def sales():
             if pcode:
                 person = Entity.query.filter_by(type="person", code=pcode).first()
         if not person or person.type != "person":
-            flash("لطفاً مشتری معتبر انتخاب کنید.", "danger")
-            return redirect(URL_PREFIX + "/sales")
+            person_label = "مشتری" if form_kind == "sales" else "تأمین‌کننده"
+            flash(f"لطفاً {person_label} معتبر انتخاب کنید.", "danger")
+            return redirect(URL_PREFIX + f"/invoice?kind={form_kind}")
 
         item_ids    = request.form.getlist("item_id[]")
         item_codes  = request.form.getlist("item_code[]")
@@ -1569,13 +1845,14 @@ def sales():
                 item = Entity.query.filter_by(type="item", code=icode).first()
 
             if (item is not None) and item.type == "item" and q > 0 and up >= 0:
-                if not allow_negative:
+                # Stock check only for sales
+                if form_kind == "sales" and not allow_negative:
                     base_stock = float(pending_stock.get(item.id, item.stock_qty or 0.0))
                     if base_stock - q < -1e-6:
                         flash(f"موجودی کالا «{item.name}» برای فروش کافی نیست.", "danger")
-                        return redirect(URL_PREFIX + "/sales")
+                        return redirect(URL_PREFIX + f"/invoice?kind={form_kind}")
                     pending_stock[item.id] = base_stock - q
-                else:
+                elif form_kind == "sales":
                     current = float(pending_stock.get(item.id, item.stock_qty or 0.0))
                     pending_stock[item.id] = current - q
                 rows.append({"item": item, "unit_price": up, "qty": q})
@@ -1584,7 +1861,7 @@ def sales():
 
         if not rows:
             flash("لطفاً حداقل یک ردیف کالای معتبر با تعداد وارد کنید.", "danger")
-            return redirect(URL_PREFIX + "/sales")
+            return redirect(URL_PREFIX + f"/invoice?kind={form_kind}")
 
         subtotal = sum(r["unit_price"] * r["qty"] for r in rows)
         discount = 0.0
@@ -1594,8 +1871,15 @@ def sales():
         if Invoice.query.filter_by(number=number).first():
             number = generate_invoice_number()
 
-        inv = Invoice(number=number, date=inv_date, person_id=person.id,
-                      discount=discount, tax=tax, total=total)
+        inv = Invoice(
+            number=number,
+            date=inv_date,
+            person_id=person.id,
+            kind=form_kind,
+            discount=discount,
+            tax=tax,
+            total=total,
+        )
         db.session.add(inv)
         db.session.flush()
 
@@ -1613,10 +1897,17 @@ def sales():
                 line_total=line_total
             ))
 
-            try:
-                item.stock_qty = float(item.stock_qty or 0.0) - qty
-            except Exception:
-                item.stock_qty = 0.0 - qty
+            # Update stock: sales decreases, purchase increases
+            if form_kind == "sales":
+                try:
+                    item.stock_qty = float(item.stock_qty or 0.0) - qty
+                except Exception:
+                    item.stock_qty = 0.0 - qty
+            else:  # purchase
+                try:
+                    item.stock_qty = float(item.stock_qty or 0.0) + qty
+                except Exception:
+                    item.stock_qty = 0.0 + qty
 
             ph = PriceHistory.query.filter_by(person_id=person.id, item_id=item.id).first()
             if not ph:
@@ -1625,134 +1916,39 @@ def sales():
             else:
                 ph.last_price = up
 
-        try:
-            person.balance = float(person.balance or 0.0) + float(total)
-        except Exception:
-            person.balance = float(total)
-
-        db.session.commit()
-
-        flash(
-            f"✅ فاکتور «{inv.number}» ثبت شد برای «{person.name}» — {amount_to_toman_words(total)}",
-            "success",
-        )
-        return redirect(URL_PREFIX + f"/receive?invoice_id={inv.id}")
-
-    return render_template(
-        "sales.html",
-        prefix=URL_PREFIX,
-        inv_number=inv_number_generated,
-        current_jdate=now_info["jalali_date"],
-        current_gdate=now_info["greg_date"],
-    )
-
-# ----------------- Purchase -----------------
-@app.route(URL_PREFIX + "/purchase", methods=["GET","POST"])
-@login_required
-def purchase_stub():
-    ensure_permission("purchase")
-    now_info = _now_info()
-    def _next_purchase_number():
-        nums = []
-        for (num,) in db.session.query(Invoice.number).all():
-            s = (num or "").strip()
-            if s.isdigit():
-                try:
-                    nums.append(int(s))
-                except:
-                    pass
-        return str(max(nums) + 1) if nums else "1"
-
-    inv_number_generated = _next_purchase_number()
-
-    if request.method == "POST":
-        number = (request.form.get("inv_number") or "").strip() or inv_number_generated
-        inv_date = parse_gregorian_date(request.form.get("inv_date_greg"))
-
-        pid = (request.form.get("person_token") or "").strip()
-        person = None
-        if pid.isdigit():
-            person = Entity.query.get(int(pid))
-        if not person:
-            pcode = (request.form.get("person_code") or "").strip()
-            if pcode:
-                person = Entity.query.filter_by(type="person", code=pcode).first()
-        if not person or person.type != "person":
-            flash("لطفاً تأمین‌کننده معتبر انتخاب کنید.", "danger")
-            return redirect(URL_PREFIX + "/purchase")
-
-        item_ids    = request.form.getlist("item_id[]")
-        item_codes  = request.form.getlist("item_code[]")
-        unit_prices = request.form.getlist("unit_price[]")
-        qtys        = request.form.getlist("qty[]")
-
-        def _to_float(s, dv=0.0):
+        # Update person balance: sales increases balance (customer owes), purchase decreases (we owe vendor)
+        if form_kind == "sales":
             try:
-                return float(str(s).replace(",", ""))
-            except:
-                return dv
-
-        rows = []
-        MAX_ROWS = 15
-        for i in range(min(len(item_ids), len(item_codes), len(unit_prices), len(qtys))):
-            iid  = (item_ids[i] or "").strip()
-            icode= (item_codes[i] or "").strip()
-            up   = _to_float(unit_prices[i], 0.0)
-            q    = _to_float(qtys[i], 0.0)
-
-            itm = None
-            if iid.isdigit():
-                itm = Entity.query.get(int(iid))
-            if (not itm) and icode:
-                itm = Entity.query.filter_by(type="item", code=icode).first()
-
-            if itm is not None and itm.type == "item" and q > 0:
-                rows.append({"item": itm, "unit_price": max(0.0, up), "qty": q})
-            if len(rows) >= MAX_ROWS:
-                break
-
-        if not rows:
-            flash("حداقل یک ردیف کالا لازم است.", "warning")
-            return redirect(URL_PREFIX + "/purchase")
-
-        inv = Invoice(number=number, date=inv_date, person_id=person.id, discount=0.0, tax=0.0, total=0.0)
-        db.session.add(inv); db.session.flush()
-
-        total = 0.0
-        for r in rows:
-            item = r["item"]
-            up   = float(r["unit_price"])
-            qty  = float(r["qty"])
-            line_total = up * qty
-            total += line_total
-
-            db.session.add(InvoiceLine(invoice_id=inv.id, item_id=item.id, unit_price=up, qty=qty))
-
-            try:
-                item.stock_qty = float(item.stock_qty or 0.0) + qty
+                person.balance = float(person.balance or 0.0) + float(total)
             except Exception:
-                item.stock_qty = 0.0 + qty
-
-        inv.total = total
-
-        try:
-            person.balance = float(person.balance or 0.0) - float(total)
-        except Exception:
-            person.balance = -float(total)
+                person.balance = float(total)
+        else:  # purchase
+            try:
+                person.balance = float(person.balance or 0.0) - float(total)
+            except Exception:
+                person.balance = -float(total)
 
         db.session.commit()
+
+        action_label = "فروش" if form_kind == "sales" else "خرید"
         flash(
-            f"✅ فاکتور خرید «{inv.number}» ثبت شد — {amount_to_toman_words(total)}",
+            f"✅ فاکتور {action_label} «{inv.number}» ثبت شد برای «{person.name}» — {amount_to_toman_words(total)}",
             "success",
         )
-        return redirect(URL_PREFIX + f"/payment?invoice_id={inv.id}")
+        
+        # Redirect to appropriate cash doc
+        if form_kind == "sales":
+            return redirect(URL_PREFIX + f"/receive?invoice_id={inv.id}")
+        else:
+            return redirect(URL_PREFIX + f"/payment?invoice_id={inv.id}")
 
     return render_template(
-        "purchase.html",
+        "invoice.html",
         prefix=URL_PREFIX,
         inv_number=inv_number_generated,
         current_jdate=now_info["jalali_date"],
         current_gdate=now_info["greg_date"],
+        invoice_kind=kind,
     )
 
 # ----------------- Entities CRUD -----------------
@@ -1764,19 +1960,79 @@ def entities_list():
     if kind not in ("person","item"):
         kind = "item"
     q = (request.args.get("q") or "").strip()
+    try:
+        page = int(request.args.get("page") or 1)
+    except Exception:
+        page = 1
+    page = max(1, page)
+    try:
+        per_page = int(request.args.get("per_page") or 50)
+    except Exception:
+        per_page = 50
+    per_page = max(10, min(per_page, 500))
+
     base = Entity.query.filter_by(type=kind)
 
     if q:
         starts = base.filter(or_(Entity.code.ilike(f"{q}%"), Entity.name.ilike(f"{q}%")))
         contains = base.filter(or_(Entity.code.ilike(f"%{q}%"), Entity.name.ilike(f"%{q}%")))
-        rows = list(starts.order_by(Entity.level.asc(), Entity.code.asc()).limit(500).all())
+        rows = list(starts.order_by(Entity.level.asc(), Entity.code.asc()).all())
         seen = {r.id for r in rows}
-        for e in contains.order_by(Entity.level.asc(), Entity.code.asc()).limit(500).all():
+        for e in contains.order_by(Entity.level.asc(), Entity.code.asc()).all():
             if e.id not in seen:
                 rows.append(e); seen.add(e.id)
     else:
-        rows = base.order_by(Entity.level.asc(), Entity.code.asc()).limit(1000).all()
-    return render_template("entities/list.html", rows=rows, q=q, kind=kind, prefix=URL_PREFIX)
+        rows = base.order_by(Entity.level.asc(), Entity.code.asc()).all()
+
+    # Enrich with last prices and stock/balance
+    enriched = []
+    for e in rows:
+        item = {"entity": e}
+        if kind == "item":
+            item["stock"] = float(e.stock_qty or 0.0)
+            # Last purchase price
+            last_purchase = (
+                db.session.query(InvoiceLine.unit_price)
+                .join(Invoice, InvoiceLine.invoice_id == Invoice.id)
+                .filter(InvoiceLine.item_id == e.id, Invoice.kind == "purchase")
+                .order_by(Invoice.date.desc(), Invoice.id.desc())
+                .first()
+            )
+            item["last_purchase_price"] = float(last_purchase[0]) if last_purchase else None
+            # Last sale price
+            last_sale = (
+                db.session.query(InvoiceLine.unit_price)
+                .join(Invoice, InvoiceLine.invoice_id == Invoice.id)
+                .filter(InvoiceLine.item_id == e.id, Invoice.kind == "sales")
+                .order_by(Invoice.date.desc(), Invoice.id.desc())
+                .first()
+            )
+            item["last_sale_price"] = float(last_sale[0]) if last_sale else None
+        elif kind == "person":
+            item["balance"] = float(e.balance or 0.0)
+            item["status"] = "بستانکار" if item["balance"] >= 0 else "بدهکار"
+        enriched.append(item)
+
+    # Pagination
+    total_count = len(enriched)
+    start = (page - 1) * per_page
+    end = start + per_page
+    page_rows = enriched[start:end]
+    has_prev = page > 1
+    has_next = end < total_count
+
+    return render_template(
+        "entities/list.html",
+        rows=page_rows,
+        q=q,
+        kind=kind,
+        prefix=URL_PREFIX,
+        page=page,
+        per_page=per_page,
+        has_prev=has_prev,
+        has_next=has_next,
+        total=total_count,
+    )
 
 @app.route(URL_PREFIX + "/entities/new", methods=["GET", "POST"])
 @login_required
@@ -1842,14 +2098,43 @@ def reports():
     typ   = (request.args.get("type") or "all").strip().lower()
     dfrom = request.args.get("from")
     dto   = request.args.get("to")
+    method = (request.args.get("method") or "").strip().lower()  # cash methods
+    cashbox_id = (request.args.get("cashbox_id") or "").strip()
+    amount_min_raw = (request.args.get("amount_min") or "").replace(",", "").strip()
+    amount_max_raw = (request.args.get("amount_max") or "").replace(",", "").strip()
+    export = (request.args.get("export") or "").strip().lower()
+    try:
+        page = int(request.args.get("page") or 1)
+    except Exception:
+        page = 1
+    page = max(1, page)
 
     def parse_d(s):
         return parse_gregorian_date(s, allow_none=True)
     df = parse_d(dfrom); dt = parse_d(dto)
 
-    rows = []
+    # optional filters from links/search
+    person_filter = (request.args.get("person_id") or "").strip()
+    item_filter = (request.args.get("item_id") or "").strip()
+    try:
+        per_page = int(request.args.get("per_page") or 100)
+    except Exception:
+        per_page = 100
+    per_page = max(10, min(per_page, 500))
+    try:
+        amount_min = float(amount_min_raw) if amount_min_raw else None
+    except Exception:
+        amount_min = None
+    try:
+        amount_max = float(amount_max_raw) if amount_max_raw else None
+    except Exception:
+        amount_max = None
 
-    if typ in ("all", "invoice"):
+    rows = []
+    totals = {"sales": 0.0, "purchase": 0.0, "receive": 0.0, "payment": 0.0}
+
+    # Invoices (sales/purchase)
+    if typ in ("all", "invoice", "sales", "purchase"):
         inv_q = db.session.query(Invoice).join(Entity, Invoice.person_id == Entity.id)
         if q:
             inv_q = inv_q.filter(or_(
@@ -1857,23 +2142,45 @@ def reports():
                 Entity.name.ilike(f"%{q}%"),
                 Entity.code.ilike(f"%{q}%"),
             ))
+        if person_filter and person_filter.isdigit():
+            inv_q = inv_q.filter(Invoice.person_id == int(person_filter))
+        if item_filter and item_filter.isdigit():
+            inv_q = inv_q.join(InvoiceLine, Invoice.id == InvoiceLine.invoice_id).filter(InvoiceLine.item_id == int(item_filter))
         if df: inv_q = inv_q.filter(Invoice.date >= df)
         if dt: inv_q = inv_q.filter(Invoice.date <= dt)
+        # Use explicit kind when available
+        if typ == "sales":
+            inv_q = inv_q.filter(Invoice.kind == 'sales')
+        elif typ == "purchase":
+            inv_q = inv_q.filter(Invoice.kind == 'purchase')
 
-        for inv in inv_q.order_by(Invoice.id.desc()).limit(500).all():
+        for inv in inv_q.order_by(Invoice.id.desc()).all():
+            kind = inv.kind or ("sales" if (inv.number or "").upper().startswith("INV-") else "purchase")
+            amt = float(inv.total or 0.0)
+            if amount_min is not None and amt < amount_min: 
+                continue
+            if amount_max is not None and amt > amount_max:
+                continue
+            totals[kind] += amt
             rows.append({
                 "kind": "invoice",
                 "id": inv.id,
                 "number": inv.number,
                 "date": to_jdate_str(inv.date),
+                "date_key": inv.date,
                 "person": inv.person.name,
-                "amount": inv.total,
+                "amount": amt,
+                "invoice_kind": kind,
+                "person_balance": float(inv.person.balance or 0.0) if inv.person else None,
             })
 
-    if typ in ("all", "receive", "payment"):
+    # Cash documents
+    if typ in ("all", "receive", "payment", "cheque"):
         cd_q = db.session.query(CashDoc).join(Entity, CashDoc.person_id == Entity.id)
         if typ in ("receive", "payment"):
             cd_q = cd_q.filter(CashDoc.doc_type == typ)
+        if typ == "cheque":
+            cd_q = cd_q.filter(func.lower(func.coalesce(CashDoc.method, "")) == "cheque")
         if q:
             cd_q = cd_q.filter(or_(
                 CashDoc.number.ilike(f"%{q}%"),
@@ -1883,27 +2190,63 @@ def reports():
             ))
         if df: cd_q = cd_q.filter(CashDoc.date >= df)
         if dt: cd_q = cd_q.filter(CashDoc.date <= dt)
+        if method:
+            cd_q = cd_q.filter(func.lower(func.coalesce(CashDoc.method, "")) == method)
+        if cashbox_id and cashbox_id.isdigit():
+            cd_q = cd_q.filter(CashDoc.cashbox_id == int(cashbox_id))
 
-        for d in cd_q.order_by(CashDoc.id.desc()).limit(500).all():
+        for d in cd_q.order_by(CashDoc.id.desc()).all():
+            amt = float(d.amount or 0.0)
+            if amount_min is not None and amt < amount_min: 
+                continue
+            if amount_max is not None and amt > amount_max:
+                continue
+            totals[d.doc_type] += amt
             rows.append({
                 "kind": d.doc_type,
                 "id": d.id,
                 "number": d.number,
                 "date": to_jdate_str(d.date),
+                "date_key": d.date,
                 "person": d.person.name,
-                "amount": d.amount,
+                "amount": amt,
                 "cheque_number": d.cheque_number,
                 "method": d.method,
                 "cashbox": d.cashbox.name if d.cashbox else None,
                 "cheque_due": to_jdate_str(d.cheque_due_date) if d.cheque_due_date else None,
             })
 
-    rows.sort(key=lambda r: (r["date"], str(r["number"])), reverse=True)
+    # Sort rows by date (gregorian) then id/number desc
+    rows.sort(key=lambda r: (r.get("date_key"), r.get("id", 0)), reverse=True)
+
+    # Pagination
+    total_count = len(rows)
+    start = (page - 1) * per_page
+    end = start + per_page
+    page_rows = rows[start:end]
+    has_prev = page > 1
+    has_next = end < total_count
+
+    # Cashboxes for filter select
+    cashboxes = (
+        CashBox.query.filter_by(is_active=True)
+        .order_by(CashBox.kind.desc(), CashBox.name.asc())
+        .all()
+    )
 
     try:
         return render_template(
             "reports.html",
-            rows=rows, q=q, typ=typ, dfrom=dfrom, dto=dto, prefix=URL_PREFIX
+            rows=page_rows, q=q, typ=typ, dfrom=dfrom, dto=dto, prefix=URL_PREFIX,
+            per_page=per_page, page=page, has_prev=has_prev, has_next=has_next, total=total_count,
+            person_filter=person_filter,
+            item_filter=item_filter,
+            method=method,
+            cashbox_id=cashbox_id,
+            amount_min=amount_min_raw,
+            amount_max=amount_max_raw,
+            totals=totals,
+            cashboxes=cashboxes,
         )
     except Exception:
         html = [
@@ -2013,9 +2356,200 @@ def cash_view(doc_id):
     return render_template("page.html", title="سند نقدی", content=Markup(html), prefix=URL_PREFIX)
 
 # ===================== دریافت وجه =====================
+# ----------------- Unified Cash Doc (Receive & Payment) -----------------
+@app.route(URL_PREFIX + "/cash_doc", methods=["GET", "POST"])
 @app.route(URL_PREFIX + "/receive", methods=["GET", "POST"])
+@app.route(URL_PREFIX + "/payment", methods=["GET", "POST"])
 @login_required
-def receive():
+def unified_cash():
+    # تشخیص نوع سند از مسیر یا پارامتر
+    kind = request.args.get("kind", "").strip().lower()
+    if not kind:
+        if "/receive" in request.path:
+            kind = "receive"
+        elif "/payment" in request.path:
+            kind = "payment"
+        else:
+            kind = "receive"  # پیش‌فرض
+    
+    # بررسی دسترسی
+    ensure_permission(kind)
+    
+    now_info = _now_info()
+    if kind == "receive":
+        doc_number = jalali_reference("RCV", now_info["datetime"])
+    else:
+        doc_number = jalali_reference("PAY", now_info["datetime"])
+    
+    pos_device_key, pos_device_label = _pos_device_config()
+    prefill_amount = None
+    prefill_note = None
+    prefill_person = None
+    
+    # فقط صندوق‌های فعال را بیاور
+    cashboxes = (
+        CashBox.query.filter_by(is_active=True)
+        .order_by(CashBox.kind.desc(), CashBox.name.asc())
+        .all()
+    )
+    
+    if request.method == "GET":
+        invoice_id = (request.args.get("invoice_id") or "").strip()
+        if invoice_id.isdigit():
+            inv = Invoice.query.get(int(invoice_id))
+            if inv:
+                prefill_amount = float(inv.total or 0.0)
+                if inv.person:
+                    prefill_person = inv.person
+                if kind == "receive":
+                    prefill_note = f"دریافت بابت فاکتور فروش {inv.number}"
+                else:
+                    prefill_note = f"پرداخت بابت فاکتور خرید {inv.number}"
+        if prefill_amount is None:
+            try:
+                prefill_amount = float((request.args.get("amount") or "").replace(",", ""))
+            except Exception:
+                prefill_amount = None
+        pid = (request.args.get("person_id") or "").strip()
+        if not prefill_person and pid.isdigit():
+            prefill_person = Entity.query.get(int(pid))
+
+    if request.method == "POST":
+        # kind از form data
+        form_kind = request.form.get("cash_kind", kind).strip().lower()
+        
+        number = (request.form.get("doc_number") or "").strip() or doc_number
+        doc_date = parse_gregorian_date(request.form.get("doc_date_greg"))
+
+        person = None
+        pid = (request.form.get("person_token") or "").strip()
+        if pid.isdigit():
+            person = Entity.query.get(int(pid))
+        if not person:
+            pcode = (request.form.get("person_code") or "").strip()
+            if pcode:
+                person = Entity.query.filter_by(type="person", code=pcode).first()
+        if not person or person.type != "person":
+            flash("لطفاً طرف حساب معتبر انتخاب کنید.", "danger")
+            return redirect(URL_PREFIX + f"/cash_doc?kind={form_kind}")
+
+        amount = _to_float(request.form.get("amount"), 0.0)
+        if amount <= 0:
+            flash("مبلغ باید بزرگ‌تر از صفر باشد.", "danger")
+            return redirect(URL_PREFIX + f"/cash_doc?kind={form_kind}")
+        
+        method = (request.form.get("method") or "").strip().lower()
+        if method not in ("pos", "cash", "bank", "cheque"):
+            method = "cash"
+        note = (request.form.get("note") or "").strip() or None
+
+        cashbox = None
+        cashbox_raw = (request.form.get("cashbox_id") or "").strip()
+        if cashbox_raw.isdigit():
+            cashbox = CashBox.query.get(int(cashbox_raw))
+            if cashbox and not cashbox.is_active:
+                cashbox = None
+
+        cheque_number = "".join(ch for ch in (request.form.get("cheque_number") or "") if ch.isdigit())
+        cheque_bank = (request.form.get("cheque_bank") or "").strip() or None
+        cheque_branch = (request.form.get("cheque_branch") or "").strip() or None
+        cheque_account = (request.form.get("cheque_account") or "").strip() or None
+        cheque_owner = (request.form.get("cheque_owner") or "").strip() or None
+        cheque_due_date = parse_gregorian_date(
+            request.form.get("cheque_due_date"), allow_none=True
+        )
+        if cheque_due_date is None:
+            cheque_due_date = parse_jalali_date(
+                request.form.get("cheque_due_date_fa"), allow_none=True
+            )
+
+        # فقط برای چک نیاز به صندوق داریم
+        if method == "cheque":
+            if not cashbox or cashbox.kind != "bank":
+                flash("برای ثبت چک، یک حساب بانکی فعال انتخاب کنید.", "danger")
+                return redirect(URL_PREFIX + f"/cash_doc?kind={form_kind}")
+            if len(cheque_number) != 16:
+                flash("شماره صیادی چک باید ۱۶ رقم باشد.", "danger")
+                return redirect(URL_PREFIX + f"/cash_doc?kind={form_kind}")
+        elif method in ("cash", "bank"):
+            # اگر صندوق انتخاب شده، نوعش را بررسی کن
+            if cashbox:
+                required_kind = "cash" if method == "cash" else "bank"
+                if cashbox.kind != required_kind:
+                    flash("نوع صندوق با روش پرداخت مطابقت ندارد.", "warning")
+        else:
+            # برای POS و سایر روش‌ها چک را پاک کن
+            cheque_number = None
+            cheque_bank = None
+            cheque_branch = None
+            cheque_account = None
+            cheque_owner = None
+            cheque_due_date = None
+
+        # اگر چک نیست، مقادیر چک را null کن
+        if method != "cheque":
+            cheque_number = None
+            cheque_bank = None
+            cheque_branch = None
+            cheque_account = None
+            cheque_owner = None
+            cheque_due_date = None
+
+        doc = CashDoc(
+            doc_type=form_kind,
+            number=number,
+            date=doc_date,
+            person_id=person.id,
+            amount=amount,
+            method=method,
+            note=note,
+            cashbox_id=cashbox.id if cashbox else None,
+            cheque_number=cheque_number or None,
+            cheque_bank=cheque_bank,
+            cheque_branch=cheque_branch,
+            cheque_account=cheque_account,
+            cheque_owner=cheque_owner,
+            cheque_due_date=cheque_due_date,
+        )
+        db.session.add(doc)
+
+        # بروزرسانی balance: دریافت کم می‌کند، پرداخت اضافه می‌کند
+        try:
+            if form_kind == "receive":
+                person.balance = float(person.balance or 0.0) - float(amount)
+            else:  # payment
+                person.balance = float(person.balance or 0.0) + float(amount)
+        except Exception:
+            pass
+
+        db.session.commit()
+        
+        action_label = "دریافت" if form_kind == "receive" else "پرداخت"
+        flash(
+            f"✅ {action_label} «{number}» برای «{person.name}» — {amount_to_toman_words(amount)}",
+            "success",
+        )
+        return redirect(URL_PREFIX + f"/cash/{doc.id}")
+
+    return render_template(
+        "cash_doc.html",
+        doc_number=doc_number,
+        prefix=URL_PREFIX,
+        current_jdate=now_info["jalali_date"],
+        current_gdate=now_info["greg_date"],
+        pos_device_key=pos_device_key,
+        pos_device_label=pos_device_label,
+        prefill_amount=prefill_amount,
+        prefill_person=prefill_person,
+        prefill_note=prefill_note,
+        cashboxes=cashboxes,
+        cash_kind=kind,
+    )
+
+# ----------------- Old Receive (removed, now using unified_cash) -----------------
+@app.route(URL_PREFIX + "/receive_old", methods=["GET", "POST"])
+@login_required
+def receive_old():
     ensure_permission("receive")
     now_info = _now_info()
     rec_number = jalali_reference("RCV", now_info["datetime"])
@@ -2346,6 +2880,11 @@ def payment():
 def settings_stub():
     admin_required()
     current_key, current_label = _pos_device_config()
+    
+    # دریافت تنظیمات شخصی کاربر
+    username = getattr(current_user, "username", "admin")
+    user_settings = UserSettings.get_for_user(username)
+    
     if request.method == "POST":
         form_id = (request.form.get("form_id") or "pos").strip().lower()
         if form_id == "pos":
@@ -2400,7 +2939,34 @@ def settings_stub():
                 flash("کلید و تنظیمات دستیار هوشمند ذخیره شد.", "success")
             else:
                 flash("کلید دستیار پاک شد.", "info")
+        elif form_id == "user_ai":
+            # ذخیره تنظیمات شخصی هر کاربر
+            user_settings.openai_api_key = (request.form.get("user_openai_api_key") or "").strip() or None
+            user_settings.openai_model = (request.form.get("user_openai_model") or "").strip() or None
+            user_settings.system_prompt = (request.form.get("user_system_prompt") or "").strip() or None
+            
+            temp = request.form.get("user_temperature")
+            if temp:
+                try:
+                    user_settings.temperature = float(temp)
+                except:
+                    user_settings.temperature = 0.7
+            else:
+                user_settings.temperature = 0.7
+            
+            max_tok = request.form.get("user_max_tokens")
+            if max_tok:
+                try:
+                    user_settings.max_tokens = int(max_tok)
+                except:
+                    user_settings.max_tokens = None
+            else:
+                user_settings.max_tokens = None
+            
+            db.session.commit()
+            flash("✅ تنظیمات شخصی شما ذخیره شد.", "success")
         return redirect(URL_PREFIX + "/settings")
+    
     return render_template(
         "settings.html",
         prefix=URL_PREFIX,
@@ -2415,6 +2981,7 @@ def settings_stub():
         assistant_model_choices=ASSISTANT_MODEL_CHOICES,
         assistant_api_mask=_mask_secret(_openai_api_key()),
         assistant_api_has=bool(_openai_api_key()),
+        user_settings=user_settings,
     )
 
 @app.route(URL_PREFIX + "/assistant")
@@ -2487,6 +3054,36 @@ def assistant_chat():
                 },
             )
 
+    # handle assistant-suggested cash/transfer documents (receive/payment)
+    cash_payload = result.get("cash") if isinstance(result.get("cash"), dict) else None
+    applied_cash_number = None
+    if cash_payload:
+        cplan = _prepare_cash_plan(cash_payload)
+        # if assistant couldn't determine direction or missing critical info, require confirmation
+        if cplan.get("missing_person") or (not cplan.get("bank_account") and (cplan.get("method") or '').lower()=='bank'):
+            needs_confirmation = True
+
+        if not needs_confirmation:
+            try:
+                outcome_cash = _apply_cash_plan(cplan)
+                applied = True
+                applied_cash_number = outcome_cash["doc"].number
+                reply_text = (reply_text or "") + f"\nسند نقدی «{applied_cash_number}» با موفقیت ثبت شد."
+            except Exception as exc:
+                db.session.rollback()
+                apply_error = str(exc)
+                needs_confirmation = True
+
+        if needs_confirmation and not ticket:
+            ticket = _register_ai_task(
+                current_user.username,
+                {
+                    "plan": cplan,
+                    "reply": reply_text,
+                    "apply_error": apply_error,
+                },
+            )
+
     actions_summary = None
     actions_payload = result.get("actions") if isinstance(result.get("actions"), list) else []
     if actions_payload:
@@ -2525,26 +3122,44 @@ def assistant_apply():
         return jsonify({"status": "error", "message": "توکن منقضی یا نامعتبر است."}), 400
     plan = task.get("plan")
     if not plan:
-        return jsonify({"status": "error", "message": "اطلاعات فاکتور موجود نیست."}), 400
+        return jsonify({"status": "error", "message": "اطلاعات عملیات موجود نیست."}), 400
 
+    # Decide whether this is an invoice plan or cash plan
     try:
-        outcome = _apply_invoice_plan(plan)
+        if isinstance(plan, dict) and plan.get("items"):
+            outcome = _apply_invoice_plan(plan)
+            invoice = outcome["invoice"]
+            return jsonify({"status": "ok", "invoice_number": invoice.number, "invoice_id": invoice.id})
+        elif isinstance(plan, dict) and (plan.get("amount") is not None and plan.get("person")):
+            outcome = _apply_cash_plan(plan)
+            doc = outcome.get("doc")
+            return jsonify({"status": "ok", "cash_number": doc.number, "cash_id": doc.id})
+        else:
+            return jsonify({"status": "error", "message": "نوع عملیات قابل اعمال نیست."}), 400
     except Exception as exc:
         db.session.rollback()
         return jsonify({"status": "error", "message": str(exc)}), 400
-
-    invoice = outcome["invoice"]
-    return jsonify({
-        "status": "ok",
-        "invoice_number": invoice.number,
-        "invoice_id": invoice.id,
-    })
 
 @app.route(URL_PREFIX + "/admin", methods=["GET"])
 @login_required
 def admin_stub():
     admin_required()
     return render_template("admin/dashboard.html", prefix=URL_PREFIX)
+
+
+@app.route(URL_PREFIX + "/admin/site-views", methods=["GET"])
+@login_required
+def admin_site_views():
+    admin_required()
+    try:
+        page = int(request.args.get("page") or 1)
+    except Exception:
+        page = 1
+    per_page = 100
+    q = db.session.query(SiteView).order_by(SiteView.created_at.desc())
+    total = q.count()
+    rows = q.offset((page-1)*per_page).limit(per_page).all()
+    return render_template("admin/site_views.html", prefix=URL_PREFIX, rows=rows, page=page, per_page=per_page, total=total)
 
 
 @app.route(URL_PREFIX + "/admin/users", methods=["GET", "POST"])
@@ -2732,6 +3347,47 @@ def admin_cashboxes_delete(box_id):
         db.session.delete(box)
         flash("صندوق حذف شد.", "success")
     db.session.commit()
+    return redirect(URL_PREFIX + "/admin/cashboxes")
+
+
+@app.route(URL_PREFIX + "/admin/cashboxes/remove-defaults", methods=["POST"]) 
+@login_required
+def admin_cashboxes_remove_defaults():
+    """Remove or deactivate common pre-seeded default cashbox names.
+
+    This endpoint looks for boxes with common default names (english and persian)
+    and deletes them if unused or deactivates them if they have usage.
+    """
+    admin_required()
+    DEFAULT_NAMES = {"cash", "pos", "bank", "نقد", "بانک", "پوز"}
+    boxes = CashBox.query.all()
+    removed = 0
+    deactivated = 0
+    for box in boxes:
+        if (box.name or "").strip().lower() in DEFAULT_NAMES:
+            usage_exists = (
+                db.session.query(CashDoc.id)
+                .filter(CashDoc.cashbox_id == box.id)
+                .limit(1)
+                .first()
+            )
+            if usage_exists:
+                if box.is_active:
+                    box.is_active = False
+                    deactivated += 1
+            else:
+                db.session.delete(box)
+                removed += 1
+    db.session.commit()
+    msg_parts = []
+    if removed:
+        msg_parts.append(f"{removed} صندوق پیش‌فرض حذف شد.")
+    if deactivated:
+        msg_parts.append(f"{deactivated} صندوق به‌علت استفاده غیرفعال شد.")
+    if not msg_parts:
+        flash("صندوق پیش‌فرضی پیدا نشد.", "info")
+    else:
+        flash("; ".join(msg_parts), "success")
     return redirect(URL_PREFIX + "/admin/cashboxes")
 
 # ----------------- Utility APIs -----------------
@@ -3113,6 +3769,19 @@ with app.app_context():
     _ensure_column_sqlite("cash_docs", "cheque_account", "TEXT", "NULL")
     _ensure_column_sqlite("cash_docs", "cheque_owner", "TEXT", "NULL")
     _ensure_column_sqlite("cash_docs", "cheque_due_date", "TEXT", "NULL")
+    _ensure_column_sqlite("invoices", "kind", "TEXT", "'sales'")
+
+    # one-off backfill for invoice.kind if empty
+    try:
+        missing = Invoice.query.filter(or_(Invoice.kind.is_(None), Invoice.kind == "")).limit(1).first()
+        if missing:
+            rows = Invoice.query.all()
+            for inv in rows:
+                if not inv.kind:
+                    inv.kind = "sales" if (inv.number or "").upper().startswith("INV-") else "purchase"
+            db.session.commit()
+    except Exception as ex:
+        app.logger.error(f"backfill invoice.kind failed: {ex}")
 
 if __name__ == "__main__":
     if URL_PREFIX:

@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block content %}
+<h2>بازدیدهای سایت</h2>
+<p>لیست آدرس‌ها و IPهایی که سایت را مشاهده کرده‌اند.</p>
+<div class="card">
+  <table class="table">
+    <thead>
+      <tr><th>زمان</th><th>IP</th><th>مسیر</th><th>روش</th><th>کاربر</th></tr>
+    </thead>
+    <tbody>
+      {% for r in rows %}
+      <tr>
+        <td>{{ r.created_at }}</td>
+        <td>{{ r.ip }}</td>
+        <td>{{ r.path }}</td>
+        <td>{{ r.method }}</td>
+        <td>{{ r.user or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</div>
+<div style="margin-top:12px">صفحه {{ page }} — کل: {{ total }}</div>
+{% endblock %}

@@ -88,7 +88,7 @@
   <form method="post" class="card" style="padding:16px; margin-bottom:16px; display:grid; gap:16px;">
     <input type="hidden" name="form_id" value="ai">
     <div>
-      <h3 style="margin-top:0;">🤖 اتصال دستیار هوشمند</h3>
+      <h3 style="margin-top:0;">🤖 اتصال دستیار هوشمند (سراسری)</h3>
       <p class="muted">کلید API سرویس OpenAI را وارد کنید تا بتوانید از ماژول هوش مصنوعی برای خواندن فاکتورها استفاده کنید.</p>
     </div>
 
@@ -122,6 +122,71 @@
 
     <div>
       <button type="submit" class="btn-primary">ذخیره تنظیمات دستیار</button>
+    </div>
+  </form>
+
+  <form method="post" class="card" style="padding:16px; margin-bottom:16px; display:grid; gap:16px; border:2px solid #28a745;">
+    <input type="hidden" name="form_id" value="user_ai">
+    <div>
+      <h3 style="margin-top:0;">👤 تنظیمات شخصی دستیار هوشمند</h3>
+      <p class="muted">تنظیمات شخصی شما برای استفاده از دستیار هوشمند (کلید API، مدل، دستورالعمل‌های سیستمی و ...)</p>
+      <div class="card muted" style="background:#e7f9ed; border:1px solid #28a745; padding:12px; margin-top:12px;">
+        <strong>✨ ویژگی جدید:</strong> حالا هر کاربر می‌تواند کلید API و تنظیمات خاص خود را داشته باشد!
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div>
+        <label class="lbl" for="user_openai_api_key">کلید API شخصی شما</label>
+        <input class="inp" type="password" id="user_openai_api_key" name="user_openai_api_key" 
+               value="{{ user_settings.openai_api_key or '' }}" placeholder="sk-..." autocomplete="off">
+        <div class="hint">اگر خالی باشد، از کلید سراسری استفاده می‌شود.</div>
+      </div>
+      <div>
+        <label class="lbl" for="user_openai_model">مدل دلخواه شما</label>
+        <select class="inp" id="user_openai_model" name="user_openai_model">
+          <option value="">پیش‌فرض (از تنظیمات سراسری)</option>
+          {% for value,label in assistant_model_choices %}
+          <option value="{{ value }}" {% if user_settings.openai_model == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <div>
+      <label class="lbl" for="user_system_prompt">دستورالعمل‌های سیستمی سفارشی (اختیاری)</label>
+      <textarea class="inp" id="user_system_prompt" name="user_system_prompt" rows="4" 
+                placeholder="مثال: تو یک دستیار حسابداری برای یک فروشگاه موبایل هستی. همیشه قیمت‌ها را با دقت بررسی کن...">{{ user_settings.system_prompt or '' }}</textarea>
+      <div class="hint">این دستورات به عنوان پیام سیستمی برای مدل ارسال می‌شود.</div>
+    </div>
+
+    <div class="grid-2">
+      <div>
+        <label class="lbl" for="user_temperature">Temperature (خلاقیت مدل)</label>
+        <input class="inp" type="number" id="user_temperature" name="user_temperature" 
+               value="{{ user_settings.temperature or 0.7 }}" min="0" max="2" step="0.1">
+        <div class="hint">عدد کمتر = دقیق‌تر، عدد بیشتر = خلاق‌تر (پیش‌فرض: 0.7)</div>
+      </div>
+      <div>
+        <label class="lbl" for="user_max_tokens">حداکثر توکن (اختیاری)</label>
+        <input class="inp" type="number" id="user_max_tokens" name="user_max_tokens" 
+               value="{{ user_settings.max_tokens or '' }}" min="100" max="16000" placeholder="خودکار">
+        <div class="hint">محدودیت طول پاسخ (خالی = بدون محدودیت)</div>
+      </div>
+    </div>
+
+    <div class="card muted" style="background:transparent; border:1px dashed var(--border-color); padding:12px;">
+      <ul style="margin:0; padding-right:18px; line-height:1.8;">
+        <li><strong>کلید API شخصی:</strong> اگر وارد کنید، از کلید شما استفاده می‌شود، در غیر این صورت از کلید سراسری</li>
+        <li><strong>مدل:</strong> می‌توانید مدل دلخواه خود را انتخاب کنید (مثلاً gpt-4o برای دقت بیشتر)</li>
+        <li><strong>دستورالعمل‌های سیستمی:</strong> رفتار دستیار را برای نیازهای خاص خود شخصی‌سازی کنید</li>
+        <li><strong>Temperature:</strong> کنترل میزان خلاقیت و تصادفی بودن پاسخ‌ها</li>
+        <li>این تنظیمات فقط برای کاربر شما ذخیره می‌شود و روی دیگران تأثیر ندارد</li>
+      </ul>
+    </div>
+
+    <div>
+      <button type="submit" class="btn-primary">💾 ذخیره تنظیمات شخصی من</button>
     </div>
   </form>
 

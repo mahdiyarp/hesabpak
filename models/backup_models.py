@@ -21,6 +21,29 @@ class Setting(db.Model):
         else:
             s.value = value
 
+class UserSettings(db.Model):
+    """تنظیمات شخصی هر کاربر (کلید API، مدل، دستورالعمل‌ها و ...)"""
+    __tablename__ = "user_settings"
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(64), nullable=False, unique=True, index=True)
+    openai_api_key = db.Column(db.Text, nullable=True)  # کلید API
+    openai_model = db.Column(db.String(64), nullable=True)  # مدل (gpt-4o, gpt-4o-mini, ...)
+    system_prompt = db.Column(db.Text, nullable=True)  # دستورالعمل‌های سیستمی
+    temperature = db.Column(db.Float, nullable=True, default=0.7)  # دمای مدل
+    max_tokens = db.Column(db.Integer, nullable=True)  # حداکثر توکن
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    @staticmethod
+    def get_for_user(username):
+        """دریافت تنظیمات کاربر یا ایجاد رکورد جدید"""
+        settings = UserSettings.query.filter_by(username=username).first()
+        if not settings:
+            settings = UserSettings(username=username)
+            db.session.add(settings)
+            db.session.flush()
+        return settings
+
 class BackupLog(db.Model):
     __tablename__ = "backup_log"
     id = db.Column(db.Integer, primary_key=True)
