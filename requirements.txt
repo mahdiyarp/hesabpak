@@ -4,3 +4,4 @@ Flask-SQLAlchemy
 SQLAlchemy>=2.0
 python-dotenv
 MarkupSafe
+openai>=1.51.0

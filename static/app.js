@@ -28,6 +28,10 @@ function badgeOf(t){
   const panel   = $('#global-results') || $('#search-results');
   const actions = $('#global-actions') || $('#search-actions');
   const kindSel = $('#global-kind');
+  const sortSel = $('#global-sort');
+  const userPerms = Array.isArray(window.USER_PERMISSIONS) ? window.USER_PERMISSIONS : [];
+  const isAdmin = (window.IS_ADMIN === true || window.IS_ADMIN === 'true');
+  const allow = (perm)=>{ if(!perm) return true; return isAdmin || userPerms.indexOf(perm) !== -1; };
 
   if(!input || !panel) return;
 
@@ -43,13 +47,19 @@ function badgeOf(t){
   };
 
   if(actions){
-    actions.innerHTML = [
-      {href:`${window.prefix}/reports`, label:'📊 گزارشات'},
-      {href:`${window.prefix}/sales`,   label:'🧾 فاکتور فروش جدید'},
-      {href:`${window.prefix}/entities?kind=item`,   label:'📚 لیست کالاها'},
-      {href:`${window.prefix}/entities?kind=person`, label:'📚 لیست اشخاص'}
-    ].map(x=>`<a class="act" href="${x.href}">${x.label}</a>`).join('');
-    showActions();
+    const quickLinks = [
+      {href:`${window.prefix}/reports`, label:'📊 گزارشات', perm:'reports'},
+      {href:`${window.prefix}/sales`,   label:'🧾 فاکتور فروش جدید', perm:'sales'},
+      {href:`${window.prefix}/entities?kind=item`,   label:'📚 لیست کالاها', perm:'entities'},
+      {href:`${window.prefix}/entities?kind=person`, label:'📚 لیست اشخاص', perm:'entities'}
+    ].filter(link => allow(link.perm));
+    if(quickLinks.length){
+      actions.innerHTML = quickLinks.map(x=>`<a class="act" href="${x.href}">${x.label}</a>`).join('');
+      showActions();
+    } else {
+      actions.innerHTML = '<span class="muted">مجوزی برای میانبرها ندارید.</span>';
+      showActions();
+    }
   }
 
   let tmr = null;
@@ -66,6 +76,17 @@ function badgeOf(t){
     tmr = setTimeout(()=> runSearch(q), 220);
   });
 
+  function rerunIfNeeded(){
+    const q = input.value.trim();
+    if(!q){
+      hide(panel);
+      showActions();
+      return;
+    }
+    if(tmr) clearTimeout(tmr);
+    runSearch(q);
+  }
+
   if(kindSel){
     kindSel.addEventListener('change', function(){
       const q = input.value.trim();
@@ -74,8 +95,16 @@ function badgeOf(t){
         showActions();
         return;
       }
-      if(tmr) clearTimeout(tmr);
-      runSearch(q);
+      rerunIfNeeded();
+    });
+  }
+
+  if(sortSel){
+    sortSel.addEventListener('change', function(){
+      if(document && document.body){
+        document.body.setAttribute('data-search-sort', sortSel.value || '');
+      }
+      rerunIfNeeded();
     });
   }
 
@@ -90,7 +119,8 @@ function badgeOf(t){
 
   function runSearch(q){
     const kind = kindSel ? (kindSel.value || '').trim() : '';
-    const url  = `${window.prefix}/api/search?q=${encodeURIComponent(q)}${kind ? `&kind=${encodeURIComponent(kind)}` : ''}`;
+    const sort = sortSel ? (sortSel.value || '').trim() : (document.body?.dataset?.searchSort || '');
+    const url  = `${window.prefix}/api/search?q=${encodeURIComponent(q)}${kind ? `&kind=${encodeURIComponent(kind)}` : ''}${sort ? `&sort=${encodeURIComponent(sort)}` : ''}`;
     fetch(url, {credentials:'same-origin'})
       .then(r=>r.json())
       .then(data=>{
@@ -100,9 +130,16 @@ function badgeOf(t){
           return;
         }
         panel.innerHTML = data.map(m => {
-          const meta = m.meta ? ` <span class="meta">| ${m.meta}</span>` : '';
-          return `<a class="res" href="#" data-id="${m.id}" data-type="${m.type}" data-code="${m.code}">
-                    <b>${badgeOf(m.type)}</b> — <code>${m.code}</code> — ${m.name}${meta}
+          const pieces = (m.meta || '').split('•').map(part => part.trim()).filter(Boolean);
+          if(m.stock){ pieces.push(`موجودی: ${m.stock}`); }
+          if(m.price){ pieces.push(`قیمت: ${m.price}`); }
+          if(m.balance && (!m.type || m.type === 'person')){ pieces.push(`مانده: ${m.balance}`); }
+          const meta = pieces.length ? `<div class="res-meta">${pieces.map(p=>`<span class="res-sub">${p}</span>`).join('')}</div>` : '';
+          const badge = `<span class="res-badge">${badgeOf(m.type)}</span>`;
+          const code = m.code ? `<span class="res-code">${m.code}</span>` : '';
+          return `<a class="res" href="#" data-id="${m.id}" data-type="${m.type}" data-code="${m.code || ''}">
+                    <div class="res-head">${badge}${code}<span class="res-title">${m.name || ''}</span></div>
+                    ${meta}
                   </a>`;
         }).join('');
         show(panel);
@@ -125,25 +162,41 @@ function badgeOf(t){
 
     let acts = [];
     if(typ === 'invoice'){
-      acts.push({href:`${window.prefix}/invoice/${id}`, label:'مشاهده فاکتور'});
-      if(window.IS_ADMIN === true || window.IS_ADMIN === 'true'){
+      if(allow('reports') || allow('sales') || allow('purchase')){
+        acts.push({href:`${window.prefix}/invoice/${id}`, label:'مشاهده فاکتور'});
+      }
+      if(isAdmin){
         acts.push({href:`${window.prefix}/invoice/${id}/edit`, label:'ویرایش فاکتور'});
       }
     }else if(typ === 'receive' || typ === 'payment'){
-      acts.push({href:`${window.prefix}/cash/${id}`, label:'مشاهده سند'});
-      if(window.IS_ADMIN === true || window.IS_ADMIN === 'true'){
+      if(allow('reports') || allow(typ)){
+        acts.push({href:`${window.prefix}/cash/${id}`, label:'مشاهده سند'});
+      }
+      if(isAdmin){
         acts.push({href:`${window.prefix}/cash/${id}/edit`, label:'ویرایش سند'});
       }
     }else if(typ === 'person'){
-      acts.push({href:`${window.prefix}/entities?kind=person&q=${encodeURIComponent(code)}`, label:'نمایه شخص'});
-      acts.push({href:`${window.prefix}/reports?person_id=${id}`, label:'گزارشات این مشتری'});
+      if(allow('entities')){
+        acts.push({href:`${window.prefix}/entities?kind=person&q=${encodeURIComponent(code)}`, label:'نمایه شخص'});
+      }
+      if(allow('reports')){
+        acts.push({href:`${window.prefix}/reports?person_id=${id}`, label:'گزارشات این مشتری'});
+      }
     }else if(typ === 'item'){
-      acts.push({href:`${window.prefix}/entities?kind=item&q=${encodeURIComponent(code)}`, label:'نمایه کالا'});
-      acts.push({href:`${window.prefix}/reports?item_id=${id}`, label:'گزارشات فروش این کالا'});
+      if(allow('entities')){
+        acts.push({href:`${window.prefix}/entities?kind=item&q=${encodeURIComponent(code)}`, label:'نمایه کالا'});
+      }
+      if(allow('reports')){
+        acts.push({href:`${window.prefix}/reports?item_id=${id}`, label:'گزارشات فروش این کالا'});
+      }
     }
 
     if(actions){
-      actions.innerHTML = acts.map(l=>`<a class="act" href="${l.href}">${l.label}</a>`).join('');
+      if(acts.length){
+        actions.innerHTML = acts.map(l=>`<a class="act" href="${l.href}">${l.label}</a>`).join('');
+      }else{
+        actions.innerHTML = '<span class="muted">مجوزی برای این نتیجه ندارید.</span>';
+      }
       showActions();
     }
     hide(panel);
@@ -153,6 +206,175 @@ function badgeOf(t){
     if(ev.target.closest('.global-search, .search-wrap')) return;
     hide(panel);
     if(!input.value.trim()) showActions();
+  });
+})();
+
+// =============== Form persistence (per-page, sessionStorage) ===============
+(function(){
+  // By default persist all forms unless explicitly disabled with data-persist="false".
+  const forms = $all('form:not([data-persist="false"])');
+  if(!forms.length) return;
+  if(typeof window.sessionStorage === 'undefined') return;
+
+  function storageKey(form){
+    const custom = form.getAttribute('data-persist-key');
+    // include action or id to distinguish multiple forms on same path
+    const ident = custom || form.getAttribute('id') || form.getAttribute('name') || window.location.pathname;
+    return `hp:persist:${ident}`;
+  }
+
+  function collect(form){
+    const data = {};
+    Array.from(form.elements).forEach(el => {
+      if(!el.name || el.disabled) return;
+      if(el.type === 'password') return;
+      // keep array-like values as joined string; restoration preserves simple use-cases
+      if(el.name.endsWith('[]')){
+        // gather all elements with same name
+        const vals = Array.from(form.elements).filter(x=>x.name===el.name && !x.disabled).map(x=> x.type==='checkbox'? (x.checked?x.value:null) : x.value).filter(Boolean);
+        data[el.name] = vals;
+        return;
+      }
+      if(el.type === 'checkbox'){
+        data[el.name] = el.checked;
+      }else if(el.type === 'radio'){
+        if(el.checked) data[el.name] = el.value;
+      }else{
+        data[el.name] = el.value;
+      }
+    });
+    return data;
+  }
+
+  function restore(form, data){
+    if(!data) return;
+    Array.from(form.elements).forEach(el => {
+      if(!el.name || !(el.name in data)) return;
+      const val = data[el.name];
+      if(Array.isArray(val)){
+        if(el.name.endsWith('[]')){
+          // set first matching element values; for more complex cases apps can opt-out
+          if(el.type === 'checkbox' || el.type === 'radio'){
+            el.checked = val.indexOf(el.value) !== -1;
+          }else{
+            el.value = val[0] || '';
+          }
+          return;
+        }
+      }
+      if(el.type === 'checkbox'){
+        el.checked = !!val;
+      }else if(el.type === 'radio'){
+        el.checked = (el.value === val);
+      }else{
+        el.value = val;
+      }
+    });
+  }
+
+  // track overall dirty state across forms to warn on unload
+  let anyDirty = false;
+  const formStates = new Map();
+
+  function setDirty(form, v){
+    formStates.set(form, !!v);
+    anyDirty = Array.from(formStates.values()).some(x=>x===true);
+    // toggle beforeunload handler
+    if(anyDirty){
+      window.addEventListener('beforeunload', beforeUnloadHandler);
+    } else {
+      window.removeEventListener('beforeunload', beforeUnloadHandler);
+    }
+  }
+
+  function beforeUnloadHandler(e){
+    // Standard browser confirmation
+    const msg = 'فرم پر شده ذخیره نشده است. آیا مطمئن هستید که از صفحه خارج می‌شوید؟';
+    (e || window.event).returnValue = msg; // Gecko + IE
+    return msg; // Webkit, Safari, Chrome
+  }
+
+  forms.forEach(form => {
+    // skip forms that explicitly opt out
+    if(form.getAttribute('data-persist') === 'false') return;
+    const key = storageKey(form);
+    try {
+      const saved = sessionStorage.getItem(key);
+      if(saved){ restore(form, JSON.parse(saved)); setDirty(form, true); }
+    } catch(err){ console.warn('restore form failed', err); }
+
+    const handler = () => {
+      try {
+        const snapshot = collect(form);
+        sessionStorage.setItem(key, JSON.stringify(snapshot));
+        // if any field has value mark dirty
+        const hasValue = Object.keys(snapshot).some(k=>{
+          const v = snapshot[k];
+          if(v === null || v === undefined) return false;
+          if(Array.isArray(v)) return v.length>0;
+          if(typeof v === 'boolean') return v === true;
+          return String(v||'').trim().length>0;
+        });
+        setDirty(form, hasValue);
+      } catch(err){ console.warn('persist form failed', err); }
+    };
+    form.addEventListener('input', handler);
+    form.addEventListener('change', handler);
+
+    // NOTE: Do NOT clear on submit so values persist if server-side validation fails.
+    // Snapshot will be cleared on explicit reset/cancel or via server-driven hint in future.
+
+    // intercept cancel buttons/links inside form (data-action="cancel" or .btn-cancel)
+    form.addEventListener('click', function(ev){
+      const t = ev.target.closest('[data-action="cancel"], .btn-cancel');
+      if(!t) return;
+      // if form has data, confirm
+      const isDirty = formStates.get(form) === true;
+      if(!isDirty) return; // allow
+      ev.preventDefault();
+      const ok = confirm('فرم پر شده است و تغییرات ذخیره نشده‌اند. آیا می‌خواهید لغو کنید و اطلاعات فرم پاک شوند؟');
+      if(ok){
+        try{ sessionStorage.removeItem(key); setDirty(form, false); }catch(e){}
+        // if it's a link, follow href
+        if(t.tagName.toLowerCase() === 'a' && t.href){ window.location.href = t.href; }
+        // if it's a button of type reset, perform reset and allow default
+        if(t.tagName.toLowerCase() === 'button' && (t.type || '').toLowerCase() === 'reset'){
+          form.reset();
+        }
+        // otherwise if data-target provided, navigate
+        const href = t.getAttribute('data-href') || t.getAttribute('href');
+        if(href){ window.location.href = href; }
+      }
+    });
+
+    // allow explicit reset clears
+    form.addEventListener('reset', ()=>{
+      try{ sessionStorage.removeItem(key); setDirty(form, false); }catch(e){}
+    });
+  });
+
+})();
+
+// =============== Basic client-side validation for required person selection ===============
+(function(){
+  const forms = $all('form');
+  if(!forms.length) return;
+  forms.forEach(form => {
+    form.addEventListener('submit', function(ev){
+      // if form explicitly opts out
+      if(form.getAttribute('data-validate-person') === 'false') return;
+      // detect hidden person fields by common names
+      const personField = form.querySelector('input[name="person_token"], input[name="person_id"], input[name="person"]');
+      if(!personField) return; // not a person-bound form
+      const val = (personField.value || '').trim();
+      const isNumericId = /^\d+$/.test(val);
+      if(!val || !isNumericId){
+        ev.preventDefault();
+        alert('لطفاً طرف حساب معتبر انتخاب کنید.');
+        try { personField.focus(); } catch(e){}
+        return false;
+      }
+    }, true);
   });
 })();
 
@@ -197,5 +419,140 @@ function badgeOf(t){
 
   tick();
   setInterval(tick, 1000);
+})();
+
+// =============== Jalali Date Inputs ===============
+(function(){
+  const inputs = document.querySelectorAll('[data-jalali-input]');
+  if(inputs.length === 0) return;
+
+  const faDigits = '۰۱۲۳۴۵۶۷۸۹'.split('');
+  const enDigits = '0123456789'.split('');
+
+  const toFaDigits = (value)=> String(value || '').replace(/\d/g, d => faDigits[Number(d)]);
+  const toEnDigits = (value)=> String(value || '').replace(/[۰-۹]/g, ch => enDigits[faDigits.indexOf(ch)]);
+
+  const pad = (n)=> n.toString().padStart(2, '0');
+
+  function jalaliToGregorian(jy, jm, jd){
+    jy = parseInt(jy, 10);
+    jm = parseInt(jm, 10);
+    jd = parseInt(jd, 10);
+    if(isNaN(jy) || isNaN(jm) || isNaN(jd)) return null;
+    jy += 1595;
+    let days = -355668 + (365 * jy) + Math.floor(jy / 33) * 8 + Math.floor(((jy % 33) + 3) / 4);
+    days += jd + (jm <= 6 ? (31 * (jm - 1)) : ((jm - 7) * 30) + 186);
+    let gy = 400 * Math.floor(days / 146097);
+    days %= 146097;
+    if(days > 36524){
+      gy += 100 * Math.floor((days - 1) / 36524);
+      days = (days - 1) % 36524;
+      if(days >= 365){
+        days += 1;
+      }
+    }
+    gy += 4 * Math.floor(days / 1461);
+    days %= 1461;
+    if(days > 365){
+      gy += Math.floor((days - 1) / 365);
+      days = (days - 1) % 365;
+    }
+    let gd = days + 1;
+    let gm;
+    if(days < 186){
+      gm = 1 + Math.floor(days / 31);
+      gd = 1 + (days % 31);
+    } else {
+      gm = 7 + Math.floor((days - 186) / 30);
+      gd = 1 + ((days - 186) % 30);
+    }
+    return [gy, gm, gd];
+  }
+
+  function gregorianToJalali(gy, gm, gd){
+    gy = parseInt(gy, 10);
+    gm = parseInt(gm, 10);
+    gd = parseInt(gd, 10);
+    if(isNaN(gy) || isNaN(gm) || isNaN(gd)) return null;
+    const g_d_m = [0,31,59,90,120,151,181,212,243,273,304,334];
+    let jy = (gy > 1600) ? 979 : 0;
+    gy -= (gy > 1600) ? 1600 : 621;
+    const gy2 = gm > 2 ? gy + 1 : gy;
+    let days = (365 * gy) + Math.floor((gy2 + 3) / 4) - Math.floor((gy2 + 99) / 100) + Math.floor((gy2 + 399) / 400);
+    days += gd + g_d_m[gm - 1] - 80;
+    jy += 33 * Math.floor(days / 12053);
+    days %= 12053;
+    jy += 4 * Math.floor(days / 1461);
+    days %= 1461;
+    if(days > 365){
+      jy += Math.floor((days - 1) / 365);
+      days = (days - 1) % 365;
+    }
+    const jm = (days < 186) ? 1 + Math.floor(days / 31) : 7 + Math.floor((days - 186) / 30);
+    const jd = (days < 186) ? 1 + (days % 31) : 1 + ((days - 186) % 30);
+    return [jy, jm, jd];
+  }
+
+  function parseJalali(raw){
+    if(!raw) return null;
+    const clean = toEnDigits(String(raw)).replace(/\//g, '-').trim();
+    const parts = clean.split('-');
+    if(parts.length !== 3) return null;
+    const jy = parseInt(parts[0], 10);
+    const jm = parseInt(parts[1], 10);
+    const jd = parseInt(parts[2], 10);
+    if(!jy || !jm || !jd) return null;
+    if(jm < 1 || jm > 12 || jd < 1 || jd > 31) return null;
+    return {jy, jm, jd};
+  }
+
+  inputs.forEach(inp => {
+    const targetId = inp.dataset.jalaliTarget;
+    if(!targetId) return;
+    const hidden = document.getElementById(targetId) || document.querySelector(`[name="${targetId}"]`);
+    if(!hidden) return;
+
+    const syncFromHidden = ()=>{
+      const raw = hidden.value || '';
+      if(!raw) return;
+      const parts = raw.split('-');
+      if(parts.length !== 3) return;
+      const g = parts.map(p=>parseInt(p,10));
+      const j = gregorianToJalali(g[0], g[1], g[2]);
+      if(j){
+        inp.value = toFaDigits(`${j[0]}-${pad(j[1])}-${pad(j[2])}`);
+      }
+    };
+
+    const syncHidden = ()=>{
+      const parsed = parseJalali(inp.value);
+      if(!parsed){
+        hidden.value = '';
+        inp.setCustomValidity(inp.value.trim() ? 'تاریخ جلالی نامعتبر است.' : '');
+        return;
+      }
+      const g = jalaliToGregorian(parsed.jy, parsed.jm, parsed.jd);
+      if(!g){
+        hidden.value = '';
+        inp.setCustomValidity('تاریخ جلالی نامعتبر است.');
+        return;
+      }
+      hidden.value = `${g[0]}-${pad(g[1])}-${pad(g[2])}`;
+      inp.value = toFaDigits(`${parsed.jy}-${pad(parsed.jm)}-${pad(parsed.jd)}`);
+      inp.setCustomValidity('');
+    };
+
+    inp.addEventListener('input', ()=>{
+      inp.value = toFaDigits(inp.value.replace(/[^0-9۰-۹\-\/]/g, ''));
+    });
+    inp.addEventListener('blur', syncHidden);
+    inp.addEventListener('change', syncHidden);
+
+    if(hidden.value){
+      syncFromHidden();
+    } else if(inp.value){
+      syncHidden();
+    }
+  });
 })();
 

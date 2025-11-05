@@ -69,6 +69,28 @@
     invDateGreg.value = invDateFa.dataset.greg;
   }
 
+  // Generate client-side invoice reference using Jalali parts and client time
+  try{
+    const invInput = document.querySelector('#inv_number');
+    if(invInput && (!invInput.value || invInput.value.trim()==='')){
+      const now = new Date();
+      // use the existing jalali conversion helpers in app.js if present
+      function toJalaliParts(d){
+        // reuse gregorianToJalali defined in app.js jalali helpers; fallback to simple date
+        if(typeof gregorianToJalali === 'function'){
+          return gregorianToJalali(d.getFullYear(), d.getMonth()+1, d.getDate());
+        }
+        return [d.getFullYear(), d.getMonth()+1, d.getDate()];
+      }
+      const p = toJalaliParts(now);
+      const jy = String(p[0]).padStart(4,'0');
+      const jm = String(p[1]).padStart(2,'0');
+      const jd = String(p[2]).padStart(2,'0');
+      const ts = `${String(now.getHours()).padStart(2,'0')}${String(now.getMinutes()).padStart(2,'0')}${String(now.getSeconds()).padStart(2,'0')}`;
+      invInput.value = `INV-${jy}${jm}${jd}-${ts}`;
+    }
+  }catch(e){console.warn('inv ref gen failed', e)}
+
   const personWrapper = document.querySelector('.sales-module .customer-lock');
   const personSearch = document.querySelector('#person_search');
   const personBox = document.querySelector('#person_results');
@@ -267,7 +289,8 @@
         searchInput.value = a.dataset.code;
         hide(resultsBox);
         auditLog('line-item-selected', { item_id: a.dataset.id, code: a.dataset.code, row: tr.dataset.rowIndex });
-        if(qty && !qty.value){ qty.focus(); }
+        // After selecting an item, focus the unit price field (قیمت فی)
+        if(unitPrice && !unitPrice.value){ unitPrice.focus(); }
         if(meta){
           meta.textContent = `${a.dataset.name}`;
         }
@@ -354,12 +377,39 @@
 
   const saleForm = document.querySelector('#sale-form');
   if(saleForm){
-    saleForm.addEventListener('submit', function(){
+    // Prevent accidental submits: require explicit confirmation before applying invoice
+    saleForm.addEventListener('submit', function(ev){
+      const rows = tbody.querySelectorAll('tr').length;
+      const total = toNum(grandTotal?.value);
+      const msg = `آیا از ثبت فاکتور با ${rows} ردیف و جمع کل ${total.toLocaleString()} تومان اطمینان دارید؟`;
+      if(!window.confirm(msg)){
+        ev.preventDefault();
+        return false;
+      }
       auditLog('invoice-submit', {
         person_id: personToken.value || null,
-        row_count: tbody.querySelectorAll('tr').length,
-        total: toNum(grandTotal?.value)
+        row_count: rows,
+        total: total
       });
+      // allow submission to proceed
+      return true;
+    });
+
+    // Enter acts like Tab inside the sale form: move to next focusable input
+    saleForm.addEventListener('keydown', function(ev){
+      if(ev.key !== 'Enter') return;
+      const target = ev.target;
+      if(!target || target.tagName.toLowerCase() === 'textarea') return;
+      // ignore when pressing Enter on a button/input[type=submit]
+      if(target.tagName.toLowerCase() === 'button' || (target.tagName.toLowerCase()==='input' && (target.type==='submit' || target.type==='button')) ) return;
+      // find focusable elements
+      const focusable = Array.from(saleForm.querySelectorAll('input, select, textarea, button')).filter(el => !el.disabled && el.type !== 'hidden' && el.offsetParent !== null);
+      const idx = focusable.indexOf(target);
+      if(idx >= 0){
+        ev.preventDefault();
+        const next = focusable[idx+1] || focusable[idx];
+        try{ next.focus(); }catch(e){}
+      }
     });
   }
 })();

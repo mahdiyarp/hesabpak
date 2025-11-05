@@ -1,0 +1,179 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="module-wrap cash-module">
+  <div class="overlay-shield" aria-hidden="true"></div>
+  
+  {# Kind selector tabs #}
+  <div class="kind-selector" style="margin-bottom: 1rem;">
+    <div style="display: flex; gap: 1rem; justify-content: center;">
+      <a href="{{ prefix }}/cash_doc?kind=receive" 
+         class="kind-tab {% if cash_kind == 'receive' %}active{% endif %}"
+         style="padding: 0.75rem 2rem; border-radius: 8px; text-decoration: none; font-weight: bold; transition: all 0.2s; {% if cash_kind == 'receive' %}background: #28a745; color: white;{% else %}background: #f8f9fa; color: #333; border: 2px solid #ddd;{% endif %}">
+        ➕ دریافت
+      </a>
+      <a href="{{ prefix }}/cash_doc?kind=payment" 
+         class="kind-tab {% if cash_kind == 'payment' %}active{% endif %}"
+         style="padding: 0.75rem 2rem; border-radius: 8px; text-decoration: none; font-weight: bold; transition: all 0.2s; {% if cash_kind == 'payment' %}background: #dc3545; color: white;{% else %}background: #f8f9fa; color: #333; border: 2px solid #ddd;{% endif %}">
+        ➖ پرداخت
+      </a>
+    </div>
+  </div>
+
+  <h2>{% if cash_kind == 'receive' %}➕ دریافت وجه{% else %}➖ پرداخت وجه{% endif %}</h2>
+
+  <form method="post" action="{{ prefix }}/cash_doc?kind={{ cash_kind }}" id="cash-form" novalidate data-persist="true" data-persist-key="cash_{{ cash_kind }}">
+    <input type="hidden" name="cash_kind" value="{{ cash_kind }}">
+    <input type="hidden" name="person_token" id="person_token">
+
+    <div class="card" style="padding: 1.5rem;">
+      <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-end;">
+        <div style="flex: 1; min-width: 160px;">
+          <label class="lbl" for="doc_number">شماره سند</label>
+          <input class="inp" name="doc_number" id="doc_number" value="{{ doc_number }}" readonly>
+        </div>
+        <div style="flex: 1; min-width: 160px;">
+          <label class="lbl" for="doc_date_fa">تاریخ (شمسی)</label>
+          <input class="inp" id="doc_date_fa" readonly value="{{ current_jdate }}" data-greg="{{ current_gdate }}">
+          <input type="hidden" name="doc_date_greg" id="doc_date_greg" value="{{ current_gdate }}">
+        </div>
+        <div style="flex: 2; min-width: 250px;">
+          <label class="lbl" for="person_search">طرف حساب</label>
+          <div class="customer-lock">
+            <div class="search-wrapper">
+              <input class="inp" id="person_search" placeholder="جستجو و انتخاب طرف حساب..." autocomplete="off"
+                     {% if prefill_person %}value="{{ prefill_person.name }}"{% endif %}>
+              <div id="person_results" class="search-results" hidden></div>
+            </div>
+            <button type="button" id="person_unlock" {% if prefill_person %}{% else %}hidden{% endif %}>تغییر طرف حساب</button>
+            <span class="lock-indicator"></span>
+          </div>
+          <div id="person_hint" class="hint">{% if prefill_person %}{{ prefill_person.code }} - {{ prefill_person.name }}{% else %}طرف حساب انتخاب نشده است{% endif %}</div>
+        </div>
+        <div style="flex: 1; min-width: 200px;">
+          <label class="lbl" for="amount">مبلغ (تومان)</label>
+          <input class="inp ta-num" name="amount" id="amount" inputmode="decimal" required
+                 value="{% if prefill_amount %}{{ prefill_amount }}{% endif %}">
+        </div>
+      </div>
+
+      <div style="margin-top: 1.5rem; display: flex; gap: 1rem; flex-wrap: wrap;">
+        <div style="flex: 1; min-width: 200px;">
+          <label class="lbl" for="method">روش پرداخت</label>
+          <select class="inp" name="method" id="method">
+            <option value="cash">نقدی</option>
+            <option value="pos">کارتخوان (POS)</option>
+            <option value="bank">بانکی (حواله)</option>
+            <option value="cheque">چک</option>
+          </select>
+        </div>
+        
+        {# فقط صندوق‌هایی که ثبت شده‌اند نمایش داده شوند - به جز چک که همیشه نمایش داده می‌شود #}
+        <div id="cashbox_container" style="flex: 2; min-width: 300px; display: none;">
+          <label class="lbl" for="cashbox_id">صندوق/حساب (اختیاری)</label>
+          <select class="inp" name="cashbox_id" id="cashbox_id">
+            <option value="">بدون انتخاب صندوق</option>
+            {% if cashboxes %}
+              {% for cb in cashboxes %}
+                <option value="{{ cb.id }}" data-kind="{{ cb.kind }}">{{ cb.name }} ({{ cb.kind }})</option>
+              {% endfor %}
+            {% endif %}
+          </select>
+          <div class="hint">{% if not cashboxes %}هنوز صندوقی ثبت نشده است.{% else %}انتخاب صندوق برای روش‌های نقدی و بانکی اختیاری است.{% endif %}</div>
+        </div>
+
+        <div style="flex: 3; min-width: 300px;">
+          <label class="lbl" for="note">توضیحات</label>
+          <input class="inp" name="note" id="note" value="{% if prefill_note %}{{ prefill_note }}{% endif %}">
+        </div>
+      </div>
+
+      {# فیلدهای چک - فقط وقتی روش چک است #}
+      <div id="cheque_fields" style="display: none; margin-top: 1.5rem; padding: 1rem; background: #f8f9fa; border-radius: 8px;">
+        <h4 style="margin: 0 0 1rem 0;">📝 مشخصات چک</h4>
+        <div style="display: flex; gap: 1rem; flex-wrap: wrap;">
+          <div style="flex: 1; min-width: 200px;">
+            <label class="lbl" for="cheque_number">شماره صیادی چک (۱۶ رقم)</label>
+            <input class="inp" name="cheque_number" id="cheque_number" maxlength="16" pattern="\d{16}">
+          </div>
+          <div style="flex: 1; min-width: 180px;">
+            <label class="lbl" for="cheque_due_date_fa">تاریخ سررسید</label>
+            <input class="inp" name="cheque_due_date_fa" id="cheque_due_date_fa" data-jalali-input placeholder="۱۴۰۳/۱۲/۱۵">
+          </div>
+          <div style="flex: 1; min-width: 180px;">
+            <label class="lbl" for="cheque_bank">بانک</label>
+            <input class="inp" name="cheque_bank" id="cheque_bank" placeholder="ملی، ملت، ...">
+          </div>
+        </div>
+        <div style="display: flex; gap: 1rem; flex-wrap: wrap; margin-top: 1rem;">
+          <div style="flex: 1; min-width: 180px;">
+            <label class="lbl" for="cheque_owner">صاحب چک</label>
+            <input class="inp" name="cheque_owner" id="cheque_owner">
+          </div>
+          <div style="flex: 1; min-width: 180px;">
+            <label class="lbl" for="cheque_branch">شعبه</label>
+            <input class="inp" name="cheque_branch" id="cheque_branch">
+          </div>
+          <div style="flex: 1; min-width: 180px;">
+            <label class="lbl" for="cheque_account">شماره حساب</label>
+            <input class="inp" name="cheque_account" id="cheque_account">
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="actions-row" style="margin-top: 1.5rem; display: flex; gap: 1rem; justify-content: flex-end;">
+      <button class="btn-primary" type="submit">
+        💾 ثبت {{ 'دریافت' if cash_kind == 'receive' else 'پرداخت' }}
+      </button>
+    </div>
+  </form>
+</div>
+
+<script>
+(function() {
+  const methodSelect = document.getElementById('method');
+  const cashboxContainer = document.getElementById('cashbox_container');
+  const cashboxSelect = document.getElementById('cashbox_id');
+  const chequeFields = document.getElementById('cheque_fields');
+  const hasCashboxes = {{ 'true' if cashboxes else 'false' }};
+
+  function updateFields() {
+    const method = methodSelect.value;
+    
+    // فقط برای چک صندوق اجباری است و باید نمایش داده شود
+    if (method === 'cheque') {
+      cashboxContainer.style.display = 'block';
+      chequeFields.style.display = 'block';
+      // فقط حساب‌های بانکی را نمایش بده
+      Array.from(cashboxSelect.options).forEach(opt => {
+        if (opt.value && opt.dataset.kind !== 'bank') {
+          opt.style.display = 'none';
+        } else {
+          opt.style.display = 'block';
+        }
+      });
+    } else {
+      chequeFields.style.display = 'none';
+      // برای سایر روش‌ها، فقط اگر صندوقی ثبت شده باشد نمایش بده
+      if (hasCashboxes) {
+        cashboxContainer.style.display = 'block';
+        // نمایش همه صندوق‌ها
+        Array.from(cashboxSelect.options).forEach(opt => {
+          opt.style.display = 'block';
+        });
+      } else {
+        cashboxContainer.style.display = 'none';
+      }
+    }
+  }
+
+  methodSelect.addEventListener('change', updateFields);
+  updateFields();
+
+  // پیش‌مقداردهی person_token اگر از فاکتور آمده
+  {% if prefill_person %}
+  document.getElementById('person_token').value = '{{ prefill_person.id }}';
+  {% endif %}
+})();
+</script>
+{% endblock %}

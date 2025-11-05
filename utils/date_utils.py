@@ -14,7 +14,7 @@ from datetime import datetime, date
 from typing import Dict, Optional, Tuple, Union
 
 # --- تبدیل میلادی به جلالی (بدون وابستگی خارجی) ---
-def g2j(gy:int, gm:int, gd:int):
+def g2j(gy: int, gm: int, gd: int):
     g_d_m = [0,31,59,90,120,151,181,212,243,273,304,334]
     if gy > 1600:
         jy = 979
@@ -38,6 +38,40 @@ def g2j(gy:int, gm:int, gd:int):
         jm = 7 + ((days - 186) // 30)
         jd = 1 + ((days - 186) % 30)
     return jy, jm, jd
+
+
+def j2g(jy: int, jm: int, jd: int) -> Tuple[int, int, int]:
+    """تبدیل تاریخ جلالی به میلادی بدون نیاز به وابستگی خارجی."""
+
+    jy += 1595
+    days = -355668 + (365 * jy) + ((jy // 33) * 8) + (((jy % 33) + 3) // 4)
+    days += jd + (31 * (jm - 1) if jm <= 6 else ((jm - 7) * 30) + 186)
+
+    gy = 400 * (days // 146097)
+    days %= 146097
+
+    if days > 36524:
+        gy += 100 * ((days - 1) // 36524)
+        days = (days - 1) % 36524
+        if days >= 365:
+            days += 1
+
+    gy += 4 * (days // 1461)
+    days %= 1461
+
+    if days > 365:
+        gy += (days - 1) // 365
+        days = (days - 1) % 365
+
+    gd = days + 1
+    if days < 186:
+        gm = 1 + (days // 31)
+        gd = 1 + (days % 31)
+    else:
+        gm = 7 + ((days - 186) // 30)
+        gd = 1 + ((days - 186) % 30)
+
+    return gy, gm, gd
 
 
 DateLike = Union[datetime, date]
@@ -108,6 +142,47 @@ def parse_gregorian_date(
         if not raw:
             raise ValueError("Empty date")
         return datetime.strptime(raw, "%Y-%m-%d").date()
+    except Exception:
+        if allow_none and fallback is None:
+            return None
+        return fallback if fallback is not None else today_greg_date()
+
+
+def _clean_digits(value: Optional[str]) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _fa_to_en_digits(value: str) -> str:
+    try:
+        trans = str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789")
+        return value.translate(trans)
+    except Exception:
+        return value
+
+
+def parse_jalali_date(
+    value: Optional[str],
+    fallback: Optional[date] = None,
+    *,
+    allow_none: bool = False,
+) -> Optional[date]:
+    """Parse ``YYYY-MM-DD`` (with Persian or Latin digits) Jalali dates."""
+
+    raw = _clean_digits(value)
+    if not raw:
+        return None if allow_none else (fallback or today_greg_date())
+
+    raw = _fa_to_en_digits(raw)
+    raw = raw.replace("/", "-")
+    try:
+        parts = raw.split("-")
+        if len(parts) != 3:
+            raise ValueError("Invalid Jalali date")
+        jy, jm, jd = [int(p) for p in parts]
+        gy, gm, gd = j2g(jy, jm, jd)
+        return date(gy, gm, gd)
     except Exception:
         if allow_none and fallback is None:
             return None

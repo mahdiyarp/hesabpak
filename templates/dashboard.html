@@ -1,12 +1,13 @@
 {% extends 'base.html' %}
 {% block content %}
 <div class="dashboard">
+  {% if 'hero' in dashboard_widgets %}
   <div class="dashboard-hero">
     <div class="hero-info">
       <h1>داشبورد مدیریتی</h1>
       <p>نمای کلی عملکرد امروز فروشگاه.</p>
-      <div class="hero-clock" data-live-clock data-jalali="{{ now_info['jalali_date'] }}">
-        <span class="hero-date" data-role="date">{{ now_info['jalali_date'] }}</span>
+      <div class="hero-clock" data-live-clock data-jalali="{{ now_info['jalali_date']|fa_digits }}">
+        <span class="hero-date" data-role="date">{{ now_info['jalali_date']|fa_digits }}</span>
         <span class="hero-time" data-role="time">--:--:--</span>
       </div>
     </div>
@@ -15,11 +16,17 @@
       <div class="hero-label">تعداد فاکتور فروش امروز</div>
     </div>
   </div>
+  {% endif %}
 
+  {% if 'stats' in dashboard_widgets %}
   <div class="stats-grid">
     <div class="stat-card">
       <span class="stat-title">مبلغ فروش امروز</span>
-      <span class="stat-value">{{ today_stats.invoice_total|sep }} <span class="unit">تومان</span></span>
+      <span class="stat-value">{{ today_stats.sales_total|sep }} <span class="unit">تومان</span></span>
+    </div>
+    <div class="stat-card">
+      <span class="stat-title">مبلغ خرید امروز</span>
+      <span class="stat-value">{{ today_stats.purchase_total|sep }} <span class="unit">تومان</span></span>
     </div>
     <div class="stat-card">
       <span class="stat-title">جمع دریافتی امروز</span>
@@ -34,10 +41,27 @@
       <span class="stat-value">{{ today_stats.net_cash|sep }} <span class="unit">تومان</span></span>
     </div>
   </div>
+  {% endif %}
 
+  {% if 'assistant' in user_permissions %}
+  <div class="card assistant-callout">
+    <div class="assistant-icon">🤖</div>
+    <div class="assistant-body">
+      <h3>دستیار هوشمند حساب‌پاک</h3>
+      <p>بارگذاری تصویر یا متن فاکتور و ثبت خودکار فروش یا خرید با کمک هوش مصنوعی.</p>
+      <div class="assistant-actions">
+        <a class="btn-primary" href="{{ prefix }}/assistant">شروع گفت‌وگو</a>
+        <span class="assistant-hint">مدل فعال: {{ assistant_model_label }}</span>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if 'cash' in dashboard_widgets %}
   <div class="balances-card card">
     <h2>موجودی صندوق‌ها</h2>
     <div class="table-wrapper">
+      {% if cash_balances and cash_balances|length > 0 %}
       <table>
         <thead>
           <tr>
@@ -58,9 +82,14 @@
           {% endfor %}
         </tbody>
       </table>
+      {% else %}
+      <div class="empty-state">هیچ صندوقی ثبت نشده است. برای مدیریت صندوق‌ها به بخش مدیریت صندوق‌ها مراجعه کنید.</div>
+      {% endif %}
     </div>
   </div>
+  {% endif %}
 
+  {% if 'charts' in dashboard_widgets %}
   <div class="charts-grid">
     <div class="card chart-card">
       <div class="chart-header">
@@ -77,7 +106,9 @@
       <canvas id="cashChart" height="220"></canvas>
     </div>
   </div>
+  {% endif %}
 
+  {% if 'cheques' in dashboard_widgets %}
   <div class="lists-grid">
     <div class="card list-card">
       <h3>چک‌های دریافتی سه روز آینده</h3>
@@ -89,7 +120,7 @@
             <strong>{{ doc.person }}</strong>
             <span class="amount">{{ doc.amount|sep }} تومان</span>
           </div>
-          <div class="row-meta">{{ doc.date }} | شماره سند {{ doc.number }}</div>
+          <div class="row-meta">{{ doc.date|fa_digits }} | شماره سند {{ doc.number|fa_digits }}{% if doc.cheque_number %} | چک {{ doc.cheque_number|fa_digits }}{% endif %}</div>
         </li>
         {% endfor %}
       </ul>
@@ -107,7 +138,7 @@
             <strong>{{ doc.person }}</strong>
             <span class="amount">{{ doc.amount|sep }} تومان</span>
           </div>
-          <div class="row-meta">{{ doc.date }} | شماره سند {{ doc.number }}</div>
+          <div class="row-meta">{{ doc.date|fa_digits }} | شماره سند {{ doc.number|fa_digits }}{% if doc.cheque_number %} | چک {{ doc.cheque_number|fa_digits }}{% endif %}</div>
         </li>
         {% endfor %}
       </ul>
@@ -116,6 +147,7 @@
       {% endif %}
     </div>
   </div>
+  {% endif %}
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -132,6 +164,17 @@
       data: {
         labels: chartData.labels,
         datasets: [
+          {
+            type: 'line',
+            label: 'مبلغ خرید',
+            data: chartData.purchaseTotals || [],
+            borderColor: '#DD6B5A',
+            backgroundColor: 'rgba(221,107,90,0.08)',
+            borderWidth: 2,
+            tension: 0.35,
+            yAxisID: 'y',
+            fill: true,
+          },
           {
             type: 'line',
             label: 'مبلغ فروش',

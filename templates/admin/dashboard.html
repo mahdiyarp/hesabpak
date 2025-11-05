@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="module-wrap admin-dashboard">
+  <h2>🗄️ مدیریت سامانه</h2>
+  <p class="muted" style="margin: 0 0 16px;">
+    از این بخش می‌توانید تنظیمات حیاتی سامانه، فرآیندهای بکاپ و ابزارهای فنی را کنترل کنید.
+  </p>
+
+  <div class="admin-grid">
+    <a class="admin-card" href="{{ url_for('admin_users') }}">
+      <div class="admin-card__icon">👥</div>
+      <div class="admin-card__body">
+        <h3>کاربران و سطوح دسترسی</h3>
+        <p>ایجاد، ویرایش، غیرفعال‌سازی و تعیین مجوزهای دسترسی کاربران سامانه.</p>
+      </div>
+      <div class="admin-card__chev">›</div>
+    </a>
+
+    <a class="admin-card" href="{{ url_for('admin_cashboxes') }}">
+      <div class="admin-card__icon">🏦</div>
+      <div class="admin-card__body">
+        <h3>صندوق‌ها و حساب‌ها</h3>
+        <p>مدیریت صندوق‌های نقدی و حساب‌های بانکی جهت استفاده در دریافت و پرداخت.</p>
+      </div>
+      <div class="admin-card__chev">›</div>
+    </a>
+
+    <a class="admin-card" href="{{ prefix }}/settings">
+      <div class="admin-card__icon">⚙️</div>
+      <div class="admin-card__body">
+        <h3>تنظیمات</h3>
+        <p>پیکربندی دستگاه کارتخوان و سایر تنظیمات مدیریتی سامانه.</p>
+      </div>
+      <div class="admin-card__chev">›</div>
+    </a>
+
+    <a class="admin-card" href="{{ url_for('backup.index') }}">
+      <div class="admin-card__icon">🗄️</div>
+      <div class="admin-card__body">
+        <h3>بکاپ و سال مالی</h3>
+        <p>ساخت و مدیریت بکاپ‌ها، بازیابی اطلاعات و شروع سال مالی جدید.</p>
+      </div>
+      <div class="admin-card__chev">›</div>
+    </a>
+
+    <a class="admin-card" href="{{ prefix }}/developer">
+      <div class="admin-card__icon">🧑‍💻</div>
+      <div class="admin-card__body">
+        <h3>ابزار توسعه‌دهنده</h3>
+        <p>اجرای اسکریپت‌های پشتیبانی و بررسی وضعیت فنی سیستم.</p>
+      </div>
+      <div class="admin-card__chev">›</div>
+    </a>
+
+    <a class="admin-card" href="{{ prefix }}/assistant">
+      <div class="admin-card__icon">🤖</div>
+      <div class="admin-card__body">
+        <h3>دستیار هوشمند</h3>
+        <p>ثبت خودکار فاکتور از طریق هوش مصنوعی و شناسایی اقلام از روی تصویر.</p>
+      </div>
+      <div class="admin-card__chev">›</div>
+    </a>
+  </div>
+</div>
+{% endblock %}

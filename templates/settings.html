@@ -4,6 +4,7 @@
   <h2>⚙️ تنظیمات سامانه</h2>
 
   <form method="post" class="card" style="padding:16px; margin-bottom:16px;">
+    <input type="hidden" name="form_id" value="pos">
     <h3 style="margin-top:0;">انتخاب دستگاه کارتخوان</h3>
     <p class="muted" style="margin-top:4px;">
       دستگاه‌های زیر از پرکاربردترین پایانه‌های فروش سه سال اخیر در ایران هستند. با انتخاب دستگاه، مبلغ اسناد دریافت/پرداخت به‌صورت
@@ -26,12 +27,175 @@
     </div>
   </form>
 
+  <form method="post" class="card" style="padding:16px; margin-bottom:16px; display:grid; gap:18px;">
+    <input type="hidden" name="form_id" value="ui">
+    <div>
+      <h3 style="margin-top:0;">🎨 شخصی‌سازی ظاهر</h3>
+      <p class="muted">تم رابط کاربری و ترتیب نمایش کارت‌ها در داشبورد را انتخاب کنید.</p>
+      <div class="theme-options">
+        {% for value,label in theme_choices %}
+        <label class="theme-option">
+          <input type="radio" name="ui_theme" value="{{ value }}" {% if value == selected_theme %}checked{% endif %}>
+          <span class="theme-chip theme-{{ value }}">{{ label }}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div>
+        <label class="lbl" for="search_sort">نحوه مرتب‌سازی نتایج جستجو</label>
+        <select class="inp" id="search_sort" name="search_sort">
+          {% for value,label in search_sort_choices %}
+          <option value="{{ value }}" {% if value == search_sort_selected %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="lbl" for="price_display_mode">نمایش قیمت کالا در نتایج</label>
+        <select class="inp" id="price_display_mode" name="price_display_mode">
+          {% for value,label in price_display_modes %}
+          <option value="{{ value }}" {% if value == price_mode_selected %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <div class="card muted" style="background:transparent; border:1px dashed var(--border-color); padding:12px;">
+      <label style="display:flex; align-items:center; gap:10px;">
+        <input type="checkbox" name="allow_negative_sales" {% if allow_negative_selected %}checked{% endif %}>
+        امکان ثبت فروش با موجودی منفی (برای پیش‌فروش یا رزرو)
+      </label>
+    </div>
+
+    <div>
+      <h4 style="margin:0 0 8px 0;">بخش‌های قابل نمایش در داشبورد</h4>
+      <div class="widget-grid">
+        {% for value,label in dashboard_widget_choices %}
+        <label class="widget-option">
+          <input type="checkbox" name="dashboard_widgets" value="{{ value }}" {% if value in dashboard_widgets_selected %}checked{% endif %}>
+          <span>{{ label }}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+
+    <div>
+      <button type="submit" class="btn-primary">ذخیره تنظیمات ظاهری</button>
+    </div>
+  </form>
+
+  <form method="post" class="card" style="padding:16px; margin-bottom:16px; display:grid; gap:16px;">
+    <input type="hidden" name="form_id" value="ai">
+    <div>
+      <h3 style="margin-top:0;">🤖 اتصال دستیار هوشمند (سراسری)</h3>
+      <p class="muted">کلید API سرویس OpenAI را وارد کنید تا بتوانید از ماژول هوش مصنوعی برای خواندن فاکتورها استفاده کنید.</p>
+    </div>
+
+    <div class="grid-2">
+      <div>
+        <label class="lbl" for="openai_api_key">کلید API</label>
+        <input class="inp" type="password" id="openai_api_key" name="openai_api_key" placeholder="sk-..." autocomplete="off">
+        {% if assistant_api_has %}
+        <div class="hint">کلید فعلی: {{ assistant_api_mask }}</div>
+        {% else %}
+        <div class="hint">برای فعال‌شدن دستیار لازم است یک کلید معتبر ثبت شود.</div>
+        {% endif %}
+      </div>
+      <div>
+        <label class="lbl" for="openai_model">مدل پیش‌فرض</label>
+        <select class="inp" id="openai_model" name="openai_model">
+          {% for value,label in assistant_model_choices %}
+          <option value="{{ value }}" {% if value == assistant_model_selected %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+        <div class="hint">مدل‌های چندحالته قادر به پردازش متن و تصویر هستند.</div>
+      </div>
+    </div>
+
+    <div class="card muted" style="background:transparent; border:1px dashed var(--border-color); padding:12px;">
+      <ul style="margin:0; padding-right:18px; line-height:1.8;">
+        <li>کلید در پایگاه داده به‌صورت رمز نشده نگهداری می‌شود؛ از دسترسی کاربران غیرمجاز جلوگیری کنید.</li>
+        <li>برای حذف کلید، فیلد را خالی گذاشته و ذخیره کنید.</li>
+      </ul>
+    </div>
+
+    <div>
+      <button type="submit" class="btn-primary">ذخیره تنظیمات دستیار</button>
+    </div>
+  </form>
+
+  <form method="post" class="card" style="padding:16px; margin-bottom:16px; display:grid; gap:16px; border:2px solid #28a745;">
+    <input type="hidden" name="form_id" value="user_ai">
+    <div>
+      <h3 style="margin-top:0;">👤 تنظیمات شخصی دستیار هوشمند</h3>
+      <p class="muted">تنظیمات شخصی شما برای استفاده از دستیار هوشمند (کلید API، مدل، دستورالعمل‌های سیستمی و ...)</p>
+      <div class="card muted" style="background:#e7f9ed; border:1px solid #28a745; padding:12px; margin-top:12px;">
+        <strong>✨ ویژگی جدید:</strong> حالا هر کاربر می‌تواند کلید API و تنظیمات خاص خود را داشته باشد!
+      </div>
+    </div>
+
+    <div class="grid-2">
+      <div>
+        <label class="lbl" for="user_openai_api_key">کلید API شخصی شما</label>
+        <input class="inp" type="password" id="user_openai_api_key" name="user_openai_api_key" 
+               value="{{ user_settings.openai_api_key or '' }}" placeholder="sk-..." autocomplete="off">
+        <div class="hint">اگر خالی باشد، از کلید سراسری استفاده می‌شود.</div>
+      </div>
+      <div>
+        <label class="lbl" for="user_openai_model">مدل دلخواه شما</label>
+        <select class="inp" id="user_openai_model" name="user_openai_model">
+          <option value="">پیش‌فرض (از تنظیمات سراسری)</option>
+          {% for value,label in assistant_model_choices %}
+          <option value="{{ value }}" {% if user_settings.openai_model == value %}selected{% endif %}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+
+    <div>
+      <label class="lbl" for="user_system_prompt">دستورالعمل‌های سیستمی سفارشی (اختیاری)</label>
+      <textarea class="inp" id="user_system_prompt" name="user_system_prompt" rows="4" 
+                placeholder="مثال: تو یک دستیار حسابداری برای یک فروشگاه موبایل هستی. همیشه قیمت‌ها را با دقت بررسی کن...">{{ user_settings.system_prompt or '' }}</textarea>
+      <div class="hint">این دستورات به عنوان پیام سیستمی برای مدل ارسال می‌شود.</div>
+    </div>
+
+    <div class="grid-2">
+      <div>
+        <label class="lbl" for="user_temperature">Temperature (خلاقیت مدل)</label>
+        <input class="inp" type="number" id="user_temperature" name="user_temperature" 
+               value="{{ user_settings.temperature or 0.7 }}" min="0" max="2" step="0.1">
+        <div class="hint">عدد کمتر = دقیق‌تر، عدد بیشتر = خلاق‌تر (پیش‌فرض: 0.7)</div>
+      </div>
+      <div>
+        <label class="lbl" for="user_max_tokens">حداکثر توکن (اختیاری)</label>
+        <input class="inp" type="number" id="user_max_tokens" name="user_max_tokens" 
+               value="{{ user_settings.max_tokens or '' }}" min="100" max="16000" placeholder="خودکار">
+        <div class="hint">محدودیت طول پاسخ (خالی = بدون محدودیت)</div>
+      </div>
+    </div>
+
+    <div class="card muted" style="background:transparent; border:1px dashed var(--border-color); padding:12px;">
+      <ul style="margin:0; padding-right:18px; line-height:1.8;">
+        <li><strong>کلید API شخصی:</strong> اگر وارد کنید، از کلید شما استفاده می‌شود، در غیر این صورت از کلید سراسری</li>
+        <li><strong>مدل:</strong> می‌توانید مدل دلخواه خود را انتخاب کنید (مثلاً gpt-4o برای دقت بیشتر)</li>
+        <li><strong>دستورالعمل‌های سیستمی:</strong> رفتار دستیار را برای نیازهای خاص خود شخصی‌سازی کنید</li>
+        <li><strong>Temperature:</strong> کنترل میزان خلاقیت و تصادفی بودن پاسخ‌ها</li>
+        <li>این تنظیمات فقط برای کاربر شما ذخیره می‌شود و روی دیگران تأثیر ندارد</li>
+      </ul>
+    </div>
+
+    <div>
+      <button type="submit" class="btn-primary">💾 ذخیره تنظیمات شخصی من</button>
+    </div>
+  </form>
+
   <div class="card" style="padding:16px;">
     <h3 style="margin-top:0;">راهنما</h3>
     <ul class="muted" style="margin-top:8px; line-height:1.8;">
-      <li>پس از انتخاب دستگاه، در صفحات دریافت و پرداخت وضعیت ارسال مبلغ نمایش داده می‌شود.</li>
-      <li>اتصال فیزیکی به کارتخوان باید توسط تیم پشتیبانی شما انجام شود؛ این تنظیم تنها ارسال مبلغ را فعال می‌کند.</li>
-      <li>در صورت نیاز به مدل دیگر، لطفاً با تیم توسعه تماس بگیرید.</li>
+      <li>تم «طوسی مورب» مشابه تصویر پیش‌نمایش بوده و ناوبری مورب و کارت‌های با سایه نرم ارائه می‌دهد.</li>
+      <li>مرتب‌سازی جستجو برای تمام فرم‌های انتخاب کالا، مشتری و چک اعمال می‌شود.</li>
+      <li>اگر فروش منفی را فعال کنید کاهش موجودی از حد صفر عبور می‌کند و در گزارش موجودی نمایش داده می‌شود.</li>
     </ul>
   </div>
 </div>

@@ -5,6 +5,13 @@
 <form method="get" action="{{ prefix }}/entities" class="filters">
   <input type="hidden" name="kind" value="{{ kind }}">
   <input name="q" value="{{ q or '' }}" placeholder="جستجو بر اساس نام یا کد" class="inp" style="max-width:320px">
+  <select class="inp" name="per_page" style="max-width:120px">
+    {% set p = per_page|default(50) %}
+    <option value="20"    {{ 'selected' if p==20 }}>۲۰</option>
+    <option value="50"    {{ 'selected' if p==50 }}>۵۰</option>
+    <option value="100"   {{ 'selected' if p==100 }}>۱۰۰</option>
+    <option value="200"   {{ 'selected' if p==200 }}>۲۰۰</option>
+  </select>
   <button class="btn-primary" style="width:auto; padding:0 16px">جستجو</button>
 
   <div style="margin-right:auto"></div>
@@ -21,22 +28,37 @@
       <tr>
         <th>کد</th>
         <th>نام</th>
-        <th>{{ 'نوع شخص' if kind=='person' else 'واحد' }}</th>
-        <th>سریال</th>
+        {% if kind == 'item' %}
+          <th>واحد</th>
+          <th>موجودی</th>
+          <th>آخرین قیمت خرید</th>
+          <th>آخرین قیمت فروش</th>
+        {% else %}
+          <th>نوع شخص</th>
+          <th>مانده</th>
+          <th>وضعیت</th>
+        {% endif %}
         <th>سطح</th>
-        <th>والد</th>
         {% if is_admin %}<th class="center">عملیات</th>{% endif %}
       </tr>
     </thead>
     <tbody>
-      {% for r in rows %}
+      {% for item in rows %}
+        {% set r = item.entity %}
       <tr>
-        <td><code>{{ r.code }}</code></td>
+        <td><code>{{ r.code|fa_digits }}</code></td>
         <td>{{ r.name }}</td>
-        <td>{{ r.unit or '-' }}</td>
-        <td>{{ r.serial_no or '-' }}</td>
-        <td>{{ r.level }}</td>
-        <td>{{ r.parent.code if r.parent else '-' }}</td>
+        {% if kind == 'item' %}
+          <td>{{ r.unit or '-' }}</td>
+          <td>{{ item.stock|sep }}</td>
+          <td>{{ item.last_purchase_price|sep if item.last_purchase_price is not none else '—' }}</td>
+          <td>{{ item.last_sale_price|sep if item.last_sale_price is not none else '—' }}</td>
+        {% else %}
+          <td>{{ r.unit or '-' }}</td>
+          <td>{{ item.balance|sep }}</td>
+          <td>{{ item.status }}</td>
+        {% endif %}
+        <td>{{ r.level|fa_digits }}</td>
         {% if is_admin %}
         <td class="center">
           <div class="ops">
@@ -51,5 +73,19 @@
       {% endfor %}
     </tbody>
   </table>
+</div>
+
+<div class="pager" style="display:flex;gap:8px;align-items:center;justify-content:center;margin-top:10px;">
+  {% if has_prev %}
+    <a class="btn" href="?{{ request.query_string.decode('utf-8')|replace('page=' ~ page, 'page=' ~ (page-1)) }}">← قبلی</a>
+  {% else %}
+    <span class="btn" style="opacity:0.5;pointer-events:none;">← قبلی</span>
+  {% endif %}
+  <span class="muted">صفحه {{ page|fa_digits }} از {{ ((total + per_page - 1) // per_page)|fa_digits }}</span>
+  {% if has_next %}
+    <a class="btn" href="?{{ request.query_string.decode('utf-8')|replace('page=' ~ page, 'page=' ~ (page+1)) if 'page=' in request.query_string.decode('utf-8') else (request.query_string.decode('utf-8') ~ ('&' if request.query_string else '') ~ 'page=' ~ (page+1)) }}">بعدی →</a>
+  {% else %}
+    <span class="btn" style="opacity:0.5;pointer-events:none;">بعدی →</span>
+  {% endif %}
 </div>
 {% endblock %}

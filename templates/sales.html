@@ -1,13 +1,11 @@
 {% extends "base.html" %}
-{% block head_extra %}
-<link rel="stylesheet" href="{{ prefix }}/static/sales.css">
-{% endblock %}
+{# sales module uses global styles in static/style.css now; per-module CSS merged into global file #}
 {% block content %}
 <div class="module-wrap sales-module">
   <div class="overlay-shield" aria-hidden="true"></div>
   <h2>🧾 فاکتور فروش</h2>
 
-  <form method="post" action="{{ prefix }}/sales" id="sale-form" novalidate>
+  <form method="post" action="{{ prefix }}/sales" id="sale-form" novalidate data-persist="true" data-persist-key="sales">
     <input type="hidden" name="person_token" id="person_token">
     <input type="hidden" name="rows" id="rows" value="0">
 

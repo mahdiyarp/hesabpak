@@ -6,13 +6,24 @@
     let t; return (...args)=>{ clearTimeout(t); t=setTimeout(()=>fn(...args),ms); };
   }
 
-  async function fetchResults(type, q){
+  function badgeOf(t){
+    if(t==='person') return 'شخص';
+    if(t==='item') return 'کالا';
+    if(t==='invoice') return 'فاکتور';
+    if(t==='receive') return 'دریافت';
+    if(t==='payment') return 'پرداخت';
+    if(t==='cheque') return 'چک';
+    return t || 'نتیجه';
+  }
+
+  async function fetchResults(type, q, sort){
     const p = (typeof window.prefix === 'string' ? window.prefix : (window.APP_PREFIX || '')) || '';
-    const url = `${p}/api/search?kind=${encodeURIComponent(type)}&q=${encodeURIComponent(q)}`;
+    const order = sort || (document.body?.dataset?.searchSort || '');
+    const url = `${p}/api/search?kind=${encodeURIComponent(type)}&q=${encodeURIComponent(q)}${order ? `&sort=${encodeURIComponent(order)}` : ''}`;
     const r = await fetch(url);
     if(!r.ok) return [];
     const j = await r.json();
-	return Array.isArray(j) ? j : [];
+        return Array.isArray(j) ? j : [];
   }
 
   function renderResults(box, rows, type){
@@ -20,28 +31,27 @@
     if(!rows.length){ list.innerHTML=""; list.hidden=true; return; }
 
     list.innerHTML = rows.map(r=>{
-      if(type==="item"){
-        return `
-        <div class="res-item" data-id="${r.id}" data-title="${(r.code||'') + ' — ' + (r.name||'')}">
-          <div>
-            <div class="res-title">${(r.name||'')}</div>
-            <div class="res-sub">${(r.code||'')}${r.extra?(" • "+r.extra):""}</div>
-          </div>
-          <div class="res-side">
-            ${r.stock!=null?(`<div>موجودی: ${r.stock}</div>`):""}
-            ${r.price!=null?(`<div>قیمت: ${r.price}</div>`):""}
-          </div>
-        </div>`;
-      }else{
-        return `
-        <div class="res-item" data-id="${r.id}" data-title="${(r.code||'') + ' — ' + (r.name||'')}">
-          <div>
-            <div class="res-title">${(r.name||'')}</div>
-            <div class="res-sub">${(r.code||'')}${r.extra?(" • "+r.extra):""}</div>
-          </div>
-          <div class="res-side">${r.balance!=null?(`مانده: ${r.balance}`):""}</div>
-        </div>`;
+      const detailParts = [];
+      if(r.meta){
+        const parts = String(r.meta).split('•').map(p=>p.trim()).filter(Boolean);
+        parts.forEach(p=> detailParts.push(`<div class="res-sub">${p}</div>`));
       }
+      if(type === 'item'){
+        if(r.stock) detailParts.push(`<div class="res-sub">موجودی: ${r.stock}</div>`);
+        if(r.price) detailParts.push(`<div class="res-sub">قیمت: ${r.price}</div>`);
+      }else if(type === 'person'){
+        if(r.balance) detailParts.push(`<div class="res-sub">مانده: ${r.balance}</div>`);
+      }
+      const metaHtml = detailParts.length ? `<div class="res-meta">${detailParts.join('')}</div>` : '';
+      return `
+        <div class="res-item" data-id="${r.id}" data-title="${(r.code||'') + ' — ' + (r.name||'')}">
+          <div class="res-head">
+            <span class="res-badge">${badgeOf(type)}</span>
+            <span class="res-code">${r.code||''}</span>
+            <span class="res-title">${r.name||''}</span>
+          </div>
+          ${metaHtml}
+        </div>`;
     }).join("");
 
     list.hidden = false;
@@ -94,7 +104,7 @@
     const onSearch = debounce(async ()=>{
       const q = input.value.trim();
       if(q.length<1){ list.hidden=true; list.innerHTML=""; return; }
-      const rows = await fetchResults(type, q);
+      const rows = await fetchResults(type, q, wrap.getAttribute('data-sort'));
       renderResults(box, rows, type);
     }, 220);
 
