@@ -1,6 +1,7 @@
 # utils/backup_utils.py
 import os, io, json, gzip, shutil, datetime, zipfile, tempfile
 from pathlib import Path
+from typing import Optional
 
 def ensure_dirs(app):
     data_dir = Path(app.config.get("DATA_DIR", "data"))
@@ -80,7 +81,7 @@ def create_full_backup(app, user="system", reason="manual"):
         z.writestr("metadata.json", json.dumps(meta, ensure_ascii=False, indent=2))
     return str(out)
 
-def list_backups(app, year_key: str | None = None):
+def list_backups(app, year_key: Optional[str] = None):
     """Return backup metadata for the requested fiscal year.
 
     If ``year_key`` is provided the lookup is restricted to the matching
@@ -94,7 +95,7 @@ def list_backups(app, year_key: str | None = None):
 
     _, backup_dir, _, _ = ensure_dirs(app)
 
-    def _collect(directory: Path, *, year: str | None):
+    def _collect(directory: Path, *, year: Optional[str]):
         rows = []
         for p in sorted(directory.glob("backup_*.zip"), reverse=True):
             rows.append({
@@ -106,7 +107,7 @@ def list_backups(app, year_key: str | None = None):
             })
         return rows
 
-    items: list[dict] = []
+    items = []
 
     if year_key:
         target = backup_dir / year_key
