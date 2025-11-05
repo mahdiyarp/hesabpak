@@ -3,13 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ورود | حساب پاک</title>
+  <title>ورود | hesab pak</title>
   <link rel="stylesheet" href="{{ prefix }}/static/style.css">
 </head>
 <body class="login">
   <div class="login-wrap">
     <div class="login-card">
-  <div class="brand">حساب پاک</div>
+      <div class="brand">حساب‌پَک</div>
       <h1 class="login-title">ورود</h1>
       <form method="post" class="login-form" autocomplete="on">
         <label class="lbl">نام کاربری</label>

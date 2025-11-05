@@ -52,3 +52,18 @@ class BackupLog(db.Model):
     reason = db.Column(db.String(128))
     filename = db.Column(db.String(256))
     size = db.Column(db.Integer)
+
+
+class Token(db.Model):
+    """مدل ساده‌ی توکن‌های داخلی که هنگام رویدادهای خاص (مثلاً ثبت کاربر)
+    صادر می‌شوند و در زنجیرهٔ محلی نیز ثبت می‌گردند.
+    """
+    __tablename__ = "tokens"
+    id = db.Column(db.Integer, primary_key=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    owner = db.Column(db.String(64), nullable=False, index=True)  # username
+    amount = db.Column(db.Float, nullable=False, default=0.0)
+    symbol = db.Column(db.String(32), nullable=False, default="HSP")
+    reason = db.Column(db.String(128), nullable=True)
+    metadata_json = db.Column(db.Text, nullable=True)
+    tx_ref = db.Column(db.String(128), nullable=True)  # optional tx/hash when bridging to real chain

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ title or "hesab pak" }}</title>
+  <title>{{ title or "حساب پاک" }}</title>
   <link rel="stylesheet" href="{{ prefix }}/static/style.css">
   <link rel="stylesheet" href="{{ prefix }}/static/search.css">
   {% block head_extra %}{% endblock %}
@@ -28,7 +28,7 @@
 </head>
 <body class="theme-{{ active_theme }}" data-active-theme="{{ active_theme }}" data-search-sort="{{ search_sort_pref }}" data-price-mode="{{ price_display_mode }}">
 <header class="topbar">
-  <div class="brand">حساب پاک <span class="en">hesab pak</span></div>
+  <div class="brand">حساب پاک</div>
   <div class="clock" id="top-clock" data-live-clock data-jalali="{{ now_info['jalali_date'] }}">
     <span class="icon">⏰</span>
     <span class="time" data-role="time">--:--:--</span>
@@ -114,7 +114,7 @@
   {% endif %}
 </nav>
 
-<footer class="footer">© 2025 hesab pak</footer>
+<footer class="footer">© 2025 حساب پاک</footer>
 
 <script src="{{ prefix }}/static/app.js"></script>
 {% block body_scripts %}{% endblock %}

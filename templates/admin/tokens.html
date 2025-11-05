@@ -1,0 +1,49 @@
+{% extends 'base.html' %}
+{% block content %}
+<div class="module-wrap">
+  <h2>مدیریت توکن‌ها</h2>
+
+  <div class="card">
+    <form method="post" action="{{ prefix }}/admin/tokens/mint">
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <input class="inp" name="owner" placeholder="نام کاربری گیرنده" required style="min-width:180px;">
+        <input class="inp" name="amount" placeholder="مقدار (مثلاً 10)" required style="width:140px;">
+        <input class="inp" name="symbol" placeholder="نماد (مثلاً HSP)" value="HSP" style="width:120px;">
+        <input class="inp" name="reason" placeholder="دلیل (مثلاً new_user_reward)" style="min-width:160px;">
+        <button class="btn btn--ghost" type="submit">صدور دستی</button>
+      </div>
+    </form>
+  </div>
+
+  <div style="margin-top:16px;" class="card">
+    <h3>فهرست توکن‌ها</h3>
+    {% if tokens and tokens|length > 0 %}
+    <div class="table-wrapper">
+      <table>
+        <thead>
+          <tr><th>زمان</th><th>مالک</th><th>مقدار</th><th>نماد</th><th>دلیل</th><th>مرجع تراکنش</th></tr>
+        </thead>
+        <tbody>
+          {% for t in tokens %}
+          <tr>
+            <td>{{ t.created_at }}</td>
+            <td>{{ t.owner }}</td>
+            <td>{{ t.amount|sep }}</td>
+            <td>{{ t.symbol }}</td>
+            <td>{{ t.reason or '—' }}</td>
+            <td>{{ t.tx_ref or '—' }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+      <div class="empty-state">هیچ توکنی صادر نشده است.</div>
+    {% endif %}
+    <div style="margin-top:12px;display:flex;gap:8px;">
+      <a class="btn" href="{{ prefix }}/admin/ledger">مشاهدهٔ زنجیره (JSON)</a>
+      <a class="btn" href="{{ prefix }}/admin/ledger/download">دانلود chain.json</a>
+    </div>
+  </div>
+</div>
+{% endblock %}

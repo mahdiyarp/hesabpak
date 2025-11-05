@@ -19,7 +19,8 @@ from extensions import db
 from utils.backup_utils import ensure_dirs, autosave_record
 from blueprints.backup import backup_bp
 from autobackup import init_autobackup, register_autobackup_for
-from models.backup_models import Setting, BackupLog, UserSettings
+from models.backup_models import Setting, BackupLog, UserSettings, Token
+from utils.ledger import get_ledger
 from utils.num_words_fa import amount_to_toman_words
 from utils.date_utils import (
     to_jdate_str,
@@ -3241,6 +3242,27 @@ def admin_users():
         catalog[username] = entry
         save_users_catalog(catalog)
         flash(f"کاربر «{username}» ایجاد شد.", "success")
+
+        # Mint tokens for new user (local token issuance) if enabled
+        try:
+            tokens_to_mint = int(Setting.get("tokens_per_user", "0") or 0)
+        except Exception:
+            tokens_to_mint = 0
+        if tokens_to_mint > 0:
+            try:
+                symbol = Setting.get("token_symbol", "HSP") or "HSP"
+                reason = "new_user_signup"
+                # create token DB record
+                t = Token(owner=username, amount=float(tokens_to_mint), symbol=symbol, reason=reason, metadata_json=json.dumps({"source":"admin_users_create"}, ensure_ascii=False))
+                db.session.add(t)
+                db.session.commit()
+                # append to local ledger for immutability
+                ledger = get_ledger()
+                ledger.append_event("mint_token", {"username": username, "amount": tokens_to_mint, "symbol": symbol, "token_id": t.id})
+                app.logger.info(f"TOKEN_MINT owner={username} amount={tokens_to_mint} sym={symbol} id={t.id}")
+            except Exception:
+                db.session.rollback()
+                app.logger.exception("token mint failed for user %s", username)
         return redirect(URL_PREFIX + "/admin/users")
 
     users = sorted(
@@ -3389,6 +3411,73 @@ def admin_cashboxes_remove_defaults():
     else:
         flash("; ".join(msg_parts), "success")
     return redirect(URL_PREFIX + "/admin/cashboxes")
+
+
+@app.route(URL_PREFIX + "/admin/ledger", methods=["GET"])
+@login_required
+def admin_ledger():
+    admin_required()
+    try:
+        from utils.ledger import get_ledger
+        ledger = get_ledger()
+        chain = ledger.get_chain()
+        # limit output size
+        count = min(len(chain), 200)
+        return jsonify({"ok": True, "count": len(chain), "blocks": chain[-count:]})
+    except Exception as exc:
+        app.logger.exception("failed to read ledger: %s", exc)
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route(URL_PREFIX + "/admin/ledger/download", methods=["GET"])
+@login_required
+def admin_ledger_download():
+    admin_required()
+    try:
+        ledger_file = (get_ledger().path)
+        if not os.path.exists(ledger_file):
+            return jsonify({"ok": False, "error": "ledger file not found"}), 404
+        from flask import send_file
+        return send_file(ledger_file, as_attachment=True, download_name="chain.json")
+    except Exception as exc:
+        app.logger.exception("failed to send ledger file: %s", exc)
+        return jsonify({"ok": False, "error": str(exc)}), 500
+
+
+@app.route(URL_PREFIX + "/admin/tokens", methods=["GET"])
+@login_required
+def admin_tokens():
+    admin_required()
+    rows = Token.query.order_by(Token.created_at.desc()).limit(200).all()
+    return render_template("admin/tokens.html", prefix=URL_PREFIX, tokens=rows)
+
+
+@app.route(URL_PREFIX + "/admin/tokens/mint", methods=["POST"])
+@login_required
+def admin_tokens_mint():
+    admin_required()
+    owner = (request.form.get("owner") or "").strip()
+    try:
+        amount = float(request.form.get("amount") or 0)
+    except Exception:
+        amount = 0.0
+    symbol = (request.form.get("symbol") or Setting.get("token_symbol", "HSP") or "HSP").strip()
+    reason = (request.form.get("reason") or "manual_mint").strip()
+    if not owner or amount <= 0:
+        flash("لطفاً نام کاربری و مقدار صحیح را وارد کنید.", "danger")
+        return redirect(URL_PREFIX + "/admin/tokens")
+    try:
+        t = Token(owner=owner, amount=amount, symbol=symbol, reason=reason, metadata_json=json.dumps({"created_by": getattr(current_user, 'username', 'admin')}, ensure_ascii=False))
+        db.session.add(t)
+        db.session.commit()
+        ledger = get_ledger()
+        ledger.append_event("mint_token", {"username": owner, "amount": amount, "symbol": symbol, "token_id": t.id, "reason": reason})
+        flash(f"توکن به کاربر {owner} صادر شد.", "success")
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("manual token mint failed")
+        flash("صدور توکن ناموفق بود.", "danger")
+    return redirect(URL_PREFIX + "/admin/tokens")
 
 # ----------------- Utility APIs -----------------
 @app.route(URL_PREFIX + "/api/num2words", methods=["GET"])
