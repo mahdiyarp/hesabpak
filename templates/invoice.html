@@ -40,11 +40,14 @@
         </div>
         <div style="flex:2 1 300px; min-width:240px;">
           <label class="lbl" for="person_search">{% if invoice_kind == 'sales' %}مشتری{% else %}تأمین‌کننده{% endif %}</label>
-          <div class="search-wrapper" style="display:flex; gap:0.5rem; align-items:center;">
-            <input class="inp" id="person_search" placeholder="جستجو و انتخاب {% if invoice_kind == 'sales' %}مشتری{% else %}تأمین‌کننده{% endif %}..." autocomplete="off">
-            <button type="button" id="person_unlock" hidden class="btn-mini">تغییر</button>
+          <div class="customer-lock">
+            <div class="search-wrapper">
+              <input class="inp" id="person_search" placeholder="جستجو و انتخاب {% if invoice_kind == 'sales' %}مشتری{% else %}تأمین‌کننده{% endif %}..." autocomplete="off">
+              <div id="person_results" class="search-results" hidden></div>
+            </div>
+            <button type="button" id="person_unlock" hidden>تغییر مشتری</button>
+            <span class="lock-indicator"></span>
           </div>
-          <div id="person_results" class="search-results" hidden></div>
           <div id="person_hint" class="hint">{% if invoice_kind == 'sales' %}مشتری{% else %}تأمین‌کننده{% endif %} انتخاب نشده است</div>
         </div>
       </div>
