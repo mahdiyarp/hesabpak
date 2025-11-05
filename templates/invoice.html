@@ -27,72 +27,72 @@
     <input type="hidden" name="person_token" id="person_token">
     <input type="hidden" name="rows" id="rows" value="0">
 
-    <div class="card header-card" style="padding: 1.5rem;">
-      <div class="header-grid" style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: flex-end;">
-        <div style="flex: 1; min-width: 180px;">
+    <div class="card invoice-card" style="padding:1rem;">
+      <div class="invoice-top" style="display:flex; gap:1rem; align-items:flex-start; flex-wrap:wrap;">
+        <div style="flex:1 1 220px; min-width:180px;">
           <label class="lbl" for="inv_number">شماره فاکتور</label>
           <input class="inp" name="inv_number" id="inv_number" value="{{ inv_number }}" readonly>
         </div>
-        <div style="flex: 1; min-width: 180px;">
+        <div style="flex:1 1 180px; min-width:140px;">
           <label class="lbl" for="inv_date_fa">تاریخ (شمسی)</label>
           <input class="inp" id="inv_date_fa" readonly value="{{ current_jdate }}" data-greg="{{ current_gdate }}">
           <input type="hidden" name="inv_date_greg" id="inv_date_greg" value="{{ current_gdate }}">
         </div>
-        <div style="flex: 2; min-width: 280px;">
-          <label class="lbl" for="person_search">
-            {% if invoice_kind == 'sales' %}مشتری{% else %}تأمین‌کننده{% endif %}
-          </label>
-          <div class="customer-lock">
-            <div class="search-wrapper">
-              <input class="inp" id="person_search" placeholder="جستجو و انتخاب {% if invoice_kind == 'sales' %}مشتری{% else %}تأمین‌کننده{% endif %}..." autocomplete="off">
-              <div id="person_results" class="search-results" hidden></div>
-            </div>
-            <button type="button" id="person_unlock" hidden>تغییر {% if invoice_kind == 'sales' %}مشتری{% else %}تأمین‌کننده{% endif %}</button>
-            <span class="lock-indicator"></span>
+        <div style="flex:2 1 300px; min-width:240px;">
+          <label class="lbl" for="person_search">{% if invoice_kind == 'sales' %}مشتری{% else %}تأمین‌کننده{% endif %}</label>
+          <div class="search-wrapper" style="display:flex; gap:0.5rem; align-items:center;">
+            <input class="inp" id="person_search" placeholder="جستجو و انتخاب {% if invoice_kind == 'sales' %}مشتری{% else %}تأمین‌کننده{% endif %}..." autocomplete="off">
+            <button type="button" id="person_unlock" hidden class="btn-mini">تغییر</button>
           </div>
+          <div id="person_results" class="search-results" hidden></div>
           <div id="person_hint" class="hint">{% if invoice_kind == 'sales' %}مشتری{% else %}تأمین‌کننده{% endif %} انتخاب نشده است</div>
         </div>
       </div>
-    </div>
 
-    <div class="card table-card">
-      <table class="table sale-table">
-        <colgroup>
-          <col style="width: var(--sales-col-item);">
-          <col style="width: var(--sales-col-unit);">
-          <col style="width: var(--sales-col-qty);">
-          <col style="width: var(--sales-col-line);">
-          <col style="width: var(--sales-col-x);">
-        </colgroup>
-        <thead>
-          <tr>
-            <th scope="col">کالا</th>
-            <th scope="col">قیمت واحد</th>
-            <th scope="col">تعداد</th>
-            <th scope="col">جمع خط</th>
-            <th scope="col"></th>
-          </tr>
-        </thead>
-        <tbody id="lines_tbody"></tbody>
-      </table>
-    </div>
+      <hr style="margin:12px 0; border-color: #eee;" />
 
-    <div class="actions-row">
-      <div class="card total-box">
-        <div class="total-grid">
-          <div>
-            <label class="lbl" for="grand_total">جمع کل (تومان)</label>
-            <input class="inp ta-num" id="grand_total" readonly>
-          </div>
-          <div>
-            <label class="lbl">به حروف</label>
-            <div id="grand_total_words" class="total-text">—</div>
+      <div class="invoice-body">
+        <table class="table sale-table" style="width:100%">
+          <colgroup>
+            <col style="width: var(--sales-col-item);">
+            <col style="width: var(--sales-col-unit);">
+            <col style="width: var(--sales-col-qty);">
+            <col style="width: var(--sales-col-line);">
+            <col style="width: var(--sales-col-x);">
+          </colgroup>
+          <thead>
+            <tr>
+              <th scope="col">کالا</th>
+              <th scope="col">قیمت واحد</th>
+              <th scope="col">تعداد</th>
+              <th scope="col">جمع خط</th>
+              <th scope="col"></th>
+            </tr>
+          </thead>
+          <tbody id="lines_tbody"></tbody>
+        </table>
+      </div>
+
+      <div class="invoice-footer" style="display:flex; gap:1rem; align-items:center; justify-content:space-between; margin-top:12px; flex-wrap:wrap;">
+        <div class="total-box" style="min-width:220px;">
+          <div class="total-grid">
+            <div>
+              <label class="lbl" for="grand_total">جمع کل (تومان)</label>
+              <input class="inp ta-num" id="grand_total" readonly>
+            </div>
+            <div>
+              <label class="lbl">به حروف</label>
+              <div id="grand_total_words" class="total-text">—</div>
+            </div>
           </div>
         </div>
+
+        <div style="margin-left:auto;">
+          <button class="btn-primary submit-btn" type="submit">
+            💾 ثبت فاکتور {% if invoice_kind == 'sales' %}فروش{% else %}خرید{% endif %}
+          </button>
+        </div>
       </div>
-      <button class="btn-primary submit-btn" type="submit">
-        💾 ثبت فاکتور {% if invoice_kind == 'sales' %}فروش{% else %}خرید{% endif %}
-      </button>
     </div>
   </form>
 </div>
