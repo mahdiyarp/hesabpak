@@ -1,0 +1,60 @@
+{% extends 'admin/dashboard.html' %}
+{% block content %}
+<h2>مدیریت توکن‌های دستیار</h2>
+
+<div class="card">
+  <div style="padding:12px">
+    <h3>کلید سراسری API</h3>
+    <p>کلید سراسری برای فراخوانی سرویس AI (اگر تنظیم شود همه کاربران از آن استفاده می‌کنند).</p>
+    <form method="post" action="{{ prefix }}/admin/assistant-tokens">
+      <input type="hidden" name="action" value="update_global">
+      <div style="margin-bottom:8px">
+        <input type="text" name="global_api_key" placeholder="کلید API را وارد کنید یا برای حذف خالی بگذارید" style="width:100%" value="{{ global_key_masked }}">
+      </div>
+      <div style="text-align:left">
+        <button class="btn btn-primary">ذخیره / حذف</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<h3 style="margin-top:18px">کلیدهای کاربران</h3>
+<div class="card">
+  <div style="padding:12px">
+    <p>در اینجا می‌توانید برای هر کاربر کلید API اختصاصی قرار دهید یا آن را پاک کنید.</p>
+    <table class="table">
+      <thead>
+        <tr>
+          <th>کاربر</th>
+          <th>نقش</th>
+          <th>کلید</th>
+          <th>عملیات</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        <tr>
+          <td>{{ u.username }}</td>
+          <td>{{ u.role }}</td>
+          <td>{{ u.api_key_masked or '—' }}</td>
+          <td>
+            <form method="post" action="{{ prefix }}/admin/assistant-tokens" style="display:inline-block">
+              <input type="hidden" name="action" value="update_user">
+              <input type="hidden" name="username" value="{{ u.username }}">
+              <input type="text" name="user_api_key" placeholder="کلید جدید (خالی = پاک کردن)" style="width:260px">
+              <button class="btn btn-primary">ذخیره</button>
+            </form>
+            <form method="post" action="{{ prefix }}/admin/assistant-tokens" style="display:inline-block; margin-left:6px">
+              <input type="hidden" name="action" value="clear_user">
+              <input type="hidden" name="username" value="{{ u.username }}">
+              <button class="btn btn-secondary">پاک کردن</button>
+            </form>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+
+{% endblock %}

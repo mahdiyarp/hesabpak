@@ -744,8 +744,11 @@ def _build_openai_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any
         text = (msg.get("text") or "").strip()
         attachments = msg.get("attachments") or []
         content: List[Dict[str, Any]] = []
+        # The Responses API may expect 'output_text' for plain textual content
+        # (some client/server versions reject unknown content types like 'input_text').
+        # Use 'output_text' to maximize compatibility.
         if text:
-            content.append({"type": "input_text", "text": text})
+            content.append({"type": "output_text", "text": text})
         for att in attachments:
             atype = (att.get("type") or "").strip().lower()
             if atype != "image":
@@ -762,6 +765,8 @@ def _build_openai_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any
             # The Responses API variant in some deployments expects an image URL
             # rather than a bespoke 'image_base64' field. Use a data: URL which
             # is widely supported as an image_url fallback.
+            # 'input_image' is commonly accepted, but if the client rejects it
+            # we still provide the data URL which many assistants can consume.
             content.append({"type": "input_image", "image_url": f"data:{mime};base64,{data}"})
         if not content and not text:
             continue
@@ -893,22 +898,38 @@ def _call_openai_assistant(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
     # Some installed versions of the OpenAI Python client don't accept the
     # `response_format` keyword and will raise TypeError. In that case fall
     # back to calling without it and parse the plain text output.
+    # Some client versions may not accept `response_format` or may raise
+    # network/client exceptions. Try the schema-enabled request first and
+    # fall back gracefully. Any unexpected exception should be handled and
+    # return a readable assistant fallback instead of bubbling up.
     try:
-        response = client.responses.create(
-            model=model,
-            input=request_messages,
-            max_output_tokens=max_tokens,
-            temperature=temperature,
-            response_format={"type": "json_schema", "json_schema": AI_RESPONSE_SCHEMA},
-        )
-    except TypeError:
-        app.logger.warning("OpenAI client.responses.create() doesn't support 'response_format'; falling back to plain response")
-        response = client.responses.create(
-            model=model,
-            input=request_messages,
-            max_output_tokens=max_tokens,
-            temperature=temperature,
-        )
+        try:
+            response = client.responses.create(
+                model=model,
+                input=request_messages,
+                max_output_tokens=max_tokens,
+                temperature=temperature,
+                response_format={"type": "json_schema", "json_schema": AI_RESPONSE_SCHEMA},
+            )
+        except TypeError:
+            app.logger.warning("OpenAI client.responses.create() doesn't support 'response_format'; falling back to plain response")
+            response = client.responses.create(
+                model=model,
+                input=request_messages,
+                max_output_tokens=max_tokens,
+                temperature=temperature,
+            )
+    except Exception as e:
+        # Log full exception for diagnostics and return a safe fallback reply
+        app.logger.exception("OpenAI assistant request failed: %s", e)
+        return {
+            "reply": "خطا در برقراری ارتباط با سرویس پردازش هوش مصنوعی. لطفاً اتصال اینترنت یا تنظیمات API را بررسی کنید.",
+            "needs_confirmation": False,
+            "follow_up": None,
+            "uncertain_fields": [],
+            "actions": [],
+            "invoice": None,
+        }
 
     content: Optional[str] = None
     try:
@@ -1408,6 +1429,45 @@ def _level_by_code(code: str) -> int:
     if L == 9: return 3
     return 0
 
+
+def _suggest_next_entity_code(e_type: str) -> str:
+    """Suggest the next available numeric code for entities of type e_type.
+
+    Rules implemented:
+    - Prefer 3-digit codes starting at 100 and increasing (100..999).
+    - If no 3-digit free code, try 6-digit codes starting at 100001 and increasing
+      (this naturally produces sequences like 100001, 100002, ...).
+    - If still none, try 9-digit codes starting at 100000001 and increasing.
+
+    This mirrors the repo's 3/6/9 grouping and matches examples like
+    100 -> 101 and 100001 -> 100002.
+    """
+    try:
+        existing = {str(e.code) for e in Entity.query.filter_by(type=e_type).all()}
+    except Exception:
+        existing = set()
+
+    # 3-digit
+    for n in range(100, 1000):
+        s = f"{n:03d}"
+        if s not in existing:
+            return s
+
+    # 6-digit (avoid suffix 000; start at 100001)
+    for n in range(100001, 1_000_000):
+        s = f"{n:06d}"
+        if s not in existing:
+            return s
+
+    # 9-digit (avoid suffix 000000000; start at 100000001)
+    for n in range(100000001, 1_000_000_000):
+        s = f"{n:09d}"
+        if s not in existing:
+            return s
+
+    # Fallback: random numeric string (very unlikely to reach here)
+    return "100"
+
 def validate_entity_form(form, for_update_id=None):
     e_type = (form.get("type") or "").strip()         # person | item
     code   = (form.get("code") or "").strip()
@@ -1629,6 +1689,7 @@ def index():
         },
         dashboard_widgets=_dashboard_widgets(),
         assistant_model_label=dict(ASSISTANT_MODEL_CHOICES).get(_assistant_model(), _assistant_model()),
+        api_ready=bool(_openai_api_key()) and OpenAI is not None,
     )
 
 @app.route(URL_PREFIX + "/login", methods=["GET", "POST"])
@@ -2072,7 +2133,17 @@ def entities_new():
 
     parents_lvl1 = Entity.query.filter_by(level=1).order_by(Entity.code.asc()).all()
     parents_lvl2 = Entity.query.filter_by(level=2).order_by(Entity.code.asc()).all()
-    return render_template("entities/new.html", parents_lvl1=parents_lvl1, parents_lvl2=parents_lvl2, prefix=URL_PREFIX)
+    # suggest next codes for both types so the template can prefill accordingly
+    suggested_person_code = _suggest_next_entity_code("person")
+    suggested_item_code = _suggest_next_entity_code("item")
+    return render_template(
+        "entities/new.html",
+        parents_lvl1=parents_lvl1,
+        parents_lvl2=parents_lvl2,
+        prefix=URL_PREFIX,
+        suggested_person_code=suggested_person_code,
+        suggested_item_code=suggested_item_code,
+    )
 
 @app.route(URL_PREFIX + "/entities/<int:eid>/edit", methods=["GET","POST"])
 @login_required
@@ -3303,6 +3374,68 @@ def admin_modules():
     return render_template("admin/module_designer.html", prefix=URL_PREFIX, config=cfg)
 
 
+@app.route(URL_PREFIX + "/admin/assistant-tokens", methods=["GET", "POST"])
+@login_required
+def admin_assistant_tokens():
+    admin_required()
+
+    # load users from catalog
+    catalog = load_users_catalog()
+
+    # handle form submissions
+    if request.method == "POST":
+        action = (request.form.get("action") or "").strip().lower()
+        if action == "update_global":
+            key = (request.form.get("global_api_key") or "").strip()
+            if key:
+                Setting.set("openai_api_key", key)
+                db.session.commit()
+                flash("کلید سراسری API ذخیره شد.", "success")
+            else:
+                # clear
+                Setting.set("openai_api_key", "")
+                db.session.commit()
+                flash("کلید سراسری API حذف شد.", "success")
+            return redirect(URL_PREFIX + "/admin/assistant-tokens")
+
+        if action == "update_user":
+            username = (request.form.get("username") or "").strip()
+            user_key = (request.form.get("user_api_key") or "").strip()
+            if not username or username not in catalog:
+                flash("کاربر نامعتبر است.", "danger")
+                return redirect(URL_PREFIX + "/admin/assistant-tokens")
+            us = UserSettings.get_for_user(username)
+            us.openai_api_key = user_key or None
+            db.session.commit()
+            flash(f"کلید کاربر «{username}» به‌روزرسانی شد.", "success")
+            return redirect(URL_PREFIX + "/admin/assistant-tokens")
+
+        if action == "clear_user":
+            username = (request.form.get("username") or "").strip()
+            if not username or username not in catalog:
+                flash("کاربر نامعتبر است.", "danger")
+                return redirect(URL_PREFIX + "/admin/assistant-tokens")
+            us = UserSettings.get_for_user(username)
+            us.openai_api_key = None
+            db.session.commit()
+            flash(f"کلید کاربر «{username}» پاک شد.", "success")
+            return redirect(URL_PREFIX + "/admin/assistant-tokens")
+
+    # GET: show current keys (masked)
+    global_key = Setting.get("openai_api_key", "") or ""
+    users = []
+    for username, meta in sorted(catalog.items(), key=lambda kv: kv[0].lower()):
+        us = UserSettings.get_for_user(username)
+        users.append({
+            "username": username,
+            "role": meta.get("role"),
+            "api_key_masked": _mask_secret(us.openai_api_key or ""),
+            "has_key": bool(us.openai_api_key),
+        })
+
+    return render_template("admin/assistant_tokens.html", prefix=URL_PREFIX, global_key_masked=_mask_secret(global_key), users=users)
+
+
 @app.route(URL_PREFIX + "/admin/assistant-drafts", methods=["GET"])
 @login_required
 def admin_assistant_drafts():
@@ -3447,15 +3580,38 @@ def assistant_parse():
     # combine text + ocr_text for detection
     combined = " ".join([t for t in [text, ocr_text] if t])
 
-    # very simple keyword heuristics (Persian/English)
+    # Improved heuristics for detection: look for strong indicators of invoices,
+    # receipts (دریافت/رسید), payments (پرداخت), and cheques. Use counts and
+    # priority so short receipt texts are not misclassified as invoices.
     lower = combined.lower()
     kind = "unknown"
-    if any(k in lower for k in ["فاکتور", "invoice", "صورت حساب"]):
+
+    # Strong indicators
+    has_invoice = any(k in lower for k in ["فاکتور", "invoice", "صورت حساب"])
+    has_receipt = any(k in lower for k in ["رسید", "رسید پرداخت", "رسید دریافت", "receipt"]) or any(k in lower for k in ["دریافت", "وصول", "واریز شد"]) 
+    has_payment = any(k in lower for k in ["پرداخت", "payment", "پرداخت شد"]) 
+    has_cheque = any(k in lower for k in ["چک", "چک صیاد", "شماره چک", "سررسید"]) 
+
+    # If explicit invoice markers present and no receipt/payment clues -> invoice
+    if has_invoice and not (has_receipt or has_payment):
         kind = "invoice"
-    elif any(k in lower for k in ["دریافت", "receipt", "receipt"]):
+    # If receipt/payment markers present and no invoice marker -> treat as cash doc
+    elif has_receipt or has_payment:
+        # prefer 'receive' if words like 'دریافت' or 'وصول' or 'رسید' exist
+        if has_receipt and not has_payment:
+            kind = "receive"
+        elif has_payment and not has_receipt:
+            kind = "payment"
+        else:
+            # ambiguous: if both appear, try to infer by context: look for 'پرداخت' near numbers
+            if "پرداخت" in lower and not "فاکتور" in lower:
+                kind = "payment"
+            else:
+                kind = "receive"
+    # If cheque indicators present without invoice markers, mark as receive/payment
+    elif has_cheque:
+        # default to receive; downstream logic can flip based on context
         kind = "receive"
-    elif any(k in lower for k in ["پرداخت", "payment"]):
-        kind = "payment"
     elif any(k in lower for k in ["کالا", "محصول", "item"]):
         kind = "item"
     elif any(k in lower for k in ["شخص", "طرف حساب", "person"]):
@@ -3999,16 +4155,25 @@ with app.app_context():
     _ensure_column_sqlite("cash_docs", "cheque_owner", "TEXT", "NULL")
     _ensure_column_sqlite("cash_docs", "cheque_due_date", "TEXT", "NULL")
     _ensure_column_sqlite("invoices", "kind", "TEXT", "'sales'")
+    # ensure invoices.kind column exists; do NOT force a 'sales' default that would
+    # incorrectly mark existing purchase invoices as sales. Use NULL as default so
+    # we can run a reliable backfill below.
+    _ensure_column_sqlite("invoices", "kind", "TEXT", "NULL")
 
-    # one-off backfill for invoice.kind if empty
+    # Backfill invoice.kind for all existing invoices using the number prefix
+    # heuristic. Run unconditionally to correct any rows that may have been
+    # populated with an incorrect default previously.
     try:
-        missing = Invoice.query.filter(or_(Invoice.kind.is_(None), Invoice.kind == "")).limit(1).first()
-        if missing:
-            rows = Invoice.query.all()
-            for inv in rows:
-                if not inv.kind:
-                    inv.kind = "sales" if (inv.number or "").upper().startswith("INV-") else "purchase"
+        rows = Invoice.query.all()
+        changed = 0
+        for inv in rows:
+            desired = "sales" if (inv.number or "").upper().startswith("INV-") else "purchase"
+            if (inv.kind or "") != desired:
+                inv.kind = desired
+                changed += 1
+        if changed:
             db.session.commit()
+            app.logger.info(f"Backfilled invoice.kind for {changed} invoices")
     except Exception as ex:
         app.logger.error(f"backfill invoice.kind failed: {ex}")
 

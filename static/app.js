@@ -47,12 +47,8 @@ function badgeOf(t){
   };
 
   if(actions){
-    const quickLinks = [
-      {href:`${window.prefix}/reports`, label:'📊 گزارشات', perm:'reports'},
-      {href:`${window.prefix}/sales`,   label:'🧾 فاکتور فروش جدید', perm:'sales'},
-      {href:`${window.prefix}/entities?kind=item`,   label:'📚 لیست کالاها', perm:'entities'},
-      {href:`${window.prefix}/entities?kind=person`, label:'📚 لیست اشخاص', perm:'entities'}
-    ].filter(link => allow(link.perm));
+    // quick links removed from top search per user request
+    const quickLinks = [].filter(link => allow(link.perm));
     if(quickLinks.length){
       actions.innerHTML = quickLinks.map(x=>`<a class="act" href="${x.href}">${x.label}</a>`).join('');
       showActions();

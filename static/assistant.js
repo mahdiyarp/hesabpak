@@ -3,6 +3,16 @@
   const form = document.getElementById('assistant-form');
   if(!form){ return; }
 
+  // Prevent double-initialization if the script is loaded more than once
+  try{
+    if(form.dataset.hspAssistantInitialized === '1'){
+      // already initialized
+      console.debug('assistant: form already initialized, skipping second init');
+      return;
+    }
+    form.dataset.hspAssistantInitialized = '1';
+  }catch(e){ /* ignore */ }
+
   const input = document.getElementById('assistant-input');
   const fileInput = document.getElementById('assistant-file');
   const messagesEl = document.getElementById('assistant-messages');
@@ -16,6 +26,8 @@
   let history = [];
   let pendingTicket = null;
   let isSending = false;
+  // guard to avoid concurrent send calls from duplicate listeners
+  let lastSendNonce = null;
 
   function setEmptyState(){
     if(!messagesEl){ return; }
@@ -155,6 +167,11 @@
     const file = fileInput && fileInput.files && fileInput.files[0] ? fileInput.files[0] : null;
     if(!text && !file){ return; }
 
+    // Prevent accidental duplicate sends: generate a nonce and ignore repeated calls
+    const nonce = Date.now() + '-' + Math.random().toString(36).slice(2,8);
+    if(lastSendNonce === nonce){ return; }
+    lastSendNonce = nonce;
+
     const message = { role: 'user', text: text, attachments: [] };
     appendMessage('user', text || 'در حال ارسال تصویر...');
 
@@ -172,7 +189,7 @@
       }
     }
 
-    history.push(message);
+  history.push(message);
     setLoading(true);
     clearPreview();
 
@@ -182,6 +199,8 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ messages: history })
       });
+      // Reset lastSendNonce on success/failure so new sends are permitted
+      lastSendNonce = null;
       const data = await response.json();
       if(!response.ok || data.status !== 'ok'){
         throw new Error(data.message || 'پاسخ نامعتبر از سرور');
@@ -233,6 +252,7 @@
 
     }catch(err){
       appendMessage('assistant', err.message || 'خطا در ارتباط با سرور');
+      lastSendNonce = null;
     }finally{
       setLoading(false);
       input.value = '';

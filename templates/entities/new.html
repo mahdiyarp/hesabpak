@@ -4,13 +4,14 @@
 
 <form method="post" action="{{ prefix }}/entities/new" class="login-form" style="max-width:640px">
   <div class="lbl">انتخاب نوع</div>
-  <label class="pill"><input type="radio" name="type" value="person" required> شخص</label>
+  <label class="pill"><input type="radio" name="type" value="person" required checked> شخص</label>
   <label class="pill"><input type="radio" name="type" value="item" required> کالا</label>
 
   <label class="lbl">کد (۳/۶/۹ رقمی)</label>
   <input class="inp" id="code" name="code" inputmode="numeric"
-         pattern="^[0-9]{3}([0-9]{3}){0,2}$"
-         placeholder="مثال: 101 | 101001 | 101001001" required>
+    pattern="^[0-9]{3}([0-9]{3}){0,2}$"
+    placeholder="مثال: 101 | 101001 | 101001001" required
+    value="{{ suggested_person_code or '' }}">
 
   <label class="lbl">نام</label>
   <input class="inp" name="name" id="name" required>
@@ -39,12 +40,21 @@ document.querySelectorAll('input[name="type"]').forEach(r=>{
     if(r.value==='person' && r.checked){
       unitLabel.textContent = 'نوع شخص';
       unit.innerHTML = '<option value=\"\">— انتخاب کنید —</option><option>خانم</option><option>آقا</option><option>فروشگاه</option><option>شرکت</option><option>سازمان</option>';
+      // set suggested code for person if code input is empty or equals previous item suggestion
+  try { if(!codeEl.value || codeEl.value === (window._last_suggested || '')) codeEl.value = {{ (suggested_person_code or '')|tojson }}; } catch(e){}
     }else if(r.value==='item' && r.checked){
       unitLabel.textContent = 'واحد';
       unit.innerHTML = '<option value=\"\">— انتخاب کنید —</option><option>عدد</option><option>متر</option><option>کیلو</option><option>لیتر</option><option>بسته</option><option>جعبه</option>';
+      // set suggested code for item if code input is empty or equals previous person suggestion
+  try { if(!codeEl.value || codeEl.value === (window._last_suggested || '')) codeEl.value = {{ (suggested_item_code or '')|tojson }}; } catch(e){}
     }
   });
 });
+
+// expose last suggested and remember when we programmatically set
+window._last_suggested = {{ (suggested_person_code or '')|tojson }};
+// update last_suggested whenever code value changes programmatically
+codeEl.addEventListener('input', ()=>{ window._last_suggested = codeEl.value; });
 </script>
 
 {% endblock %}

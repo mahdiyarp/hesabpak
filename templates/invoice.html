@@ -42,7 +42,7 @@
           <label class="lbl" for="person_search">{% if invoice_kind == 'sales' %}مشتری{% else %}تأمین‌کننده{% endif %}</label>
           <div class="customer-lock">
             <div class="search-wrapper">
-              <input class="inp" id="person_search" placeholder="جستجو و انتخاب {% if invoice_kind == 'sales' %}مشتری{% else %}تأمین‌کننده{% endif %}..." autocomplete="off">
+              <input class="inp" id="person_search" data-kind="person" placeholder="جستجو و انتخاب {% if invoice_kind == 'sales' %}مشتری{% else %}تأمین‌کننده{% endif %}..." autocomplete="off">
               <div id="person_results" class="search-results" hidden></div>
             </div>
             <button type="button" id="person_unlock" hidden>تغییر مشتری</button>
@@ -104,7 +104,7 @@
   <tr>
     <td>
       <div class="search-wrapper" style="display: flex; gap: 0.5rem; align-items: center;">
-        <input class="inp item_search" name="item_code[]" placeholder="کد یا نام کالا..." autocomplete="off" style="flex: 1;">
+  <input class="inp item_search" name="item_code[]" data-kind="item" placeholder="کد یا نام کالا..." autocomplete="off" style="flex: 1;">
         <div class="search-results item_results" hidden></div>
       </div>
       <div class="line-meta" style="font-size: 0.85rem; color: #666; margin-top: 0.25rem;"></div>

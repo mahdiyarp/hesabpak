@@ -23,7 +23,8 @@
   window.IS_ADMIN = {{ 'true' if is_admin else 'false' }};
   window.USER_PERMISSIONS = {{ (user_permissions or [])|tojson|safe }};
   </script>
-  <script defer src="{{ prefix }}/static/search-unified.js"></script>
+  <script defer src="{{ prefix }}/static/search-unified.js?v=2"></script>
+  <script defer src="{{ prefix }}/static/search-ajax.js?v=2"></script>
 
 </head>
 <body class="theme-{{ active_theme }}" data-active-theme="{{ active_theme }}" data-search-sort="{{ search_sort_pref }}" data-price-mode="{{ price_display_mode }}">
@@ -45,23 +46,10 @@
     {% endif %}
   </div>
 </header>
-<!-- top menu (quick links) -->
-<nav class="top-menu">
-  {% set perms = user_permissions or [] %}
-  <div class="top-menu-inner">
-    {% if 'sales' in perms %}<a href="{{ prefix }}/invoice?kind=sales">فروش</a>{% endif %}
-    {% if 'purchase' in perms %}<a href="{{ prefix }}/invoice?kind=purchase">خرید</a>{% endif %}
-    {% if 'receive' in perms %}<a href="{{ prefix }}/cash_doc?kind=receive">دریافت</a>{% endif %}
-    {% if 'payment' in perms %}<a href="{{ prefix }}/cash_doc?kind=payment">پرداخت</a>{% endif %}
-    {% if 'reports' in perms %}<a href="{{ prefix }}/reports">گزارشات</a>{% endif %}
-    {% if 'assistant' in perms %}<a href="{{ prefix }}/assistant">دستیار</a>{% endif %}
-    {% if 'entities' in perms %}<a href="{{ prefix }}/entities?kind=item">ثبت کالا</a>{% endif %}
-    {% if 'admin' in perms %}<a href="{{ prefix }}/admin">مدیریت</a>{% endif %}
-  </div>
-</nav>
+<!-- top quick-menu removed per user request; pages will use .module-wrap under the global search -->
 
 <!-- نوار جست‌وجوی سراسری -->
-<div class="search-wrap global-search">
+<div class="search-wrap global-search" data-ajax="1">
   <div class="global-search-inputs" style="display:flex; gap:8px; align-items:center;">
     <input id="global-search" class="search-inp" type="text" placeholder="جستجو بر اساس کد یا نام..." autocomplete="off">
     <select id="global-kind" class="search-inp" style="max-width:140px;height:44px;">
@@ -78,55 +66,56 @@
   </div>
 
   <div id="global-results" class="search-results" hidden></div>
-  <div id="global-actions" class="search-actions" hidden></div>
 
 
-  {% if request.path != (prefix + '/' if prefix else '/') %}
-  <div class="dashboard-return">
-    <a class="btn back-dashboard" href="{{ prefix }}/">← بازگشت به داشبورد</a>
-  </div>
-  {% endif %}
+  {# بازگشت به داشبورد از روی سرچ حذف شد؛ لینک داشبورد اکنون در منوها نمایش داده می‌شود #}
 </div>
+
+<!-- quick shortcuts removed — single top menu used instead -->
+
+
+<!-- TOP MENUS: full set shown above the dashboard; dashboard link included -->
+<nav class="top-menus" aria-label="main-menu">
+  <div class="top-menus-inner">
+    {% set perms = user_permissions or [] %}
+    <a class="menu-item" href="{{ prefix }}/"><span class="icon">🏠</span><span class="label">داشبورد</span></a>
+    {# Invoices / Sales / Purchase #}
+    <a class="menu-item" href="{{ prefix }}/invoice?kind=sales"><span class="icon">🧾</span><span class="label">فاکتور فروش جدید</span></a>
+    <a class="menu-item" href="{{ prefix }}/invoice?kind=purchase"><span class="icon">📥</span><span class="label">فاکتور خرید جدید</span></a>
+    {# Entities: items / persons #}
+    <a class="menu-item" href="{{ prefix }}/entities?kind=item"><span class="icon">📦</span><span class="label">کالاها</span></a>
+    <a class="menu-item" href="{{ prefix }}/entities?kind=person"><span class="icon">👥</span><span class="label">اشخاص</span></a>
+    {# Cash: receive / payment #}
+    <a class="menu-item" href="{{ prefix }}/cash_doc?kind=receive"><span class="icon">➕</span><span class="label">دریافت</span></a>
+    <a class="menu-item" href="{{ prefix }}/cash_doc?kind=payment"><span class="icon">➖</span><span class="label">پرداخت</span></a>
+    {# Reports and Settings #}
+    <a class="menu-item" href="{{ prefix }}/reports"><span class="icon">📊</span><span class="label">گزارشات</span></a>
+    <a class="menu-item" href="{{ prefix }}/settings"><span class="icon">⚙️</span><span class="label">تنظیمات</span></a>
+    {# Admin and Assistant (show if permitted) #}
+    {% if 'assistant' in perms %}
+      <a class="menu-item" href="{{ prefix }}/assistant"><span class="icon">🤖</span><span class="label">دستیار</span></a>
+    {% endif %}
+    {% if 'admin' in perms %}
+      <a class="menu-item" href="{{ prefix }}/admin"><span class="icon">🗄️</span><span class="label">مدیریت</span></a>
+    {% endif %}
+  </div>
+</nav>
 
 
 <!-- اول: محتوای ماژول صفحه -->
-<main class="container">
+<div class="module-wrap">
+  <main class="container">
   {% with messages = get_flashed_messages(with_categories=true) %}
     {% if messages %}
       {% for cat,msg in messages %}<div class="flash {{cat}}">{{ msg }}</div>{% endfor %}
     {% endif %}
   {% endwith %}
   {% block content %}{% endblock %}
-</main>
+  </main>
+</div>
 
 <!-- بعد: منوهای عمودی موبایلی -->
-<nav class="mobile-menu" style="padding:0 12px;">
-  {% set perms = user_permissions or [] %}
-  {% if 'sales' in perms %}
-  <a class="menu-item" href="{{ prefix }}/invoice?kind=sales"><span class="icon">🧾</span><span class="label">فروش</span><span class="chev">›</span></a>
-  {% endif %}
-  {% if 'receive' in perms %}
-  <a class="menu-item" href="{{ prefix }}/cash_doc?kind=receive"><span class="icon">➕</span><span class="label">دریافت</span><span class="chev">›</span></a>
-  {% endif %}
-  {% if 'purchase' in perms %}
-  <a class="menu-item" href="{{ prefix }}/invoice?kind=purchase"><span class="icon">🛒</span><span class="label">خرید</span><span class="chev">›</span></a>
-  {% endif %}
-  {% if 'payment' in perms %}
-  <a class="menu-item" href="{{ prefix }}/cash_doc?kind=payment"><span class="icon">➖</span><span class="label">پرداخت</span><span class="chev">›</span></a>
-  {% endif %}
-  {% if 'reports' in perms %}
-  <a class="menu-item" href="{{ prefix }}/reports"><span class="icon">📊</span><span class="label">گزارشات</span><span class="chev">›</span></a>
-  {% endif %}
-  {% if 'assistant' in perms %}
-  <a class="menu-item" href="{{ prefix }}/assistant"><span class="icon">🤖</span><span class="label">دستیار هوشمند</span><span class="chev">›</span></a>
-  {% endif %}
-  {% if 'entities' in perms %}
-  <a class="menu-item" href="{{ prefix }}/entities?kind=item"><span class="icon">➕</span><span class="label">ثبت شخص یا کالا جدید</span><span class="chev">›</span></a>
-  {% endif %}
-  {% if 'admin' in perms %}
-  <a class="menu-item" href="{{ prefix }}/admin"><span class="icon">🗄️</span><span class="label">مدیریت</span><span class="chev">›</span></a>
-  {% endif %}
-</nav>
+{# Bottom mobile menu removed per user request — full dashboard menus are shown in the main UI instead #}
 
 <footer class="footer">© 2025 hesab pak</footer>
 

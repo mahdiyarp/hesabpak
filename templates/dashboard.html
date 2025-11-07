@@ -44,110 +44,90 @@
   {% endif %}
 
   {% if 'assistant' in user_permissions %}
-  <div class="card assistant-callout">
-    <div class="assistant-icon">🤖</div>
-    <div class="assistant-body">
-      <h3>دستیار هوشمند حساب‌پاک</h3>
-      <p>بارگذاری تصویر یا متن فاکتور و ثبت خودکار فروش یا خرید با کمک هوش مصنوعی.</p>
-      <div class="assistant-actions">
-        <a class="btn-primary" href="{{ prefix }}/assistant">شروع گفت‌وگو</a>
-        <span class="assistant-hint">مدل فعال: {{ assistant_model_label }}</span>
+  <!-- Inline assistant widget on dashboard -->
+  <div class="module-wrap assistant-module">
+    <div class="assistant-header card">
+      <div>
+        <h2>🤖 دستیار هوشمند</h2>
+        <p class="muted">گفت‌وگوی سریع: متن یا تصویر فاکتور را اینجا ارسال کنید تا پیش‌نمایش و گزینه ثبت به شما نشان داده شود.</p>
+      </div>
+      <div class="assistant-status {{ 'ready' if api_ready else 'missing' }}">
+        {% if api_ready %}
+        <span class="dot"></span> فعال — اتصال برقرار است
+        {% else %}
+        <span class="dot"></span> غیرفعال — ابتدا کلید API را در تنظیمات ثبت کنید
+        {% endif %}
       </div>
     </div>
-  </div>
-  {% endif %}
 
-  {% if 'cash' in dashboard_widgets %}
-  <div class="balances-card card">
-    <h2>موجودی صندوق‌ها</h2>
-    <div class="table-wrapper">
-      {% if cash_balances and cash_balances|length > 0 %}
-      <table>
-        <thead>
-          <tr>
-            <th>صندوق</th>
-            <th>دریافتی</th>
-            <th>پرداختی</th>
-            <th>خالص</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for row in cash_balances %}
-          <tr>
-            <td>{{ row.label }}</td>
-            <td>{{ row.receive|sep }}</td>
-            <td>{{ row.payment|sep }}</td>
-            <td class="{{ 'pos' if row.balance >= 0 else 'neg' }}">{{ row.balance|sep }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-      {% else %}
-      <div class="empty-state">هیچ صندوقی ثبت نشده است. برای مدیریت صندوق‌ها به بخش مدیریت صندوق‌ها مراجعه کنید.</div>
-      {% endif %}
-    </div>
-  </div>
-  {% endif %}
-
-  {% if 'charts' in dashboard_widgets %}
-  <div class="charts-grid">
-    <div class="card chart-card">
-      <div class="chart-header">
-        <h3>روند فروش ۷ روز اخیر</h3>
-        <span class="chart-sub">مبالغ به تومان و تعداد فاکتور</span>
-      </div>
-      <canvas id="salesChart" height="220"></canvas>
-    </div>
-    <div class="card chart-card">
-      <div class="chart-header">
-        <h3>دریافتی و پرداختی ۷ روز اخیر</h3>
-        <span class="chart-sub">مقایسه ورود و خروج وجه</span>
-      </div>
-      <canvas id="cashChart" height="220"></canvas>
-    </div>
-  </div>
-  {% endif %}
-
-  {% if 'cheques' in dashboard_widgets %}
-  <div class="lists-grid">
-    <div class="card list-card">
-      <h3>چک‌های دریافتی سه روز آینده</h3>
-      {% if incoming_cheques %}
-      <ul>
-        {% for doc in incoming_cheques %}
-        <li>
-          <div class="row-main">
-            <strong>{{ doc.person }}</strong>
-            <span class="amount">{{ doc.amount|sep }} تومان</span>
+    <div class="assistant-layout card">
+      <section class="assistant-chat">
+        <div id="assistant-messages" class="assistant-messages" data-empty-text="پیام خود را بنویسید یا تصویر فاکتور را آپلود کنید."></div>
+        <form id="assistant-form" class="assistant-form" autocomplete="off">
+          <textarea id="assistant-input" class="assistant-input" rows="3" placeholder="سوال یا توضیح خود را بنویسید..." {% if not api_ready %}disabled{% endif %}></textarea>
+          <div class="assistant-actions">
+            <label class="file-btn">
+              📄 آپلود فاکتور
+              <input type="file" id="assistant-file" accept="image/*" {% if not api_ready %}disabled{% endif %}>
+            </label>
+            <button type="submit" class="btn-primary" {% if not api_ready %}disabled{% endif %}>ارسال</button>
           </div>
-          <div class="row-meta">{{ doc.date|fa_digits }} | شماره سند {{ doc.number|fa_digits }}{% if doc.cheque_number %} | چک {{ doc.cheque_number|fa_digits }}{% endif %}</div>
-        </li>
-        {% endfor %}
-      </ul>
-      {% else %}
-      <div class="empty-state">چکی برای این بازه ثبت نشده است.</div>
-      {% endif %}
-    </div>
-    <div class="card list-card">
-      <h3>چک‌های پرداختی سه روز آینده</h3>
-      {% if outgoing_cheques %}
-      <ul>
-        {% for doc in outgoing_cheques %}
-        <li>
-          <div class="row-main">
-            <strong>{{ doc.person }}</strong>
-            <span class="amount">{{ doc.amount|sep }} تومان</span>
+          <div class="assistant-hints">
+            <span>راهنما: «این فاکتور فروش را ثبت کن»، «از علی دریافت ۲۰۰۰۰ تومان ثبت کن»، یا «اقلام این تصویر را استخراج کن».</span>
           </div>
-          <div class="row-meta">{{ doc.date|fa_digits }} | شماره سند {{ doc.number|fa_digits }}{% if doc.cheque_number %} | چک {{ doc.cheque_number|fa_digits }}{% endif %}</div>
-        </li>
-        {% endfor %}
-      </ul>
-      {% else %}
-      <div class="empty-state">چکی برای این بازه ثبت نشده است.</div>
-      {% endif %}
+        </form>
+      </section>
+
+      <aside class="assistant-sidebar">
+        <div id="assistant-preview" class="assistant-preview" hidden>
+          <h3>پیش‌نمایش</h3>
+          <div class="preview-meta">
+            <div><span>نوع:</span> <strong data-field="kind">—</strong></div>
+            <div><span>مشتری/تأمین‌کننده:</span> <strong data-field="partner">—</strong></div>
+            <div><span>تاریخ:</span> <strong data-field="date">—</strong></div>
+            <div><span>شماره:</span> <strong data-field="number">—</strong></div>
+          </div>
+          <div class="preview-items">
+            <table>
+              <thead>
+                <tr>
+                  <th>کالا</th>
+                  <th>تعداد</th>
+                  <th>قیمت واحد</th>
+                  <th>جمع</th>
+                  <th>وضعیت</th>
+                </tr>
+              </thead>
+              <tbody></tbody>
+            </table>
+          </div>
+          <div class="preview-total">مبلغ کل: <strong data-field="total">۰</strong> تومان</div>
+          <div id="assistant-missing" class="assistant-missing" hidden></div>
+          <div id="assistant-error" class="assistant-error" hidden></div>
+          <div class="preview-actions">
+            <button type="button" id="assistant-confirm" class="btn-primary">تأیید و ثبت در سیستم</button>
+            <button type="button" id="assistant-cancel" class="btn-secondary">انصراف</button>
+          </div>
+        </div>
+
+        <div class="assistant-tips">
+          <h3>نکات استفاده</h3>
+          <ul>
+            <li>تصاویر واضح و خوانا با حداکثر حجم ۲ مگابایت نتیجه بهتری خواهند داشت.</li>
+            <li>اگر نام مشتری یا کالا را نمی‌شناسیم، دستیار برای ایجاد رکورد جدید از شما اجازه می‌گیرد.</li>
+            <li>تاریخ‌های شمسی به‌صورت خودکار تبدیل می‌شوند.</li>
+          </ul>
+        </div>
+      </aside>
     </div>
   </div>
   {% endif %}
+
+  {# Cash balances card removed per request #}
+
+  {# Charts removed from dashboard per request #}
+
+  {# Cheque lists removed from dashboard per request #}
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -289,4 +269,7 @@
   setupCashChart();
 })();
 </script>
+{% block body_scripts %}
+<script src="{{ prefix }}/static/assistant.js"></script>
+{% endblock %}
 {% endblock %}

@@ -1,9 +1,10 @@
 {% extends "base.html" %}
 {% block content %}
 
-<h2>گزارشات</h2>
+<div class="module-wrap">
+  <h2>گزارشات</h2>
 
-<form method="get" action="" class="filters" data-persist="true" data-persist-key="reports">
+  <form method="get" action="" class="filters" data-persist="true" data-persist-key="reports">
   <input class="inp" name="q" value="{{ q or '' }}" placeholder="شماره، نام/کد طرف حساب، شماره چک" style="max-width:260px">
   <select class="inp" name="type" style="max-width:180px">
     <option value="all"      {{ 'selected' if (typ or 'all')=='all' }}>همه اسناد</option>
@@ -133,8 +134,10 @@
     <span class="btn" style="opacity:0.5;pointer-events:none;">بعدی →</span>
   {% endif %}
 </div>
-{% else %}
-  <div class="card">موردی یافت نشد.</div>
-{% endif %}
+  {% else %}
+    <div class="card">موردی یافت نشد.</div>
+  {% endif %}
+
+</div>
 
 {% endblock %}

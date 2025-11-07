@@ -19,6 +19,11 @@
   function show(el){ if(!el) return; el.style.display = 'block'; el.hidden = false; activateOverlay(); }
   function hide(el){ if(!el) return; el.style.display = 'none'; el.hidden = true; deactivateOverlay(); }
 
+  // Show/hide helpers that avoid toggling the full-page overlay for small dropdowns.
+  // Use data-overlay="1" on an element when you want the overlay to be activated.
+  function showLight(el){ if(!el) return; el.style.display = 'block'; el.hidden = false; /* no overlay */ }
+  function hideLight(el){ if(!el) return; el.style.display = 'none'; el.hidden = true; /* no overlay */ }
+
   function doubleConfirm(msg1, msg2){
     if(!window.confirm(msg1)) return false;
     return window.confirm(msg2);
@@ -95,11 +100,11 @@
   // and the unified invoice page (search-wrapper + person_results placed separately).
   // Prefer .customer-lock when present, otherwise fall back to the closest .search-wrapper
   // around the person_search input so selection/lock UI still works.
+  const personSearch = document.querySelector('#person_search');
   let personWrapper = document.querySelector('.sales-module .customer-lock');
   if(!personWrapper && personSearch){
-    personWrapper = personSearch.closest('.search-wrapper');
+    try{ personWrapper = personSearch.closest('.search-wrapper'); }catch(e){}
   }
-  const personSearch = document.querySelector('#person_search');
   const personBox = document.querySelector('#person_results');
   const personToken = document.querySelector('#person_token');
   const personHint = document.querySelector('#person_hint');
@@ -113,8 +118,14 @@
       personBox.innerHTML = '';
       return;
     }
+    // ensure we only show person-type results here (defensive filter)
+    try{
+      results = results.filter(r => !r.type || String(r.type).toLowerCase() === 'person');
+    }catch(e){/* ignore */}
+    if(!results || results.length === 0){ hide(personBox); personBox.innerHTML=''; return; }
     personBox.innerHTML = results.map(r => `<a class="res" href="#" data-id="${r.id}" data-name="${r.name}" data-code="${r.code}">${r.code} — ${r.name}</a>`).join('');
-    show(personBox);
+    // show dropdown without activating the full overlay
+    try{ showLight(personBox); }catch(e){ show(personBox); }
   }
 
   function searchPerson(q){
@@ -122,6 +133,36 @@
       .then(r => r.ok ? r.json() : [])
       .then(renderPerson)
       .catch(()=>{ hide(personBox); personBox.innerHTML=''; });
+  }
+
+  // small modal that asks user to choose between Invoice (فاکتور) or Cardex (کارتکس)
+  function askInvoiceOrCardex(title){
+    return new Promise((resolve)=>{
+      try{
+        const modal = document.createElement('div');
+        modal.className = 'hp-modal-overlay';
+        modal.innerHTML = `
+          <div class="hp-modal" role="dialog" aria-modal="true">
+            <div style="font-weight:700;margin-bottom:8px">${title || 'انتخاب کنید'}</div>
+            <div style="display:flex;gap:8px;justify-content:center;margin-top:8px">
+              <button class="hp-btn hp-btn-primary" data-choice="invoice">📄 استفاده در فاکتور</button>
+              <button class="hp-btn hp-btn-secondary" data-choice="cardex">🗂️ مشاهده کارتکس</button>
+              <button class="hp-btn" data-choice="cancel">انصراف</button>
+            </div>
+          </div>`;
+        // basic styles
+        const s = modal.style;
+        s.position = 'fixed'; s.left = 0; s.top = 0; s.right = 0; s.bottom = 0; s.zIndex = 2147483647; s.display='flex'; s.alignItems='center'; s.justifyContent='center'; s.background='rgba(0,0,0,0.35)';
+        const inner = modal.querySelector('.hp-modal');
+        inner.style.background='#fff'; inner.style.padding='14px'; inner.style.borderRadius='10px'; inner.style.minWidth='280px'; inner.style.textAlign='center';
+        document.body.appendChild(modal);
+        function cleanup(){ try{ modal.remove(); }catch(e){} }
+        modal.addEventListener('click', function(ev){ if(ev.target === modal){ cleanup(); resolve('cancel'); } });
+        modal.querySelectorAll('button[data-choice]').forEach(btn=>{
+          btn.addEventListener('click', function(ev){ const ch = btn.getAttribute('data-choice'); cleanup(); resolve(ch); });
+        });
+      }catch(e){ resolve('cancel'); }
+    });
   }
 
   function lockCustomer(data){
@@ -179,15 +220,24 @@
   }
 
   if(personBox){
-    personBox.addEventListener('click', function(ev){
+    personBox.addEventListener('click', async function(ev){
       const a = ev.target.closest('a.res');
       if(!a) return;
       ev.preventDefault();
       const data = { id:a.dataset.id, name:a.dataset.name, code:a.dataset.code };
-      personToken.value = data.id;
-      lockCustomer(data);
-      hide(personBox);
-      auditLog('person-selected', data);
+      // ask user whether to use in invoice or view cardex
+      const choice = await askInvoiceOrCardex('نحوه استفاده از مورد انتخابی را مشخص کنید');
+      if(choice === 'invoice'){
+        personToken.value = data.id;
+        lockCustomer(data);
+        hide(personBox);
+        auditLog('person-selected', data);
+      }else if(choice === 'cardex'){
+        // navigate to entity card (edit/view)
+        window.location = `${prefix}/entities/${encodeURIComponent(data.id)}/edit`;
+      }else{
+        // canceled — keep dropdown open for convenience
+      }
     });
   }
 
@@ -266,7 +316,8 @@
         return;
       }
       resultsBox.innerHTML = rows.map(r => `<a class="res" href="#" data-id="${r.id}" data-code="${r.code}" data-name="${r.name}">${r.code} — ${r.name}</a>`).join('');
-      show(resultsBox);
+      // show item result dropdown without activating the overlay (lightweight)
+      try{ showLight(resultsBox); }catch(e){ show(resultsBox); }
     }
 
     function searchItem(q){
@@ -294,23 +345,43 @@
         const a = ev.target.closest('a.res');
         if(!a) return;
         ev.preventDefault();
-        itemToken.value = a.dataset.id;
-        searchInput.value = a.dataset.code;
-        hide(resultsBox);
-        auditLog('line-item-selected', { item_id: a.dataset.id, code: a.dataset.code, row: tr.dataset.rowIndex });
-        // After selecting an item, focus the unit price field (قیمت فی)
-        if(unitPrice && !unitPrice.value){ unitPrice.focus(); }
-        if(meta){
-          meta.textContent = `${a.dataset.name}`;
-        }
+        const data = { id: a.dataset.id, code: a.dataset.code, name: a.dataset.name };
+        // Ask whether to use in invoice (add to row) or view cardex
+        (async ()=>{
+          const choice = await askInvoiceOrCardex('نحوه استفاده از مورد انتخابی را مشخص کنید');
+          if(choice === 'invoice'){
+            itemToken.value = data.id;
+            searchInput.value = data.code;
+            hide(resultsBox);
+            auditLog('line-item-selected', { item_id: data.id, code: data.code, row: tr.dataset.rowIndex });
+            // After selecting an item, focus the unit price field (قیمت فی)
+            if(unitPrice && !unitPrice.value){ unitPrice.focus(); }
+            if(meta){ meta.textContent = `${data.name}`; }
+          }else if(choice === 'cardex'){
+            window.location = `${prefix}/entities/${encodeURIComponent(data.id)}/edit`;
+          }else{
+            // canceled — keep results open
+          }
+        })();
       });
     }
 
-    document.addEventListener('click', function(ev){
-      if(resultsBox && !resultsBox.contains(ev.target) && ev.target !== searchInput){
-        hide(resultsBox);
-      }
-    });
+    // Use a single global click handler (added once) to hide item result boxes when clicking outside.
+    if(!document._sales_results_click_bound){
+      document._sales_results_click_bound = true;
+      document.addEventListener('click', function(ev){
+        try{
+          const all = document.querySelectorAll('.item_results');
+          all.forEach(rb => {
+            const wrapper = rb.closest('.search-wrapper') || rb.parentElement;
+            const inp = wrapper ? wrapper.querySelector('input') : null;
+            if(rb && !rb.contains(ev.target) && ev.target !== inp){
+              rb.style.display = 'none'; rb.hidden = true;
+            }
+          });
+        }catch(e){/* ignore */}
+      });
+    }
 
     [unitPrice, qty].forEach(inp => {
       if(!inp) return;

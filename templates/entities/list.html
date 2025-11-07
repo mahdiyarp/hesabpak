@@ -4,7 +4,10 @@
 
 <form method="get" action="{{ prefix }}/entities" class="filters">
   <input type="hidden" name="kind" value="{{ kind }}">
-  <input name="q" value="{{ q or '' }}" placeholder="جستجو بر اساس نام یا کد" class="inp" style="max-width:320px">
+  <div class="search-wrap" style="display:inline-block;">
+    <input name="q" value="{{ q or '' }}" placeholder="جستجو بر اساس نام یا کد" class="search-inp inp" data-kind="{{ kind }}" style="max-width:320px">
+    <div class="search-results" hidden></div>
+  </div>
   <select class="inp" name="per_page" style="max-width:120px">
     {% set p = per_page|default(50) %}
     <option value="20"    {{ 'selected' if p==20 }}>۲۰</option>
