@@ -43,6 +43,21 @@
   </div>
   {% endif %}
 
+  {# Rates widget (live prices only) #}
+  <div class="rates-panel card" style="margin-top:12px;padding:12px;">
+    <h3>قیمت‌ها (لحظه‌ای)</h3>
+    <div class="rates-widget" style="display:flex;flex-direction:column;gap:8px">
+      <div style="display:flex;gap:12px;align-items:center;flex-wrap:wrap">
+        <div>USD: <strong class="rate-usd">—</strong></div>
+        <div>EUR: <strong class="rate-eur">—</strong></div>
+        <div>گرم 18: <strong class="rate-gram18">—</strong></div>
+        <div>سکه (تمام): <strong class="rate-coin">—</strong></div>
+        <div style="margin-left:auto;color:#666;font-size:12px">آخرین بروزرسانی: <span class="rates-updated">—</span></div>
+      </div>
+      <div style="color:#666;font-size:12px">نرخ‌ها به‌صورت خودکار به‌روز می‌شوند (بک‌اند قابل تنظیم).</div>
+    </div>
+  </div>
+
   {% if 'assistant' in user_permissions %}
   <!-- Inline assistant widget on dashboard -->
   <div class="module-wrap assistant-module">
@@ -270,6 +285,7 @@
 })();
 </script>
 {% block body_scripts %}
+<script src="{{ prefix }}/static/rates.js"></script>
 <script src="{{ prefix }}/static/assistant.js"></script>
 {% endblock %}
 {% endblock %}

@@ -29,6 +29,8 @@ from utils.date_utils import (
     jalali_reference,
     fa_digits,
 )
+from utils import rates as rates_utils
+from utils import bank_utils
 
 # ----------------- Config -----------------
 load_dotenv()
@@ -3840,6 +3842,51 @@ def api_now():
             "timestamp": int(info["datetime"].timestamp()),
         }
     )
+
+
+@app.route(URL_PREFIX + "/api/rates", methods=["GET"])
+@login_required
+def api_rates_get():
+    """بازگرداندن اسنپ‌شات نرخ‌ها (مقداری که قبلاً ذخیره شده یا پیش‌فرض)."""
+    try:
+        snap = rates_utils.get_rate_snapshot()
+        return jsonify({"ok": True, "rates": snap})
+    except Exception:
+        return jsonify({"ok": False, "rates": {}}), 500
+
+
+@app.route(URL_PREFIX + "/api/rates", methods=["POST"])
+@login_required
+def api_rates_set():
+    """تنها برای ادمین: تنظیم دستی نرخ‌ها (MVP).
+    بدنه JSON می‌تواند دقیقاً همان ساختار rates.json را داشته باشد.
+    """
+    try:
+        admin_required()
+    except Exception:
+        return jsonify({"ok": False, "message": "forbidden"}), 403
+    payload = request.get_json(silent=True) or {}
+    try:
+        rates_utils.save_rates(payload)
+        return jsonify({"ok": True})
+    except Exception as exc:
+        app.logger.exception("failed to save rates: %s", exc)
+        return jsonify({"ok": False, "message": str(exc)}), 500
+
+
+@app.route(URL_PREFIX + "/api/bank_detect", methods=["POST"])
+@login_required
+def api_bank_detect():
+    data = request.get_json(silent=True) or {}
+    val = (data.get('value') or data.get('q') or '').strip()
+    if not val:
+        return jsonify({"ok": False, "message": "no value provided"}), 400
+    try:
+        info = bank_utils.detect_bank(val)
+        return jsonify({"ok": True, "result": info})
+    except Exception as exc:
+        app.logger.exception("bank_detect failed: %s", exc)
+        return jsonify({"ok": False, "message": str(exc)}), 500
 
 
 # ----------------- Search API -----------------

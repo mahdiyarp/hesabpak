@@ -5,3 +5,5 @@ SQLAlchemy>=2.0
 python-dotenv
 MarkupSafe
 openai>=1.51.0
+requests>=2.0
+beautifulsoup4>=4.0
