@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="module-wrap admin-dashboard">
+  <h2>📜 دفتر ثبت (Ledger)</h2>
+  <p class="muted" style="margin: 0 0 16px;">لیست ورود‌های ثبت‌شده به دفتر افزوده‌شونده (append-only). این صفحه برای بررسی زنجیرهٔ هش‌ها و payload‌ها مناسب است.</p>
+
+  <div style="margin-bottom:12px"> <a class="btn" href="{{ url_for('admin_stub') }}">بازگشت به مدیریت</a> </div>
+
+  <div class="links">
+    <table style="width:100%;background:#fff;border:1px solid #eee;border-radius:10px;border-collapse:collapse">
+      <thead>
+        <tr style="background:#f7faf9">
+          <th style="text-align:right;padding:8px;border-bottom:1px solid #eee">#</th>
+          <th style="text-align:right;padding:8px;border-bottom:1px solid #eee">تاریخ</th>
+          <th style="text-align:right;padding:8px;border-bottom:1px solid #eee">نوع</th>
+          <th style="text-align:right;padding:8px;border-bottom:1px solid #eee">شناسه</th>
+          <th style="text-align:right;padding:8px;border-bottom:1px solid #eee">عمل</th>
+          <th style="text-align:left;padding:8px;border-bottom:1px solid #eee">payload (JSON)</th>
+          <th style="text-align:left;padding:8px;border-bottom:1px solid #eee">hash</th>
+          <th style="text-align:left;padding:8px;border-bottom:1px solid #eee">prev_hash</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for e in rows %}
+        <tr>
+          <td style="padding:8px;border-bottom:1px solid #f3f3f3">{{ e.id }}</td>
+          <td style="padding:8px;border-bottom:1px solid #f3f3f3">{{ e.created_at }}</td>
+          <td style="padding:8px;border-bottom:1px solid #f3f3f3">{{ e.object_type }}</td>
+          <td style="padding:8px;border-bottom:1px solid #f3f3f3">{{ e.object_id or '—' }}</td>
+          <td style="padding:8px;border-bottom:1px solid #f3f3f3">{{ e.action }}</td>
+          <td style="padding:8px;border-bottom:1px solid #f3f3f3"><pre style="white-space:pre-wrap;max-height:120px;overflow:auto">{{ e.payload }}</pre></td>
+          <td style="padding:8px;border-bottom:1px solid #f3f3f3"><code style="font-size:11px">{{ e.hash }}</code></td>
+          <td style="padding:8px;border-bottom:1px solid #f3f3f3"><code style="font-size:11px">{{ e.prev_hash or '—' }}</code></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div style="margin-top:12px;text-align:center">
+    {% if page > 1 %}
+      <a class="btn" href="?page={{ page-1 }}">صفحهٔ قبلی</a>
+    {% endif %}
+    <span style="margin:0 12px">صفحه {{ page }} — کل {{ total }}</span>
+    {% if page * per_page < total %}
+      <a class="btn" href="?page={{ page+1 }}">صفحهٔ بعدی</a>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

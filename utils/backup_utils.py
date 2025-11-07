@@ -1,5 +1,5 @@
 # utils/backup_utils.py
-import os, io, json, gzip, shutil, datetime, zipfile, tempfile
+import os, io, json, gzip, shutil, datetime, zipfile, tempfile, decimal, uuid
 from pathlib import Path
 from typing import Optional
 
@@ -176,8 +176,55 @@ def autosave_record(app, model_name: str, pk_value, payload: dict):
     day_dir.mkdir(parents=True, exist_ok=True)
     fn = f"{d.strftime('%H-%M-%S')}_{pk_value}.json.gz"
     path = day_dir / fn
+    def _sanitize(obj):
+        """Recursively convert non-JSON-serializable objects into JSON-friendly types.
+
+        - datetime.date / datetime.datetime -> ISO 8601 string
+        - decimal.Decimal -> float
+        - bytes -> utf-8 decoded string (fallback: repr)
+        - set/tuple -> list
+        - dict/list -> sanitized recursively
+        - other objects -> str(obj)
+        """
+        # simple primitives
+        if obj is None or isinstance(obj, (str, int, float, bool)):
+            return obj
+        # dates
+        if isinstance(obj, (datetime.datetime, datetime.date)):
+            try:
+                return obj.isoformat()
+            except Exception:
+                return str(obj)
+        # Decimal
+        if isinstance(obj, decimal.Decimal):
+            try:
+                return float(obj)
+            except Exception:
+                return str(obj)
+        # bytes
+        if isinstance(obj, (bytes, bytearray)):
+            try:
+                return obj.decode("utf-8")
+            except Exception:
+                return repr(obj)
+        # mappings
+        if isinstance(obj, dict):
+            return {str(k): _sanitize(v) for k, v in obj.items()}
+        # iterables
+        if isinstance(obj, (list, tuple, set)):
+            return [_sanitize(v) for v in obj]
+        # UUID
+        if isinstance(obj, uuid.UUID):
+            return str(obj)
+        # Fallback to string representation
+        try:
+            return str(obj)
+        except Exception:
+            return None
+
+    safe_payload = _sanitize(payload)
     with gzip.open(path, "wt", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
+        json.dump(safe_payload, f, ensure_ascii=False, indent=2)
     try:
         touch_autosave_marker(app, d.isoformat(timespec="seconds"))
     except Exception:

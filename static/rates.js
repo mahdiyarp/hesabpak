@@ -17,10 +17,12 @@
   async function updateRatesOnce(el){
     const data = await fetchRates();
     if(!data) return;
-    const cur = data.currencies || {};
+    // API returns { ok: true, rates: { currencies: {...}, gold: {...}, updated_at: ... } }
+    const snap = data.rates || data || {};
+    const cur = snap.currencies || {};
     const usd = (cur.USD && cur.USD.rate) ? cur.USD.rate : null;
     const eur = (cur.EUR && cur.EUR.rate) ? cur.EUR.rate : null;
-    const gold = data.gold || {};
+    const gold = snap.gold || {};
     const gram18 = gold.gram_18 || null;
     const coin = gold.coin_full || null;
 
@@ -34,7 +36,7 @@
     if(eurLbl) eurLbl.textContent = eur ? fmt(eur) + ' تومان' : '—';
     if(gramLbl) gramLbl.textContent = gram18 ? fmt(gram18) + ' تومان' : '—';
     if(coinLbl) coinLbl.textContent = coin ? fmt(coin) + ' تومان' : '—';
-    if(updatedLbl) updatedLbl.textContent = (data.rates && data.rates.updated_at) ? data.rates.updated_at : (data.updated_at || '—');
+    if(updatedLbl) updatedLbl.textContent = snap.updated_at || data.updated_at || '—';
   }
 
   async function init(el){

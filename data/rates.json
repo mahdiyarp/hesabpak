@@ -1,0 +1,17 @@
+{
+  "updated_at": "2025-11-07T01:33:19.544558",
+  "currencies": {
+    "USD": {
+      "rate": null,
+      "unit": "تومان"
+    },
+    "EUR": {
+      "rate": null,
+      "unit": "تومان"
+    }
+  },
+  "gold": {
+    "gram_18": 24.0,
+    "coin_full": 18.0
+  }
+}

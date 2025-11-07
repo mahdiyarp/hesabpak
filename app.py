@@ -5,6 +5,8 @@ from datetime import datetime, timedelta, date
 from typing import Any, Dict, List, Optional
 
 from flask import Flask, render_template, redirect, request, flash, session, jsonify, abort, current_app
+import subprocess, shlex, traceback
+import shutil
 from flask_login import LoginManager, login_user, logout_user, login_required, UserMixin, current_user
 from dotenv import load_dotenv
 from markupsafe import Markup, escape
@@ -31,6 +33,70 @@ from utils.date_utils import (
 )
 from utils import rates as rates_utils
 from utils import bank_utils
+import hashlib
+
+# --- Simple append-only ledger for traceability (blockchain-like) ----------
+class LedgerEntry(db.Model):
+    __tablename__ = "ledger_entries"
+    id = db.Column(db.Integer, primary_key=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
+    object_type = db.Column(db.String(64), nullable=False)
+    object_id = db.Column(db.String(64), nullable=True)
+    action = db.Column(db.String(64), nullable=False)
+    payload = db.Column(db.Text, nullable=True)
+    prev_hash = db.Column(db.String(128), nullable=True)
+    hash = db.Column(db.String(128), nullable=False, unique=True, index=True)
+
+
+def _compute_entry_hash(prev_hash: Optional[str], payload_text: str, ts_iso: str) -> str:
+    m = hashlib.sha256()
+    prev = (prev_hash or "")
+    m.update(prev.encode("utf-8"))
+    m.update(ts_iso.encode("utf-8"))
+    m.update((payload_text or "").encode("utf-8"))
+    return m.hexdigest()
+
+
+def record_ledger(object_type: str, object_id: Optional[str], action: str, payload: Dict[str, Any]) -> LedgerEntry:
+    """Create a new ledger entry (append-only)."""
+    try:
+        # get last hash
+        last = db.session.query(LedgerEntry).order_by(LedgerEntry.id.desc()).first()
+        prev = last.hash if last else None
+        ts = datetime.utcnow().isoformat()
+        payload_text = json.dumps(payload, ensure_ascii=False, sort_keys=True)
+        h = _compute_entry_hash(prev, payload_text, ts)
+        entry = LedgerEntry(object_type=object_type, object_id=str(object_id) if object_id is not None else None, action=action, payload=payload_text, prev_hash=prev, hash=h)
+        db.session.add(entry)
+        db.session.commit()
+
+        # record ledger entry for invoice created via UI
+        try:
+            ledger_lines = []
+            for r in rows:
+                try:
+                    ledger_lines.append({"item_id": int(r['item'].id), "qty": float(r['qty']), "unit_price": float(r['unit_price'])})
+                except Exception:
+                    continue
+            ledger_payload = {
+                "invoice_id": inv.id,
+                "number": inv.number,
+                "kind": inv.kind,
+                "total": float(inv.total or 0.0),
+                "person_id": person.id if person else None,
+                "lines": ledger_lines,
+            }
+            try:
+                record_ledger("invoice", inv.id, "create", ledger_payload)
+            except Exception:
+                app.logger.exception("failed to write invoice ledger entry (ui)")
+        except Exception:
+            app.logger.exception("failed to prepare invoice ledger payload (ui)")
+        return entry
+    except Exception:
+        db.session.rollback()
+        app.logger.exception('ledger record failed')
+        raise
 
 # ----------------- Config -----------------
 load_dotenv()
@@ -158,6 +224,17 @@ app.config["SQLALCHEMY_DATABASE_URI"] = DB_URI
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 db.init_app(app)
 print(f"[DB] Using: {DB_PATH}")
+# Optionally start rates background updater on app startup if enabled via env
+try:
+    RATES_AUTO_START = os.environ.get('RATES_AUTO_START', '').strip().lower()
+    if RATES_AUTO_START in ('1','true','yes','on'):
+        try:
+            rates_utils.start_background_updater(interval_seconds=int(os.environ.get('RATES_INTERVAL') or 60), run_on_start=True)
+            app.logger.info('rates background updater started')
+        except Exception:
+            app.logger.exception('failed to start rates background updater')
+except Exception:
+    pass
 
 USERS_FILE = str((DB_DIR / "users.json").resolve())
 LOG_FILE   = str((DB_DIR / "activity.log").resolve())
@@ -1260,6 +1337,23 @@ def _apply_cash_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
             person_entity.balance = float(amount)
 
     db.session.commit()
+    # record ledger entry for cash doc creation
+    try:
+        ledger_payload = {
+            "doc_id": doc.id,
+            "number": doc.number,
+            "doc_type": doc.doc_type,
+            "amount": float(doc.amount or 0.0),
+            "person_id": person_entity.id if person_entity else None,
+            "cashbox_id": cb.id if cb else None,
+        }
+        try:
+            record_ledger("cashdoc", doc.id, "create", ledger_payload)
+        except Exception:
+            app.logger.exception("failed to write cashdoc ledger entry")
+    except Exception:
+        app.logger.exception("failed to prepare cashdoc ledger payload")
+
     return {"doc": doc, "person": person_entity, "cashbox": cb}
 
 def _ensure_entity(kind: str, data: Dict[str, Any]) -> Entity:
@@ -1393,6 +1487,27 @@ def _apply_invoice_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
         partner_entity.balance = float(total) if kind == "sales" else -float(total)
 
     db.session.commit()
+
+    # record ledger entry for invoice creation (append-only)
+    try:
+        ledger_lines = [
+            {"item_id": int(p["entity"].id), "qty": float(p["qty"]), "unit_price": float(p["unit_price"]) }
+            for p in items_payload
+        ]
+        ledger_payload = {
+            "invoice_id": inv.id,
+            "number": inv.number,
+            "kind": inv.kind,
+            "total": float(inv.total or 0.0),
+            "partner_id": partner_entity.id if partner_entity else None,
+            "lines": ledger_lines,
+        }
+        try:
+            record_ledger("invoice", inv.id, "create", ledger_payload)
+        except Exception:
+            app.logger.exception("failed to write invoice ledger entry")
+    except Exception:
+        app.logger.exception("failed to prepare invoice ledger payload")
 
     return {
         "invoice": inv,
@@ -2130,6 +2245,10 @@ def entities_new():
             level=data["level"]
         )
         db.session.add(ent); db.session.commit()
+        try:
+            record_ledger("entity", ent.id, "create", {"type": ent.type, "code": ent.code, "name": ent.name, "unit": ent.unit, "level": ent.level})
+        except Exception:
+            pass
         flash("ثبت شد.", "success")
         return redirect(URL_PREFIX + f"/entities?kind={ent.type}")
 
@@ -2162,6 +2281,10 @@ def entities_edit(eid):
         ent.parent_id = data["parent"].id if data["parent"] else None
         ent.level = data["level"]
         db.session.commit()
+        try:
+            record_ledger("entity", ent.id, "update", {"type": ent.type, "code": ent.code, "name": ent.name, "unit": ent.unit, "level": ent.level})
+        except Exception:
+            pass
         flash("ویرایش شد.", "success")
         return redirect(URL_PREFIX + f"/entities?kind={ent.type}")
 
@@ -2175,7 +2298,13 @@ def entities_delete(eid):
     admin_required()
     ent = Entity.query.get_or_404(eid)
     t = ent.type
+    # capture payload before deletion
+    payload = {"id": ent.id, "type": ent.type, "code": ent.code, "name": ent.name}
     db.session.delete(ent); db.session.commit()
+    try:
+        record_ledger("entity", eid, "delete", payload)
+    except Exception:
+        pass
     flash("حذف شد.", "success")
     return redirect(URL_PREFIX + f"/entities?kind={t}")
 
@@ -3241,6 +3370,97 @@ def admin_stub():
     return render_template("admin/dashboard.html", prefix=URL_PREFIX)
 
 
+@app.route(URL_PREFIX + "/admin/update_from_git", methods=["POST"])
+@login_required
+def admin_update_from_git():
+    admin_required()
+    EXPECTED_REMOTE = "https://github.com/mahdiyarp/hesabpak.git"
+    repo_dir = str(PROJECT_ROOT)
+    result = {"ok": False, "steps": []}
+    def step(msg, ok=True):
+        result["steps"].append({"msg": msg, "ok": bool(ok)})
+
+    try:
+        # verify git repo
+        git_dir = PROJECT_ROOT / ".git"
+        if not git_dir.exists():
+            step("Not a git repository", ok=False)
+            return jsonify(result), 400
+
+        # check origin url
+        try:
+            out = subprocess.check_output(shlex.split(f"git -C {shlex.quote(repo_dir)} remote get-url origin"), stderr=subprocess.STDOUT, text=True).strip()
+        except subprocess.CalledProcessError as e:
+            step(f"failed to read git remote: {e.output}", ok=False)
+            return jsonify(result), 500
+
+        if EXPECTED_REMOTE not in out and out.strip() != EXPECTED_REMOTE:
+            step(f"remote origin URL mismatch: {out}", ok=False)
+            return jsonify(result), 403
+        step(f"remote origin OK: {out}")
+
+        # create DB backup
+        db_file = (Path(app.config.get("DATA_DIR", "data")) / app.config.get("DB_FILE", "hesabpak.sqlite3"))
+        if db_file.exists():
+            ts = datetime.utcnow().strftime("%Y%m%dT%H%M%S")
+            bdir = Path(app.config.get("DATA_DIR", "data")) / "backups" / "fast_update"
+            bdir.mkdir(parents=True, exist_ok=True)
+            bpath = bdir / f"{db_file.name}.{ts}.bak"
+            try:
+                shutil.copy2(str(db_file), str(bpath))
+                step(f"DB backup created: {bpath}")
+            except Exception as e:
+                step(f"DB backup failed: {e}", ok=False)
+        else:
+            step("No DB file to backup; skipping")
+
+        # ensure clean working tree
+        status = subprocess.check_output(shlex.split(f"git -C {shlex.quote(repo_dir)} status --porcelain"), text=True)
+        if status.strip():
+            step("Local uncommitted changes present; aborting to avoid data loss", ok=False)
+            return jsonify(result), 409
+        step("Working tree clean")
+
+        # fetch & fast-forward pull
+        try:
+            subprocess.check_call(shlex.split(f"git -C {shlex.quote(repo_dir)} fetch origin --prune"))
+            branch = os.environ.get('GIT_BRANCH', 'main')
+            subprocess.check_call(shlex.split(f"git -C {shlex.quote(repo_dir)} pull --ff-only origin {shlex.quote(branch)}"))
+            step("git pull --ff-only origin succeeded")
+        except subprocess.CalledProcessError as e:
+            step(f"git pull failed: {e}", ok=False)
+            return jsonify(result), 500
+
+        # install requirements inside venv if present
+        venv_dir = PROJECT_ROOT / "venv"
+        if venv_dir.exists() and (venv_dir / "bin" / "python").exists():
+            py = str(venv_dir / "bin" / "python")
+            try:
+                subprocess.check_call([py, "-m", "pip", "install", "-r", str(PROJECT_ROOT / "requirements.txt")])
+                step("requirements installed inside venv")
+            except subprocess.CalledProcessError as e:
+                step(f"pip install in venv failed: {e}", ok=False)
+        else:
+            step("No venv found; skipping pip install")
+
+        # restart (Passenger)
+        try:
+            tmpdir = PROJECT_ROOT / "tmp"
+            tmpdir.mkdir(parents=True, exist_ok=True)
+            (tmpdir / "restart.txt").write_text(datetime.utcnow().isoformat())
+            step("Passenger restart triggered (tmp/restart.txt)")
+        except Exception as e:
+            step(f"failed to trigger restart: {e}", ok=False)
+
+        result["ok"] = True
+        return jsonify(result)
+
+    except Exception:
+        app.logger.exception("update_from_git failed")
+        step("unexpected error; see server logs", ok=False)
+        return jsonify(result), 500
+
+
 @app.route(URL_PREFIX + "/admin/site-views", methods=["GET"])
 @login_required
 def admin_site_views():
@@ -3254,6 +3474,21 @@ def admin_site_views():
     total = q.count()
     rows = q.offset((page-1)*per_page).limit(per_page).all()
     return render_template("admin/site_views.html", prefix=URL_PREFIX, rows=rows, page=page, per_page=per_page, total=total)
+
+
+@app.route(URL_PREFIX + "/admin/ledger", methods=["GET"])
+@login_required
+def admin_ledger():
+    admin_required()
+    try:
+        page = int(request.args.get("page") or 1)
+    except Exception:
+        page = 1
+    per_page = 100
+    q = db.session.query(LedgerEntry).order_by(LedgerEntry.id.desc())
+    total = q.count()
+    rows = q.offset((page - 1) * per_page).limit(per_page).all()
+    return render_template("admin/ledger.html", prefix=URL_PREFIX, rows=rows, page=page, per_page=per_page, total=total)
 
 
 @app.route(URL_PREFIX + "/admin/users", methods=["GET", "POST"])

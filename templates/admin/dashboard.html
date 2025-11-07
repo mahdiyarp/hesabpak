@@ -61,6 +61,57 @@
       </div>
       <div class="admin-card__chev">›</div>
     </a>
+
+    <div class="admin-card" id="admin-update-card" style="cursor:default">
+      <div class="admin-card__icon">⬆️</div>
+      <div class="admin-card__body">
+        <h3>آپدیت از گیت‌هاب</h3>
+        <p>آپدیت کد از مخزن رسمی (فقط برای مدیران). قبل از اجرای این عملیات از ذخیره‌سازی محلی اطمینان حاصل کنید.</p>
+        <div style="margin-top:8px">
+          <button id="btn-update-from-git" class="btn">اجرای آپدیت</button>
+          <span id="update-status" style="margin-left:12px;color:#666"></span>
+        </div>
+      </div>
+      <div class="admin-card__chev">›</div>
+    </div>
+
+    <a class="admin-card" href="{{ prefix }}/admin/ledger">
+      <div class="admin-card__icon">🔗</div>
+      <div class="admin-card__body">
+        <h3>دفتر ثبت (Ledger)</h3>
+        <p>مشاهدهٔ زنجیرهٔ ورودهای ثبت‌شده برای ردیابیِ تغییرات (append-only).</p>
+      </div>
+      <div class="admin-card__chev">›</div>
+    </a>
   </div>
 </div>
 {% endblock %}
+
+  {% block scripts %}
+    <script>
+      (function(){
+        const btn = document.getElementById('btn-update-from-git');
+        const status = document.getElementById('update-status');
+        if (!btn) return;
+        btn.addEventListener('click', async function(){
+          if (!confirm('آیا قصد دارید مخزن رسمی را از GitHub دریافت و برنامه را به‌روز کنید؟ عملیات ممکن است باعث راه‌اندازی مجدد سرویس شود.')) return;
+          btn.disabled = true; status.textContent = 'در حال اجرا...';
+          try{
+            const resp = await fetch('{{ prefix }}/admin/update_from_git', {method:'POST', credentials:'same-origin', headers:{'X-Requested-With':'XMLHttpRequest'}});
+            const data = await resp.json();
+            if (resp.ok && data.ok){
+              status.textContent = 'آپدیت با موفقیت انجام شد';
+              alert('آپدیت با موفقیت انجام شد. لطفاً لاگ‌ها را بررسی کنید.');
+            } else {
+              status.textContent = 'خطا در آپدیت';
+              alert('خطا: ' + (data.steps ? JSON.stringify(data.steps, null, 2) : resp.statusText));
+            }
+          }catch(err){
+            console.error(err);
+            status.textContent = 'خطای شبکه';
+            alert('خطای شبکه یا درخواست نامعتبر. کنسول مرورگر را ببینید.');
+          } finally { btn.disabled = false; }
+        });
+      })();
+    </script>
+  {% endblock %}

@@ -230,7 +230,10 @@
       }catch(e){/* ignore portal errors */}
     }
 
-  const input = legacy ? (box._legacyWrapper.querySelector('input') || box._legacyWrapper.querySelector('input[type=text]')) : $(".search-input", box);
+  // Be flexible: support .search-input (new), .search-inp (legacy), or any input inside the box
+  const input = legacy
+    ? (box._legacyWrapper.querySelector('input') || box._legacyWrapper.querySelector('input[type=text]'))
+    : ( $(".search-input", box) || $(".search-inp", box) || box.querySelector('input') );
   const list = legacy ? (box._legacyWrapper.querySelector('.search-results') || box._legacyWrapper.querySelector('.item_results')) : $(".search-results", box);
     if(!input || !list) return;
     // mark this container as handled by unified search so other scripts skip it
@@ -299,6 +302,24 @@
       if(list.innerHTML.trim()) list.hidden=false;
     });
 
+    // remember mapping from list -> box so delegated handlers can resolve the wrapper
+    try{ if(list) list._searchBox = box; }catch(e){}
+
+    // attach a delegated click handler on the list (idempotent)
+    try{
+      if(list && !list._delegatedClickAttached){
+        list.addEventListener('click', function(ev){
+          try{
+            const it = ev.target.closest ? ev.target.closest('.res-item') : null;
+            if(!it) return;
+            const sb = list._searchBox || box;
+            selectResult(sb, it.getAttribute('data-id'), it.getAttribute('data-title'), it.getAttribute('data-kind'));
+          }catch(e){ console.warn('delegated click handler error', e); }
+        });
+        list._delegatedClickAttached = true;
+      }
+    }catch(e){}
+
     input.addEventListener("keydown", (e)=>{
       if(list.hidden && (e.key==="ArrowDown"||e.key==="ArrowUp")){ list.hidden=false; e.preventDefault(); return; }
       if(e.key==="ArrowDown"){ moveActive(list, +1); e.preventDefault(); }
@@ -319,6 +340,8 @@
   // Override selectResult to support populating legacy hidden inputs
   const _origSelect = selectResult;
   function selectResult(box, id, title, kind){
+    // small debug help to see clicks from the global search dropdown
+    try{ console.debug && console.debug('search-unified: selectResult called', { id, title, kind, box: (box && box.className) }); }catch(e){}
     // Populate the most appropriate hidden input for this search box.
     try{
       const parent = box.parentElement || box._legacyWrapper || document;
@@ -346,8 +369,9 @@
     // If this search widget is the global/top search, perform default navigation
     try{
       const p = (typeof window.prefix === 'string' ? window.prefix : (window.APP_PREFIX || '')) || '';
-      const parentEl = parent;
-      const globalWrap = parentEl.closest ? parentEl.closest('.global-search') : null;
+      // prefer box.closest (covers the global topbar), fallback to parent
+      const parentEl = (box && box.closest) ? box : (parent || document);
+      const globalWrap = (box && box.closest) ? box.closest('.global-search') : (parentEl && parentEl.closest ? parentEl.closest('.global-search') : null);
       if(globalWrap){
         const k = (kind || '').toLowerCase();
         if(k === 'invoice'){
@@ -367,7 +391,7 @@
       // If this selection happened inside a filters form (entities list),
       // navigate to entity edit/cardex for direct inspection.
       try{
-        const filtersForm = parentEl.closest ? parentEl.closest('form.filters, .filters') : null;
+        const filtersForm = (box && box.closest) ? box.closest('form.filters, .filters') : (parentEl && parentEl.closest ? parentEl.closest('form.filters, .filters') : null);
         if(filtersForm){
           window.location = p + '/entities/' + encodeURIComponent(id) + '/edit';
           return;
