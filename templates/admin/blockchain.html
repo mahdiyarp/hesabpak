@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="module-wrap admin-blockchain">
+  <h2>⛓️ بلاک‌چین شفافیت حساب‌پاک</h2>
+  <p class="muted" style="margin-bottom:18px;">
+    در این بخش می‌توانید سلامت زنجیره داخلی حساب‌پاک را بررسی کنید و توکن‌های شفافیتی جدید برای ثبت تراکنش‌های مهم صادر نمایید.
+  </p>
+
+  <div class="card" style="margin-bottom:24px;">
+    <h3 style="margin-top:0;">صدور توکن جدید</h3>
+    <p class="muted">اطلاعات زیر روی بلاک‌چین داخلی ثبت و امضا می‌شود.</p>
+    <form method="post" action="{{ url_for('admin_blockchain') }}">
+      <div class="form-grid">
+        <label>
+          <span>نام توکن</span>
+          <input class="inp" type="text" name="token_name" placeholder="مثلاً: TRANSPARENCY" required>
+        </label>
+        <label>
+          <span>گیرنده</span>
+          <input class="inp" type="text" name="recipient" placeholder="نام شخص یا واحد دریافت‌کننده">
+        </label>
+        <label>
+          <span>مقدار</span>
+          <input class="inp" type="number" name="amount" min="0" step="0.0001" placeholder="مثلاً: 100" required>
+        </label>
+        <label style="grid-column: 1 / -1;">
+          <span>توضیحات (اختیاری)</span>
+          <textarea class="inp" name="note" rows="3" placeholder="شرح علت صدور یا شماره مستند"></textarea>
+        </label>
+      </div>
+      <div style="text-align:left; margin-top:12px;">
+        <button class="btn btn-primary" type="submit">ثبت توکن روی بلاک‌چین</button>
+      </div>
+    </form>
+  </div>
+
+  <div class="card" style="margin-bottom:24px;">
+    <h3 style="margin-top:0;">وضعیت زنجیره</h3>
+    <ul class="meta-list">
+      <li>تعداد بلوک‌ها: <strong>{{ chain_meta.count }}</strong></li>
+      <li>سطح سختی ماینینگ: <strong>{{ chain_meta.difficulty }}</strong></li>
+      <li>آخرین هش: <code style="font-size:12px;">{{ chain_meta.last_hash or '—' }}</code></li>
+    </ul>
+    {% if chain_meta.is_valid %}
+      <div class="flash success" style="margin-top:12px;">زنجیره معتبر است و تمام بلوک‌ها با امضای رمزنگاری‌شده هماهنگ هستند.</div>
+    {% else %}
+      <div class="flash danger" style="margin-top:12px;">هشدار: مغایرت در زنجیره مشاهده شد. لطفاً موارد زیر را بررسی کنید.</div>
+      <ul class="meta-list" style="margin-top:8px;">
+        {% for issue in chain_meta.issues %}
+        <li>{{ issue }}</li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </div>
+
+  {% if supply_rows %}
+  <div class="card" style="margin-bottom:24px;">
+    <h3 style="margin-top:0;">جمع عرضه توکن‌ها</h3>
+    <div class="table-wrapper">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>نام توکن</th>
+            <th>مقدار کل صادر شده</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in supply_rows %}
+          <tr>
+            <td>{{ row.token }}</td>
+            <td>{{ row.amount }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  {% if ledger_rows %}
+  <div class="card" style="margin-bottom:24px;">
+    <h3 style="margin-top:0;">دفترچه صدور توکن</h3>
+    <div class="table-wrapper">
+      <table class="table">
+        <thead>
+          <tr>
+            <th>توکن</th>
+            <th>گیرنده</th>
+            <th>مقدار</th>
+          </tr>
+        </thead>
+        <tbody>
+          {% for row in ledger_rows %}
+          <tr>
+            <td>{{ row.token }}</td>
+            <td>{{ row.recipient }}</td>
+            <td>{{ row.amount }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="blockchain-timeline">
+    {% for block in blocks %}
+    <div class="card block-item" style="margin-bottom:18px;">
+      <div class="block-header" style="display:flex; justify-content:space-between; align-items:center; gap:8px;">
+        <div>
+          <h3 style="margin:0;">بلوک {{ block.index }}</h3>
+          <div class="muted" style="font-size:13px;">ثبت شده توسط {{ block.created_by }} — {{ block.timestamp_display or 'زمان نامشخص' }}</div>
+        </div>
+        {% if block.timestamp_jalali %}
+        <span class="tag">تاریخ شمسی: {{ block.timestamp_jalali }}</span>
+        {% endif %}
+      </div>
+      <div class="meta-list" style="margin-top:12px;">
+        <div><span class="muted">هش:</span> <code style="font-size:12px; word-break:break-all;">{{ block.hash }}</code></div>
+        <div><span class="muted">هش قبلی:</span> <code style="font-size:12px; word-break:break-all;">{{ block.previous_hash }}</code></div>
+        <div><span class="muted">نانس:</span> {{ block.nonce }}</div>
+      </div>
+      {% if block.payload %}
+      <div style="margin-top:12px;">
+        <h4 style="margin:0 0 8px;">داده ثبت شده</h4>
+        <dl class="meta-list" style="margin:0;">
+          {% for key, value in block.payload.items() %}
+          <div><span class="muted">{{ key }}:</span> {{ value }}</div>
+          {% endfor %}
+        </dl>
+      </div>
+      {% elif block.raw_data %}
+      <pre style="margin-top:12px; direction:ltr; white-space:pre-wrap;">{{ block.raw_data }}</pre>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

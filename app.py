@@ -3,6 +3,7 @@ import os, json, logging, secrets, base64
 from pathlib import Path
 from datetime import datetime, timedelta, date
 from typing import Any, Dict, List, Optional
+from decimal import Decimal, InvalidOperation
 
 from flask import Flask, render_template, redirect, request, flash, session, jsonify, abort, current_app
 from flask_login import LoginManager, login_user, logout_user, login_required, UserMixin, current_user
@@ -28,6 +29,13 @@ from utils.date_utils import (
     parse_jalali_date,
     jalali_reference,
     fa_digits,
+)
+from utils.blockchain import (
+    BLOCKCHAIN_DIFFICULTY,
+    canonical_json_dumps,
+    mine_block,
+    timestamp_to_hash_input,
+    validate_chain,
 )
 
 # ----------------- Config -----------------
@@ -299,6 +307,18 @@ class SiteView(db.Model):
     user = db.Column(db.String(64), nullable=True)
 
 
+class BlockchainBlock(db.Model):
+    __tablename__ = "blockchain_blocks"
+    id = db.Column(db.Integer, primary_key=True)
+    index = db.Column(db.Integer, nullable=False, unique=True)
+    timestamp = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    previous_hash = db.Column(db.String(128), nullable=False)
+    hash = db.Column(db.String(128), nullable=False)
+    nonce = db.Column(db.Integer, nullable=False, default=0)
+    data = db.Column(db.Text, nullable=False)
+    created_by = db.Column(db.String(64), nullable=True)
+
+
 # --- Backup wiring (once) ---
 ensure_dirs(app)
 register_autobackup_for([Invoice, CashDoc])
@@ -383,8 +403,90 @@ def save_users_catalog(catalog: dict) -> None:
             for username, data in sorted(catalog.items(), key=lambda kv: kv[0].lower())
         ]
     }
+
     with open(USERS_FILE, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
+
+
+# ----------------- Blockchain helpers -----------------
+
+def _blockchain_blocks() -> List[BlockchainBlock]:
+    return BlockchainBlock.query.order_by(BlockchainBlock.index.asc()).all()
+
+
+def _latest_block() -> Optional[BlockchainBlock]:
+    return BlockchainBlock.query.order_by(BlockchainBlock.index.desc()).first()
+
+
+def _ensure_blockchain_genesis() -> None:
+    if BlockchainBlock.query.count() > 0:
+        return
+
+    timestamp = datetime.utcnow()
+    timestamp_str = timestamp_to_hash_input(timestamp)
+    data = {
+        "type": "genesis",
+        "message": "راه‌اندازی زنجیره شفافیت حساب‌پاک",
+        "created_at": timestamp_str,
+        "created_by": "system",
+    }
+    data_json = canonical_json_dumps(data)
+    nonce, block_hash = mine_block(
+        0,
+        timestamp_str,
+        "0" * 64,
+        data_json,
+        difficulty=BLOCKCHAIN_DIFFICULTY,
+    )
+    genesis = BlockchainBlock(
+        index=0,
+        timestamp=timestamp,
+        previous_hash="0" * 64,
+        hash=block_hash,
+        nonce=nonce,
+        data=data_json,
+        created_by="system",
+    )
+    db.session.add(genesis)
+    db.session.commit()
+
+
+def _append_block(data: dict, created_by: str) -> BlockchainBlock:
+    _ensure_blockchain_genesis()
+    last_block = _latest_block()
+    next_index = (last_block.index if last_block else -1) + 1
+    previous_hash = last_block.hash if last_block else "0" * 64
+
+    timestamp = datetime.utcnow()
+    timestamp_str = timestamp_to_hash_input(timestamp)
+
+    creator = (created_by or "").strip() or "system"
+    payload = dict(data or {})
+    payload.setdefault("created_by", creator)
+    payload.setdefault("created_at", timestamp_str)
+    data_json = canonical_json_dumps(payload)
+
+    nonce, block_hash = mine_block(
+        next_index,
+        timestamp_str,
+        previous_hash,
+        data_json,
+        difficulty=BLOCKCHAIN_DIFFICULTY,
+    )
+
+    block = BlockchainBlock(
+        index=next_index,
+        timestamp=timestamp,
+        previous_hash=previous_hash,
+        hash=block_hash,
+        nonce=nonce,
+        data=data_json,
+        created_by=creator,
+    )
+    db.session.add(block)
+    db.session.commit()
+    return block
+
 
 # ----------------- Auth -----------------
 login_manager = LoginManager(app)
@@ -3347,6 +3449,124 @@ def admin_users():
         permission_labels=PERMISSION_LABELS,
         assignable_permissions=ASSIGNABLE_PERMISSIONS,
         admin_username=ADMIN_USERNAME,
+    )
+
+
+@app.route(URL_PREFIX + "/admin/blockchain", methods=["GET", "POST"])
+@login_required
+def admin_blockchain():
+    admin_required()
+    _ensure_blockchain_genesis()
+
+    if request.method == "POST":
+        token_name = (request.form.get("token_name") or "").strip()
+        recipient = (request.form.get("recipient") or "").strip()
+        amount_raw = (request.form.get("amount") or "").strip()
+        note = (request.form.get("note") or "").strip()
+
+        if not token_name:
+            flash("لطفاً نام توکن را وارد کنید.", "danger")
+            return redirect(URL_PREFIX + "/admin/blockchain")
+
+        if not recipient:
+            recipient = "سیستم"
+
+        try:
+            amount_val = Decimal(amount_raw)
+        except (InvalidOperation, TypeError):
+            flash("مقدار توکن معتبر نیست.", "danger")
+            return redirect(URL_PREFIX + "/admin/blockchain")
+
+        if amount_val <= 0:
+            flash("مقدار توکن باید بزرگ‌تر از صفر باشد.", "danger")
+            return redirect(URL_PREFIX + "/admin/blockchain")
+
+        amount_text = format(amount_val.normalize(), "f")
+        payload = {
+            "type": "mint",
+            "token": token_name,
+            "recipient": recipient,
+            "amount": amount_text,
+            "note": note,
+            "reference": secrets.token_hex(8),
+        }
+        creator = getattr(current_user, "username", "system") or "system"
+        _append_block(payload, creator)
+        flash(f"توکن «{token_name}» با مقدار {amount_text} ثبت شد.", "success")
+        return redirect(URL_PREFIX + "/admin/blockchain")
+
+    blocks = _blockchain_blocks()
+    is_valid, issues = validate_chain(blocks, difficulty=BLOCKCHAIN_DIFFICULTY)
+
+    block_entries = []
+    ledger_map: Dict[tuple[str, str], Decimal] = {}
+    supply_map: Dict[str, Decimal] = {}
+
+    for block in blocks:
+        try:
+            payload = json.loads(block.data)
+        except Exception:
+            payload = None
+
+        entry = {
+            "index": block.index,
+            "hash": block.hash,
+            "previous_hash": block.previous_hash,
+            "nonce": block.nonce,
+            "created_by": block.created_by or "system",
+            "timestamp_iso": timestamp_to_hash_input(block.timestamp) if block.timestamp else None,
+            "timestamp_display": block.timestamp.strftime("%Y-%m-%d %H:%M:%S UTC") if block.timestamp else None,
+            "timestamp_jalali": to_jdate_str(block.timestamp.date()) if block.timestamp else None,
+            "payload": payload if isinstance(payload, dict) else None,
+            "raw_data": block.data if not isinstance(payload, dict) else None,
+        }
+        block_entries.append(entry)
+
+        if isinstance(payload, dict) and payload.get("type") == "mint":
+            token_label = (payload.get("token") or "").strip() or "توکن"
+            recipient_label = (payload.get("recipient") or "").strip() or "نامشخص"
+            amount_field = payload.get("amount")
+            try:
+                amount_decimal = Decimal(str(amount_field))
+            except (InvalidOperation, TypeError):
+                continue
+            ledger_map.setdefault((token_label, recipient_label), Decimal("0"))
+            ledger_map[(token_label, recipient_label)] += amount_decimal
+            supply_map.setdefault(token_label, Decimal("0"))
+            supply_map[token_label] += amount_decimal
+
+    ledger_rows = [
+        {
+            "token": token,
+            "recipient": recipient,
+            "amount": format(amount.normalize(), "f"),
+        }
+        for (token, recipient), amount in sorted(ledger_map.items(), key=lambda kv: (kv[0][0], kv[0][1]))
+    ]
+
+    supply_rows = [
+        {
+            "token": token,
+            "amount": format(amount.normalize(), "f"),
+        }
+        for token, amount in sorted(supply_map.items(), key=lambda kv: kv[0])
+    ]
+
+    chain_meta = {
+        "count": len(blocks),
+        "difficulty": BLOCKCHAIN_DIFFICULTY,
+        "is_valid": is_valid,
+        "issues": issues,
+        "last_hash": blocks[-1].hash if blocks else None,
+    }
+
+    return render_template(
+        "admin/blockchain.html",
+        prefix=URL_PREFIX,
+        blocks=block_entries,
+        chain_meta=chain_meta,
+        ledger_rows=ledger_rows,
+        supply_rows=supply_rows,
     )
 
 
