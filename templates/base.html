@@ -3,9 +3,13 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{ title or "hesab pak" }}</title>
+  <title>{{ title or "حساب پاک" }}</title>
+  <link rel="icon" href="{{ prefix }}/static/favicon.svg" type="image/svg+xml">
+  <link rel="manifest" href="{{ prefix }}/static/manifest.webmanifest">
+  <meta name="theme-color" content="#0d1728">
   <link rel="stylesheet" href="{{ prefix }}/static/style.css">
   <link rel="stylesheet" href="{{ prefix }}/static/search.css">
+  <link rel="stylesheet" href="{{ prefix }}/static/paki.css">
   {% block head_extra %}{% endblock %}
 
   <!-- مقدار prefix را امن به JS بده؛ اگر تهی بود "" -->
@@ -28,8 +32,11 @@
 
 </head>
 <body class="theme-{{ active_theme }}" data-active-theme="{{ active_theme }}" data-search-sort="{{ search_sort_pref }}" data-price-mode="{{ price_display_mode }}">
-<header class="topbar">
-  <div class="brand">حساب پاک <span class="en">hesab pak</span></div>
+<header class="topbar paki-topbar">
+  <a class="paki-brand" href="{{ prefix }}/" aria-label="حساب پاک">
+    <img class="paki-logo" src="{{ prefix }}/static/icons/paki.svg" alt="" width="44" height="36">
+    <span class="paki-word"><strong>حساب پاک</strong><small>HesabPak · Paki</small></span>
+  </a>
   <div class="clock" id="top-clock" data-live-clock data-jalali="{{ now_info['jalali_date'] }}">
     <span class="icon">⏰</span>
     <span class="time" data-role="time">--:--:--</span>
@@ -41,6 +48,7 @@
       <span>کاربر: {{ logged_username }}</span>
       <span class="sep">|</span>
       <span>مدت فعالیت: {{ login_duration }}</span>
+      {% if session.get('demo_session') %}<span class="paki-demo-badge">محیط آزمایشی</span>{% endif %}
       <span class="sep">|</span>
       <form method="post" action="{{ prefix }}/logout" class="logout-form" onsubmit="return confirm('از حساب خارج شوید؟');"><button type="submit" class="logout">خروج</button></form>
     {% endif %}
@@ -117,9 +125,23 @@
 <!-- بعد: منوهای عمودی موبایلی -->
 {# Bottom mobile menu removed per user request — full dashboard menus are shown in the main UI instead #}
 
+<button class="paki-fab" id="paki-fab" type="button" data-paki-mood="idle" aria-label="پکی — دستیار تعاملی حساب پاک" title="پکی">
+  <svg class="paki-mini" viewBox="0 0 120 92" aria-hidden="true">
+    <defs><linearGradient id="pakiGrad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#f8fbff"/><stop offset="1" stop-color="#b9d6ff"/></linearGradient></defs>
+    <g fill="none" stroke="url(#pakiGrad)" stroke-width="8" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M22 15v60"/><path d="M22 51c0-18 27-20 27-1v13"/><path d="M49 50c0-18 27-20 27-1v26"/>
+    </g>
+    <g class="paki-eye" fill="#0c1422" stroke="#dff2ff" stroke-width="2"><circle cx="40" cy="49" r="7"/><circle cx="66" cy="49" r="7"/></g>
+    <g class="paki-pupil" fill="#fff"><circle cx="42" cy="47" r="2"/><circle cx="68" cy="47" r="2"/></g>
+    <path class="paki-mouth" d="M48 68c5 4 10 4 15 0" fill="none" stroke="#eaf5ff" stroke-width="3" stroke-linecap="round"/>
+    <g class="paki-spark" fill="none" stroke="#67d7ff" stroke-width="2"><path d="M91 18v10M86 23h10M94 31l7 7M101 31l-7 7"/></g>
+  </svg>
+</button>
+
 <footer class="footer">© 2025 hesab pak</footer>
 
 <script src="{{ prefix }}/static/app.js?v=3"></script>
+<script defer src="{{ prefix }}/static/paki.js?v=1"></script>
 {% block body_scripts %}{% endblock %}
 </body>
 </html>
