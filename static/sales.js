@@ -336,10 +336,20 @@
     function renderItems(rows){
       if(!Array.isArray(rows) || rows.length === 0){
         hide(resultsBox);
-        resultsBox.innerHTML = '';
+        resultsBox.replaceChildren();
         return;
       }
-      resultsBox.innerHTML = rows.map(r => `<a class="res" href="#" data-id="${r.id}" data-code="${r.code}" data-name="${r.name}">${r.code} — ${r.name}</a>`).join('');
+      resultsBox.replaceChildren();
+      rows.forEach(r=>{
+        const a=document.createElement('a');
+        a.className='res';
+        a.href='#';
+        a.dataset.id=r.id == null ? '' : String(r.id);
+        a.dataset.code=r.code == null ? '' : String(r.code);
+        a.dataset.name=r.name == null ? '' : String(r.name);
+        a.textContent=(r.code || '') + ' — ' + (r.name || '');
+        resultsBox.appendChild(a);
+      });
       // show item result dropdown without activating the overlay (lightweight)
       try{ showLight(resultsBox); }catch(e){ show(resultsBox); }
     }
@@ -348,7 +358,7 @@
       fetch(`${prefix}/api/search?q=${encodeURIComponent(q)}&kind=item&limit=15`, {credentials:'same-origin'})
         .then(r => r.ok ? r.json() : [])
         .then(renderItems)
-        .catch(()=>{ hide(resultsBox); resultsBox.innerHTML=''; });
+        .catch(()=>{ hide(resultsBox); resultsBox.replaceChildren(); });
     }
 
     if(searchInput){
