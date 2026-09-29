@@ -3092,21 +3092,34 @@ def reports():
     rows = []
     totals = {"sales": 0.0, "purchase": 0.0, "receive": 0.0, "payment": 0.0}
 
+    # A plain numeric query is also treated as an exact amount search.
+    q_amount = None
+    if q:
+        try:
+            q_amount = _to_float(q, None)
+        except Exception:
+            q_amount = None
+
     # Invoices (sales/purchase)
     if typ in ("all", "invoice", "sales", "purchase"):
         inv_q = db.session.query(Invoice).join(Entity, Invoice.person_id == Entity.id)
         if q:
-            inv_q = inv_q.filter(or_(
+            q_filters = [
                 Invoice.number.ilike(f"%{q}%"),
                 Entity.name.ilike(f"%{q}%"),
                 Entity.code.ilike(f"%{q}%"),
-            ))
+            ]
+            if q_amount is not None:
+                q_filters.append(Invoice.total == q_amount)
+            inv_q = inv_q.filter(or_(*q_filters))
         if person_filter and person_filter.isdigit():
             inv_q = inv_q.filter(Invoice.person_id == int(person_filter))
         if item_filter and item_filter.isdigit():
             inv_q = inv_q.join(InvoiceLine, Invoice.id == InvoiceLine.invoice_id).filter(InvoiceLine.item_id == int(item_filter))
         if df: inv_q = inv_q.filter(Invoice.date >= df)
         if dt: inv_q = inv_q.filter(Invoice.date <= dt)
+        if amount_min is not None: inv_q = inv_q.filter(Invoice.total >= amount_min)
+        if amount_max is not None: inv_q = inv_q.filter(Invoice.total <= amount_max)
         # Use explicit kind when available
         if typ == "sales":
             inv_q = inv_q.filter(Invoice.kind == 'sales')
@@ -3116,10 +3129,6 @@ def reports():
         for inv in inv_q.order_by(Invoice.id.desc()).all():
             kind = inv.kind or ("sales" if (inv.number or "").upper().startswith("INV-") else "purchase")
             amt = float(inv.total or 0.0)
-            if amount_min is not None and amt < amount_min: 
-                continue
-            if amount_max is not None and amt > amount_max:
-                continue
             totals[kind] += amt
             rows.append({
                 "kind": "invoice",
@@ -3141,14 +3150,19 @@ def reports():
         if typ == "cheque":
             cd_q = cd_q.filter(func.lower(func.coalesce(CashDoc.method, "")) == "cheque")
         if q:
-            cd_q = cd_q.filter(or_(
+            q_filters = [
                 CashDoc.number.ilike(f"%{q}%"),
                 Entity.name.ilike(f"%{q}%"),
                 Entity.code.ilike(f"%{q}%"),
                 CashDoc.cheque_number.ilike(f"%{q}%"),
-            ))
+            ]
+            if q_amount is not None:
+                q_filters.append(CashDoc.amount == q_amount)
+            cd_q = cd_q.filter(or_(*q_filters))
         if df: cd_q = cd_q.filter(CashDoc.date >= df)
         if dt: cd_q = cd_q.filter(CashDoc.date <= dt)
+        if amount_min is not None: cd_q = cd_q.filter(CashDoc.amount >= amount_min)
+        if amount_max is not None: cd_q = cd_q.filter(CashDoc.amount <= amount_max)
         if method:
             cd_q = cd_q.filter(func.lower(func.coalesce(CashDoc.method, "")) == method)
         if cashbox_id and cashbox_id.isdigit():
