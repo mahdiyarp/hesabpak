@@ -44,7 +44,6 @@ chown -R "$SERVICE_USER:$SERVICE_USER" "$APP_DIR"
 
 python3 -m venv "$VENV_DIR"
 source "$VENV_DIR/bin/activate"
-python -m pip install --upgrade pip --no-index --find-links "$APP_DIR/vendor/wheels"
 python -m pip install --no-index --find-links "$APP_DIR/vendor/wheels" -r "$APP_DIR/requirements.txt"
 deactivate
 
