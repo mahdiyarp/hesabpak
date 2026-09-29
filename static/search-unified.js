@@ -42,31 +42,56 @@
     }
   }catch(e){ /* ignore filter errors */ }
 
-    list.innerHTML = rows.map(r=>{
-      const detailParts = [];
+    list.replaceChildren();
+    rows.forEach(r=>{
+      const rowType = r.type || type;
+      const item = document.createElement('div');
+      item.className = 'res-item';
+      item.dataset.id = r.id == null ? '' : String(r.id);
+      item.dataset.kind = rowType || '';
+      item.dataset.title = ((r.code || '') + ' — ' + (r.name || '')).trim();
+
+      const head = document.createElement('div');
+      head.className = 'res-head';
+      const badge = document.createElement('span');
+      badge.className = 'res-badge';
+      badge.textContent = badgeOf(rowType);
+      head.appendChild(badge);
+      const code = document.createElement('span');
+      code.className = 'res-code';
+      code.textContent = r.code == null ? '' : String(r.code);
+      head.appendChild(code);
+      const title = document.createElement('span');
+      title.className = 'res-title';
+      title.textContent = r.name == null ? '' : String(r.name);
+      head.appendChild(title);
+      item.appendChild(head);
+
+      const details = [];
       if(r.meta){
-        const parts = String(r.meta).split('•').map(p=>p.trim()).filter(Boolean);
-        parts.forEach(p=> detailParts.push(`<div class="res-sub">${p}</div>`));
+        String(r.meta).split('•').map(p=>p.trim()).filter(Boolean).forEach(p=>details.push(p));
       }
       if(type === 'item'){
-        if(r.stock) detailParts.push(`<div class="res-sub">موجودی: ${r.stock}</div>`);
-        if((window.formatGroupedNumber ? window.formatGroupedNumber(r.price) : r.price)) detailParts.push(`<div class="res-sub">قیمت: ${(window.formatGroupedNumber ? window.formatGroupedNumber(r.price) : r.price)}</div>`);
+        if(r.stock) details.push('موجودی: ' + String(r.stock));
+        const price = window.formatGroupedNumber ? window.formatGroupedNumber(r.price) : r.price;
+        if(price) details.push('قیمت: ' + String(price));
       }else if(type === 'person'){
-        if((window.formatGroupedNumber ? window.formatGroupedNumber(r.balance) : r.balance)) detailParts.push(`<div class="res-sub">مانده: ${(window.formatGroupedNumber ? window.formatGroupedNumber(r.balance) : r.balance)}</div>`);
+        const balance = window.formatGroupedNumber ? window.formatGroupedNumber(r.balance) : r.balance;
+        if(balance) details.push('مانده: ' + String(balance));
       }
-      const metaHtml = detailParts.length ? `<div class="res-meta">${detailParts.join('')}</div>` : '';
-      // Use the actual result type for the badge when available.
-      const rowType = r.type || type;
-      return `
-        <div class="res-item" data-id="${r.id}" data-kind="${rowType}" data-title="${(r.code||'') + ' — ' + (r.name||'')}">
-          <div class="res-head">
-            <span class="res-badge">${badgeOf(rowType)}</span>
-            <span class="res-code">${r.code||''}</span>
-            <span class="res-title">${r.name||''}</span>
-          </div>
-          ${metaHtml}
-        </div>`;
-    }).join("");
+      if(details.length){
+        const meta = document.createElement('div');
+        meta.className = 'res-meta';
+        details.forEach(p=>{
+          const sub = document.createElement('div');
+          sub.className = 'res-sub';
+          sub.textContent = p;
+          meta.appendChild(sub);
+        });
+        item.appendChild(meta);
+      }
+      list.appendChild(item);
+    });
 
     try{ list.hidden = false; list.style.display = 'block'; }catch(e){}
 
