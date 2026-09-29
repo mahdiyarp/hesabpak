@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Added a shareable /demo landing with explicit demo labeling, POST-only demo start, Web Share API and clipboard fallback.
+- Added persistent in-app demo warning/ribbon and social link preview metadata.
+- Added a dedicated transaction landing at /transactions and upgraded /reports into the advanced transaction search page.
+- Transaction search now supports exact amount matching from the quick search field and applies amount bounds at database-query level.
 - Finalized Paki/PWA, isolated demo safeguards, offline distribution, health monitoring and credential-at-rest protection.
 - CI remains blocked by a GitHub hosted-runner assignment failure; no test step has executed yet.
 
