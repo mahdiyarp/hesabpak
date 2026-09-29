@@ -11,6 +11,7 @@ from flask_login import LoginManager, login_user, logout_user, login_required, U
 from dotenv import load_dotenv
 from markupsafe import Markup, escape
 from werkzeug.security import check_password_hash, generate_password_hash
+from werkzeug.middleware.proxy_fix import ProxyFix
 from sqlalchemy import func, or_, UniqueConstraint, text
 
 try:
@@ -276,6 +277,10 @@ def _permissions_for_role(role: str, requested) -> list:
 
 # ----------------- Flask & DB -----------------
 app = Flask(__name__, static_url_path=(URL_PREFIX + "/static") if URL_PREFIX else "/static")
+
+# The production deployment sits behind one trusted reverse proxy (Nginx).
+# Trust only the forwarded scheme so generated share links preserve HTTPS.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1)
 
 
 def _request_origin_is_trusted():
@@ -3252,7 +3257,8 @@ def reports():
             label = {"invoice": "فاکتور فروش","receive": "دریافت","payment": "پرداخت"}.get(r["kind"], str(r["kind"]))
             view = f"{URL_PREFIX}/invoice/{int(r['id'])}" if r["kind"] == "invoice" else f"{URL_PREFIX}/cash/{int(r['id'])}"
             ops_str = f'<a href="{escape(view)}">مشاهده</a>'
-            jdate = to_jdate_str(r["date"])
+            # The row already contains a Jalali display string here.
+            jdate = r["date"] or ""
             row_html = (
                 "<tr>"
                 f"<td style='padding:8px;border-bottom:1px solid #f3f3f3'>{escape(label)}</td>"
