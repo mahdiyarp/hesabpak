@@ -2,6 +2,7 @@
 import os
 import json
 import shutil
+import sqlite3
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -102,6 +103,71 @@ def _find_year_entry(years, start_value: Optional[str]):
             return item
     return None
 
+
+FISCAL_ONLY_SETTING_KEYS = {
+    "fiscal_year_start",
+    "fiscal_year_current",
+    "fiscal_year_label",
+    "fiscal_years",
+    "seq_invoice",
+    "seq_voucher",
+    "seq_purchase",
+}
+
+
+def _capture_global_db_state():
+    """Capture data that must remain global when switching fiscal cases."""
+    tables = ("settings", "user_settings", "backup_log", "audit_events", "site_views", "ledger_entries")
+    state = {}
+    for table in tables:
+        try:
+            rows = db.session.execute(text(f"SELECT * FROM {table} ORDER BY rowid")).mappings().all()
+            state[table] = [dict(row) for row in rows]
+        except Exception:
+            state[table] = []
+    return state
+
+
+def _restore_global_db_state(state):
+    """Restore global rows into the newly activated fiscal-year database."""
+    for table in ("settings", "user_settings", "backup_log", "audit_events", "site_views", "ledger_entries"):
+        rows = state.get(table) or []
+        try:
+            db.session.execute(text(f"DELETE FROM {table}"))
+        except Exception:
+            continue
+        if not rows:
+            continue
+        columns = list(rows[0].keys())
+        quoted = ", ".join(f'"{col}"' for col in columns)
+        placeholders = ", ".join(f":{col}" for col in columns)
+        db.session.execute(
+            text(f'INSERT INTO {table} ({quoted}) VALUES ({placeholders})'),
+            rows,
+        )
+
+
+def _restore_global_state_preserving_fiscal_settings(state):
+    """Restore global tables but keep fiscal settings from the selected case."""
+    target_settings = db.session.execute(
+        text("SELECT key, value FROM settings")
+    ).mappings().all()
+    target_fiscal = {
+        row["key"]: row["value"]
+        for row in target_settings
+        if row["key"] in FISCAL_ONLY_SETTING_KEYS
+    }
+
+    global_settings = [
+        row for row in (state.get("settings") or [])
+        if row.get("key") not in FISCAL_ONLY_SETTING_KEYS
+    ]
+    state_copy = dict(state)
+    state_copy["settings"] = global_settings
+    _restore_global_db_state(state_copy)
+
+    for key, value in target_fiscal.items():
+        Setting.set(key, value)
 
 def _case_folder(year_entry) -> Path:
     key = _year_key((year_entry or {}).get("key") or (year_entry or {}).get("jalali") or (year_entry or {}).get("label"))
@@ -598,6 +664,184 @@ def switch_year():
     if not year:
         flash("سال مالی انتخاب نشده است.", "danger")
         return redirect(url_for("backup.index"))
+
+    if year not in valid_years:
+        flash("سال مالی انتخاب‌شده معتبر نیست.", "danger")
+        return redirect(url_for("backup.index"))
+
+    current_value = Setting.get("fiscal_year_current") or Setting.get("fiscal_year_start")
+    if year == current_value:
+        flash("✅ همین سال مالی از قبل فعال است.", "info")
+        return redirect(url_for("backup.index"))
+
+    target_entry = _find_year_entry(years, year)
+    target_folder = _case_folder(target_entry)
+    target_db = target_folder / "data.sqlite3"
+    if not target_db.is_file():
+        flash("پروندهٔ دیتابیس این سال مالی هنوز ساخته نشده است. ابتدا از سال جاری یک پرونده/بکاپ معتبر ایجاد کنید.", "danger")
+        return redirect(url_for("backup.index"))
+
+    # Verify the selected case before replacing the live database.
+    try:
+        con = sqlite3.connect(f"file:{target_db}?mode=ro", uri=True)
+        try:
+            required = {
+                "settings", "user_settings", "entities", "invoices",
+                "invoice_lines", "cash_docs", "cash_boxes", "price_history",
+                "ledger_entries",
+            }
+            existing = {
+                row[0] for row in con.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table'"
+                ).fetchall()
+            }
+            missing = required - existing
+            check = con.execute("PRAGMA integrity_check").fetchone()
+        finally:
+            con.close()
+        if missing:
+            raise RuntimeError("جداول ضروری پرونده ناقص است: " + ", ".join(sorted(missing)))
+        if not check or str(check[0]).lower() != "ok":
+            raise RuntimeError("بررسی سلامت SQLite موفق نبود.")
+    except Exception as exc:
+        current_app.logger.exception("invalid fiscal-year database: %s", exc)
+        flash("پروندهٔ دیتابیس سال انتخاب‌شده معتبر یا سالم نیست.", "danger")
+        return redirect(url_for("backup.index"))
+
+    fiscal_years = _load_fiscal_years()
+    try:
+        # First save the complete current case, then capture global state that
+        # must not roll back when the selected case is activated.
+        _snapshot_current_year(fiscal_years)
+        global_state = _capture_global_db_state()
+    except Exception as exc:
+        current_app.logger.exception("failed to preserve current fiscal year before switch: %s", exc)
+        db.session.rollback()
+        flash("قبل از تغییر سال مالی، ذخیره‌سازی وضعیت جاری ناموفق بود؛ تغییر انجام نشد.", "danger")
+        return redirect(url_for("backup.index"))
+
+    data_dir = Path(current_app.config.get("DATA_DIR", "data"))
+    live_db = data_dir / current_app.config.get("DB_FILE", "app.db")
+    staged_db = live_db.with_name(live_db.name + ".switching")
+    rollback_db = live_db.with_name(live_db.name + ".before-switching")
+    switched = False
+    try:
+        db.session.remove()
+        db.engine.dispose()
+        if live_db.exists():
+            shutil.copy2(live_db, rollback_db)
+        try:
+            shutil.copy2(target_db, staged_db)
+            os.replace(staged_db, live_db)
+            switched = True
+        finally:
+            try:
+                staged_db.unlink(missing_ok=True)
+            except TypeError:
+                if staged_db.exists():
+                    staged_db.unlink()
+        db.engine.dispose()
+
+        _restore_global_state_preserving_fiscal_settings(global_state)
+        Setting.set("fiscal_year_start", year)
+        Setting.set("fiscal_year_current", year)
+        if target_entry and target_entry.get("label"):
+            Setting.set("fiscal_year_label", target_entry.get("label"))
+        db.session.commit()
+
+        try:
+            rollback_db.unlink(missing_ok=True)
+        except TypeError:
+            if rollback_db.exists():
+                rollback_db.unlink()
+    except Exception as exc:
+        current_app.logger.exception("fiscal year switch failed: %s", exc)
+        try:
+            db.session.remove()
+            db.engine.dispose()
+            if switched and rollback_db.exists():
+                os.replace(rollback_db, live_db)
+            else:
+                rollback_db.unlink(missing_ok=True)
+        except Exception:
+            current_app.logger.exception("failed to roll back fiscal year database")
+        db.engine.dispose()
+        flash("تغییر سال مالی انجام نشد و وضعیت قبلی بازیابی شد.", "danger")
+        return redirect(url_for("backup.index"))
+
+    flash(f"✅ سال مالی {year} فعال شد و اطلاعات همان پرونده بارگذاری گردید.", "success")
+    return redirect(url_for("backup.index"))
+
+    if year not in valid_years:
+        flash("سال مالی انتخاب‌شده معتبر نیست.", "danger")
+        return redirect(url_for("backup.index"))
+
+    current_value = Setting.get("fiscal_year_current") or Setting.get("fiscal_year_start")
+    if year == current_value:
+        flash("✅ همین سال مالی از قبل فعال است.", "info")
+        return redirect(url_for("backup.index"))
+
+    target_entry = _find_year_entry(years, year)
+    target_folder = _case_folder(target_entry)
+    target_db = target_folder / "data.sqlite3"
+    if not target_db.is_file():
+        flash("پروندهٔ دیتابیس این سال مالی هنوز ساخته نشده است. ابتدا از سال جاری یک پرونده/بکاپ معتبر ایجاد کنید.", "danger")
+        return redirect(url_for("backup.index"))
+
+    # Verify the selected case before replacing the live database.
+    try:
+        con = sqlite3.connect(f"file:{target_db}?mode=ro", uri=True)
+        try:
+            check = con.execute("PRAGMA integrity_check").fetchone()
+        finally:
+            con.close()
+        if not check or str(check[0]).lower() != "ok":
+            raise RuntimeError("بررسی سلامت SQLite موفق نبود.")
+    except Exception as exc:
+        current_app.logger.exception("invalid fiscal-year database: %s", exc)
+        flash("پروندهٔ دیتابیس سال انتخاب‌شده معتبر یا سالم نیست.", "danger")
+        return redirect(url_for("backup.index"))
+
+    # Snapshot the year we are leaving so any new transactions are preserved.
+    fiscal_years = _load_fiscal_years()
+    try:
+        _snapshot_current_year(fiscal_years)
+    except Exception as exc:
+        current_app.logger.exception("failed to snapshot current fiscal year before switch: %s", exc)
+        db.session.rollback()
+        flash("قبل از تغییر سال مالی، ذخیره‌سازی پروندهٔ سال جاری ناموفق بود؛ تغییر انجام نشد.", "danger")
+        return redirect(url_for("backup.index"))
+
+    data_dir = Path(current_app.config.get("DATA_DIR", "data"))
+    live_db = data_dir / current_app.config.get("DB_FILE", "app.db")
+    try:
+        db.session.remove()
+        db.engine.dispose()
+        staged_db = live_db.with_name(live_db.name + ".switching")
+        try:
+            shutil.copy2(target_db, staged_db)
+            os.replace(staged_db, live_db)
+        finally:
+            try:
+                staged_db.unlink(missing_ok=True)
+            except TypeError:
+                if staged_db.exists():
+                    staged_db.unlink()
+        db.engine.dispose()
+
+        Setting.set("fiscal_year_start", year)
+        Setting.set("fiscal_year_current", year)
+        if target_entry and target_entry.get("label"):
+            Setting.set("fiscal_year_label", target_entry.get("label"))
+        db.session.commit()
+    except Exception as exc:
+        current_app.logger.exception("fiscal year switch failed: %s", exc)
+        db.session.rollback()
+        flash("تغییر سال مالی انجام نشد.", "danger")
+        return redirect(url_for("backup.index"))
+
+    flash(f"✅ سال مالی {year} فعال شد و اطلاعات همان پرونده بارگذاری گردید.", "success")
+    return redirect(url_for("backup.index"))
 
     if year not in valid_years:
         flash("سال مالی انتخاب‌شده معتبر نیست.", "danger")
