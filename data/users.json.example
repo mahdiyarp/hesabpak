@@ -1,0 +1,15 @@
+{
+  "users": [
+    {
+      "username": "admin",
+      "password": "SET_VIA_ENV_AND_RUNTIME_HASHING",
+      "email": "",
+      "role": "admin",
+      "permissions": [
+        "admin",
+        "assistant"
+      ],
+      "is_active": true
+    }
+  ]
+}

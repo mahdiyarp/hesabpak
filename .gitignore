@@ -1,2 +1,10 @@
 __pycache__/
 *.pyc
+
+# Runtime secrets and user data
+data/users.json
+data/activity.log
+data/*.sqlite3
+data/backups/
+data/autosave/
+.env

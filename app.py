@@ -10,6 +10,7 @@ import shutil
 from flask_login import LoginManager, login_user, logout_user, login_required, UserMixin, current_user
 from dotenv import load_dotenv
 from markupsafe import Markup, escape
+from werkzeug.security import check_password_hash, generate_password_hash
 from sqlalchemy import func, or_, UniqueConstraint   # <- مهم
 
 try:
@@ -57,45 +58,33 @@ def _compute_entry_hash(prev_hash: Optional[str], payload_text: str, ts_iso: str
     return m.hexdigest()
 
 
-def record_ledger(object_type: str, object_id: Optional[str], action: str, payload: Dict[str, Any]) -> LedgerEntry:
-    """Create a new ledger entry (append-only)."""
+def record_ledger(
+    object_type: str,
+    object_id: Optional[str],
+    action: str,
+    payload: Dict[str, Any],
+) -> LedgerEntry:
+    """Append a tamper-evident ledger entry."""
     try:
-        # get last hash
         last = db.session.query(LedgerEntry).order_by(LedgerEntry.id.desc()).first()
         prev = last.hash if last else None
-        ts = datetime.utcnow().isoformat()
-        payload_text = json.dumps(payload, ensure_ascii=False, sort_keys=True)
-        h = _compute_entry_hash(prev, payload_text, ts)
-        entry = LedgerEntry(object_type=object_type, object_id=str(object_id) if object_id is not None else None, action=action, payload=payload_text, prev_hash=prev, hash=h)
+        ts = datetime.utcnow().isoformat(timespec="microseconds")
+        payload_text = json.dumps(payload or {}, ensure_ascii=False, sort_keys=True)
+        digest = _compute_entry_hash(prev, payload_text, ts)
+        entry = LedgerEntry(
+            object_type=str(object_type or "unknown"),
+            object_id=str(object_id) if object_id is not None else None,
+            action=str(action or "unknown"),
+            payload=payload_text,
+            prev_hash=prev,
+            hash=digest,
+        )
         db.session.add(entry)
         db.session.commit()
-
-        # record ledger entry for invoice created via UI
-        try:
-            ledger_lines = []
-            for r in rows:
-                try:
-                    ledger_lines.append({"item_id": int(r['item'].id), "qty": float(r['qty']), "unit_price": float(r['unit_price'])})
-                except Exception:
-                    continue
-            ledger_payload = {
-                "invoice_id": inv.id,
-                "number": inv.number,
-                "kind": inv.kind,
-                "total": float(inv.total or 0.0),
-                "person_id": person.id if person else None,
-                "lines": ledger_lines,
-            }
-            try:
-                record_ledger("invoice", inv.id, "create", ledger_payload)
-            except Exception:
-                app.logger.exception("failed to write invoice ledger entry (ui)")
-        except Exception:
-            app.logger.exception("failed to prepare invoice ledger payload (ui)")
         return entry
     except Exception:
         db.session.rollback()
-        app.logger.exception('ledger record failed')
+        app.logger.exception("ledger record failed")
         raise
 
 # ----------------- Config -----------------
@@ -392,7 +381,7 @@ if not os.path.exists(USERS_FILE):
                 "users": [
                     {
                         "username": ADMIN_USERNAME,
-                        "password": ADMIN_PASSWORD,
+                        "password": generate_password_hash(ADMIN_PASSWORD) if ADMIN_PASSWORD else "",
                         "role": "admin",
                         "permissions": ADMIN_PERMISSIONS,
                         "is_active": True,
@@ -404,6 +393,11 @@ if not os.path.exists(USERS_FILE):
             ensure_ascii=False,
             indent=2,
         )
+
+
+def _password_is_hashed(password: str) -> bool:
+    value = (password or "").strip()
+    return value.startswith(("scrypt:", "pbkdf2:", "argon2:"))
 
 
 def _normalize_user_entry(username: str, data: dict) -> dict:
@@ -443,7 +437,7 @@ def load_users_catalog() -> dict:
         catalog[ADMIN_USERNAME] = _normalize_user_entry(
             ADMIN_USERNAME,
             {
-                "password": ADMIN_PASSWORD,
+                "password": generate_password_hash(ADMIN_PASSWORD) if ADMIN_PASSWORD else "",
                 "role": "admin",
                 "permissions": ADMIN_PERMISSIONS,
                 "is_active": True,
@@ -458,7 +452,11 @@ def save_users_catalog(catalog: dict) -> None:
         "users": [
             {
                 "username": username,
-                "password": data.get("password", ""),
+                "password": (
+                    data.get("password", "")
+                    if _password_is_hashed(data.get("password", ""))
+                    else generate_password_hash(data.get("password", "")) if data.get("password", "") else ""
+                ),
                 "role": data.get("role", "staff"),
                 "permissions": _permissions_for_role(data.get("role", "staff"), data.get("permissions", [])),
                 "is_active": bool(data.get("is_active", True)),
@@ -1832,16 +1830,29 @@ def login():
         password = request.form.get("password", "")
         catalog = load_users_catalog()
         entry = catalog.get(username)
-        if entry and entry.get("password") == password:
+        stored_password = (entry.get("password") or "") if entry else ""
+        password_ok = False
+        if stored_password:
+            try:
+                password_ok = check_password_hash(stored_password, password) if _password_is_hashed(stored_password) else stored_password == password
+            except (ValueError, TypeError):
+                password_ok = False
+        if password_ok:
             if not entry.get("is_active", True):
                 flash("دسترسی این کاربر غیرفعال شده است.", "danger")
                 return redirect(URL_PREFIX + "/login")
+
+            # Upgrade legacy plaintext passwords after a successful login.
+            if not _password_is_hashed(stored_password):
+                catalog[username]["password"] = generate_password_hash(password)
+                save_users_catalog(catalog)
             login_user(
                 User(
                     username,
                     role=entry.get("role", "staff"),
                     permissions=entry.get("permissions", []),
                     is_active=entry.get("is_active", True),
+                    email=entry.get("email", ""),
                 )
             )
             session["login_at_utc"] = datetime.utcnow().isoformat()
