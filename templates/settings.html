@@ -96,11 +96,15 @@
     <div class="grid-2">
       <div>
         <label class="lbl" for="openai_api_key">کلید API</label>
-        <input class="inp" type="password" id="openai_api_key" name="openai_api_key" placeholder="sk-..." autocomplete="off">
+        <input class="inp" type="password" id="openai_api_key" name="openai_api_key" placeholder="برای تغییر کلید وارد کنید" autocomplete="new-password">
         {% if assistant_api_has %}
         <div class="hint">کلید فعلی: {{ assistant_api_mask }}</div>
+        <label style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+          <input type="checkbox" name="clear_openai_api_key" value="1">
+          حذف کلید سراسری
+        </label>
         {% else %}
-        <div class="hint">برای فعال‌شدن دستیار لازم است یک کلید معتبر ثبت شود.</div>
+        <div class="hint">کلید سراسری ثبت نشده است.</div>
         {% endif %}
       </div>
       <div>
@@ -116,8 +120,8 @@
 
     <div class="card muted" style="background:transparent; border:1px dashed var(--border-color); padding:12px;">
       <ul style="margin:0; padding-right:18px; line-height:1.8;">
-        <li>کلید در پایگاه داده به‌صورت رمز نشده نگهداری می‌شود؛ از دسترسی کاربران غیرمجاز جلوگیری کنید.</li>
-        <li>برای حذف کلید، فیلد را خالی گذاشته و ذخیره کنید.</li>
+        <li>کلید API در پایگاه داده ذخیره می‌شود؛ دسترسی به سرور و دیتابیس را محدود نگه دارید.</li>
+        <li>خالی‌گذاشتن فیلد، کلید فعلی را حفظ می‌کند؛ برای حذف، گزینهٔ «حذف کلید» را فعال کنید.</li>
       </ul>
     </div>
 
@@ -144,7 +148,11 @@
         <input class="inp" type="password" id="user_openai_api_key" name="user_openai_api_key" 
                value="" placeholder="برای تغییر کلید وارد کنید" autocomplete="new-password">
         {% if user_api_has %}
-        <div class="hint">کلید شخصی فعلی: {{ user_api_mask }} — برای حذف، فیلد را خالی و ذخیره کنید.</div>
+        <div class="hint">کلید شخصی فعلی: {{ user_api_mask }} — برای حذف، گزینهٔ حذف را فعال کنید.</div>
+        <label style="display:flex;align-items:center;gap:8px;margin-top:8px;">
+          <input type="checkbox" name="clear_user_openai_api_key" value="1">
+          حذف کلید شخصی
+        </label>
         {% else %}
         <div class="hint">کلید شخصی ثبت نشده؛ در صورت خالی‌بودن از کلید سراسری استفاده می‌شود.</div>
         {% endif %}

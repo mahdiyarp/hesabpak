@@ -3356,20 +3356,36 @@ def settings_stub():
         elif form_id == "ai":
             admin_required()
             api_key = (request.form.get("openai_api_key") or "").strip()
+            clear_api_key = request.form.get("clear_openai_api_key") == "1"
+            current_api_key = Setting.get("openai_api_key", "") or ""
             model = (request.form.get("openai_model") or _assistant_model()).strip()
             valid_models = {k for k, _ in ASSISTANT_MODEL_CHOICES}
             if model not in valid_models:
                 model = _assistant_model()
-            Setting.set("openai_api_key", api_key)
+            if api_key:
+                Setting.set("openai_api_key", api_key)
+            elif clear_api_key:
+                Setting.set("openai_api_key", "")
+            else:
+                # Empty credential input means "leave unchanged", not "delete".
+                Setting.set("openai_api_key", current_api_key)
             Setting.set("openai_model", model)
             db.session.commit()
-            if api_key:
+            if clear_api_key:
+                flash("کلید سراسری دستیار پاک شد.", "info")
+            elif api_key:
                 flash("کلید و تنظیمات دستیار هوشمند ذخیره شد.", "success")
             else:
-                flash("کلید دستیار پاک شد.", "info")
+                flash("تنظیمات دستیار هوشمند ذخیره شد؛ کلید فعلی حفظ شد.", "success")
         elif form_id == "user_ai":
             # ذخیره تنظیمات شخصی هر کاربر
-            user_settings.openai_api_key = (request.form.get("user_openai_api_key") or "").strip() or None
+            user_api_key = (request.form.get("user_openai_api_key") or "").strip()
+            clear_user_api_key = request.form.get("clear_user_openai_api_key") == "1"
+            if user_api_key:
+                user_settings.openai_api_key = user_api_key
+            elif clear_user_api_key:
+                user_settings.openai_api_key = None
+            # Empty credential input otherwise leaves the existing key unchanged.
             user_settings.openai_model = (request.form.get("user_openai_model") or "").strip() or None
             user_settings.system_prompt = (request.form.get("user_system_prompt") or "").strip() or None
             
