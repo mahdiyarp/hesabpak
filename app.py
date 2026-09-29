@@ -3021,6 +3021,7 @@ def cash_edit(doc_id):
         except Exception as ex:
             flash(f"خطا: {ex}", "danger")
         return redirect(URL_PREFIX + f"/cash/{doc.id}")
+    current_method = (doc.method or "").lower()
     edit_html = f"""
     <form method="post">
       <div class="card" style="padding:10px">
@@ -3028,13 +3029,13 @@ def cash_edit(doc_id):
         <input class="inp" name="amount" value="{int(doc.amount)}">
         <label class="lbl" style="margin-top:8px">روش</label>
         <select class="inp" name="method">
-          <option value="pos" {'selected' if (doc.method or '').lower()=='pos' else ''}>دستگاه پوز</option>
-          <option value="cash" {'selected' if (doc.method or '').lower()=='cash' else ''}>نقدی</option>
-          <option value="bank" {'selected' if (doc.method or '').lower()=='bank' else ''}>بانک</option>
-          <option value="cheque" {'selected' if (doc.method or '').lower()=='cheque' else ''}>چک</option>
+          <option value="pos" {'selected' if current_method == 'pos' else ''}>دستگاه پوز</option>
+          <option value="cash" {'selected' if current_method == 'cash' else ''}>نقدی</option>
+          <option value="bank" {'selected' if current_method == 'bank' else ''}>بانک</option>
+          <option value="cheque" {'selected' if current_method == 'cheque' else ''}>چک</option>
         </select>
         <label class="lbl" style="margin-top:8px">یادداشت</label>
-        <textarea class="inp" name="note">{doc.note or ''}</textarea>
+        <textarea class="inp" name="note">{escape(doc.note or "")}</textarea>
         <div style="margin-top:10px"><button class="btn">ذخیره</button></div>
       </div>
     </form>
