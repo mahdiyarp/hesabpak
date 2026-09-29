@@ -195,3 +195,15 @@ def test_assistant_upload_rejects_non_image_without_touching_disk(monkeypatch):
         response = app_module.assistant_parse()
 
     assert response[1] == 400
+
+
+def test_security_headers_include_compatible_csp():
+    with app_module.app.test_request_context("/", base_url="https://example.test"):
+        response = app_module.app.make_response("ok")
+        response = app_module._security_headers(response)
+
+    csp = response.headers["Content-Security-Policy"]
+    assert "default-src 'self'" in csp
+    assert "https://cdn.jsdelivr.net" in csp
+    assert "object-src 'none'" in csp
+    assert "frame-ancestors 'self'" in csp
