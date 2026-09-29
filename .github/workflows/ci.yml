@@ -13,16 +13,29 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-python@v7
-        with:
-          python-version: "3.11"
-      - name: Install dependencies
-        run: python -m pip install --upgrade pip
-        
-      - name: Install project dependencies
-        run: python -m pip install -r requirements-dev.txt
+      - name: Checkout source without third-party actions
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          git init .
+          git remote add origin "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          git fetch --no-tags --depth=1 origin "${GITHUB_SHA}"
+          git checkout --detach FETCH_HEAD
+
+      - name: Prepare isolated Python environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 -m venv .ci-venv
+          . .ci-venv/bin/activate
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements-dev.txt
+          echo "${GITHUB_WORKSPACE}/.ci-venv/bin" >> "${GITHUB_PATH}"
+
       - name: Compile
         run: python -m compileall app.py autobackup.py blueprints models utils
+
       - name: Run tests
         run: pytest -q
