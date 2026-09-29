@@ -409,3 +409,8 @@ def test_sensitive_query_values_are_redacted_from_request_logs():
     assert safe["api_key"] == "***"
     assert safe["authorization"] == "***"
     assert safe["name"] == "Mahdi"
+
+def test_global_search_actions_do_not_use_dynamic_html_sink():
+    source = (Path(app_module.__file__).resolve().parent / "static" / "app.js").read_text(encoding="utf-8")
+    assert "quickLinks.map" not in source
+    assert "actions.innerHTML = quickLinks" not in source
