@@ -4,10 +4,10 @@
   "description":"نرم‌افزار حسابداری فارسی حساب پاک",
   "lang":"fa-IR",
   "dir":"rtl",
-  "start_url":"./",
-  "scope":"./",
+  "start_url":"../",
+  "scope":"../",
   "display":"standalone",
   "background_color":"#0d1728",
   "theme_color":"#0d1728",
-  "icons":[{"src":"./static/favicon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]
+  "icons":[{"src":"../static/favicon.svg","sizes":"any","type":"image/svg+xml","purpose":"any maskable"}]
 }
