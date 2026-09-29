@@ -10,6 +10,7 @@ import shutil
 from flask_login import LoginManager, login_user, logout_user, login_required, UserMixin, current_user
 from dotenv import load_dotenv
 from markupsafe import Markup, escape
+from werkzeug.security import check_password_hash, generate_password_hash
 from sqlalchemy import func, or_, UniqueConstraint   # <- مهم
 
 try:
@@ -63,11 +64,7 @@ def record_ledger(
     action: str,
     payload: Dict[str, Any],
 ) -> LedgerEntry:
-    """Append a tamper-evident ledger entry.
-
-    The caller owns the business transaction; this helper commits only the
-    ledger row because it is deliberately a separate audit trail.
-    """
+    """Append a tamper-evident ledger entry."""
     try:
         last = db.session.query(LedgerEntry).order_by(LedgerEntry.id.desc()).first()
         prev = last.hash if last else None
@@ -384,7 +381,7 @@ if not os.path.exists(USERS_FILE):
                 "users": [
                     {
                         "username": ADMIN_USERNAME,
-                        "password": ADMIN_PASSWORD,
+                        "password": generate_password_hash(ADMIN_PASSWORD) if ADMIN_PASSWORD else "",
                         "role": "admin",
                         "permissions": ADMIN_PERMISSIONS,
                         "is_active": True,
@@ -396,6 +393,11 @@ if not os.path.exists(USERS_FILE):
             ensure_ascii=False,
             indent=2,
         )
+
+
+def _password_is_hashed(password: str) -> bool:
+    value = (password or "").strip()
+    return value.startswith(("scrypt:", "pbkdf2:", "argon2:"))
 
 
 def _normalize_user_entry(username: str, data: dict) -> dict:
@@ -435,7 +437,7 @@ def load_users_catalog() -> dict:
         catalog[ADMIN_USERNAME] = _normalize_user_entry(
             ADMIN_USERNAME,
             {
-                "password": ADMIN_PASSWORD,
+                "password": generate_password_hash(ADMIN_PASSWORD) if ADMIN_PASSWORD else "",
                 "role": "admin",
                 "permissions": ADMIN_PERMISSIONS,
                 "is_active": True,
@@ -450,7 +452,11 @@ def save_users_catalog(catalog: dict) -> None:
         "users": [
             {
                 "username": username,
-                "password": data.get("password", ""),
+                "password": (
+                    data.get("password", "")
+                    if _password_is_hashed(data.get("password", ""))
+                    else generate_password_hash(data.get("password", "")) if data.get("password", "") else ""
+                ),
                 "role": data.get("role", "staff"),
                 "permissions": _permissions_for_role(data.get("role", "staff"), data.get("permissions", [])),
                 "is_active": bool(data.get("is_active", True)),
@@ -1824,16 +1830,29 @@ def login():
         password = request.form.get("password", "")
         catalog = load_users_catalog()
         entry = catalog.get(username)
-        if entry and entry.get("password") == password:
+        stored_password = (entry.get("password") or "") if entry else ""
+        password_ok = False
+        if stored_password:
+            try:
+                password_ok = check_password_hash(stored_password, password) if _password_is_hashed(stored_password) else stored_password == password
+            except (ValueError, TypeError):
+                password_ok = False
+        if password_ok:
             if not entry.get("is_active", True):
                 flash("دسترسی این کاربر غیرفعال شده است.", "danger")
                 return redirect(URL_PREFIX + "/login")
+
+            # Upgrade legacy plaintext passwords after a successful login.
+            if not _password_is_hashed(stored_password):
+                catalog[username]["password"] = generate_password_hash(password)
+                save_users_catalog(catalog)
             login_user(
                 User(
                     username,
                     role=entry.get("role", "staff"),
                     permissions=entry.get("permissions", []),
                     is_active=entry.get("is_active", True),
+                    email=entry.get("email", ""),
                 )
             )
             session["login_at_utc"] = datetime.utcnow().isoformat()
