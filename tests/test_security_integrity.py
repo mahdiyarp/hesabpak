@@ -296,3 +296,9 @@ def test_audit_log_payload_is_size_limited(monkeypatch):
         response = app_module.api_audit_log()
 
     assert response.status_code == 413
+
+def test_legacy_receive_route_is_get_only_compat_redirect():
+    rules = [r for r in app_module.app.url_map.iter_rules() if r.rule == "/receive_old"]
+    assert len(rules) == 1
+    assert "GET" in rules[0].methods
+    assert "POST" not in rules[0].methods
