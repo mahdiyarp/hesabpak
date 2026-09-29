@@ -36,3 +36,38 @@ def test_demo_mode_has_a_production_data_guard():
     app = (ROOT / "app.py").read_text(encoding="utf-8")
     assert 'if DEMO_MODE and Path(DATA_DIR).name.strip().lower()' in app
     assert '"data", "production", "prod"' in app
+
+def test_demo_share_landing_and_start_flow_are_explicitly_split():
+    app = (ROOT / "app.py").read_text(encoding="utf-8")
+    template = (ROOT / "templates" / "demo_landing.html").read_text(encoding="utf-8")
+    assert '@app.route(URL_PREFIX + "/demo", methods=["GET"])' in app
+    assert '@app.route(URL_PREFIX + "/demo/start", methods=["GET", "POST"])' in app
+    assert 'if request.method == "GET":' in app
+    assert 'return redirect(URL_PREFIX + "/demo")' in app
+    assert 'روش اشتراک‌گذاری' not in template
+    assert "نسخه نمایشی" in template
+    assert "share_url" in template
+    assert "navigator.share" in template
+    assert "کپی لینک" in template
+
+
+def test_demo_visibility_is_persistent_inside_authenticated_ui():
+    base = (ROOT / "templates" / "base.html").read_text(encoding="utf-8")
+    assert 'session.get("demo_session")' in base
+    assert "نسخه نمایشی" in base
+    assert "اطلاعات واقعی وارد نکنید" in base
+
+
+def test_transactions_landing_and_search_ui_exist():
+    app = (ROOT / "app.py").read_text(encoding="utf-8")
+    landing = (ROOT / "templates" / "transactions.html").read_text(encoding="utf-8")
+    search = (ROOT / "templates" / "reports.html").read_text(encoding="utf-8")
+    assert '@app.route(URL_PREFIX + "/transactions")' in app
+    assert 'templates/transactions.html' not in app  # route uses render_template name, not filesystem path
+    assert 'render_template("transactions.html"' in app
+    assert "جستجو در تراکنش‌ها" in landing
+    assert "جستجوی پیشرفته" in landing
+    assert "حداکثر" not in landing
+    assert "جستجوی تراکنش‌ها" in search
+    assert "حذف فیلترها" in search
+    assert "نتیجه در این جستجو" in search
