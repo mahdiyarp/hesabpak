@@ -158,7 +158,7 @@
   {# Cheque lists removed from dashboard per request #}
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+{# نمودارها در حالت فعلی از CDN لود نمی‌شوند تا رابط بدون وابستگی خارجی هم باز شود. #}
 <script>
 (function(){
   const chartData = {{ chart_data|tojson }};
