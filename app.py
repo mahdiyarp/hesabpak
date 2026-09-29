@@ -2233,6 +2233,17 @@ def unified_invoice():
         invoice_kind=kind,
     )
 
+def _adjust_cash_person_balance(doc_type: str, person, old_amount: float, new_amount: float) -> None:
+    """Adjust a denormalized person balance by the change in a cash document."""
+    delta = float(new_amount or 0.0) - float(old_amount or 0.0)
+    if abs(delta) < 1e-12:
+        return
+    if (doc_type or "").strip().lower() == "receive":
+        person.balance = float(person.balance or 0.0) - delta
+    else:
+        person.balance = float(person.balance or 0.0) + delta
+
+
 # ----------------- Entities CRUD -----------------
 @app.route(URL_PREFIX + "/entities")
 @login_required
@@ -2385,9 +2396,31 @@ def entities_delete(eid):
     admin_required()
     ent = Entity.query.get_or_404(eid)
     t = ent.type
-    # capture payload before deletion
+
+    # Preserve accounting history: entities referenced by any document or
+    # parent relation must not be physically deleted.
+    references = []
+    if Entity.query.filter_by(parent_id=eid).first():
+        references.append("زیرمجموعه‌ها")
+    if Invoice.query.filter_by(person_id=eid).first():
+        references.append("فاکتورها")
+    if InvoiceLine.query.filter_by(item_id=eid).first():
+        references.append("ردیف فاکتورها")
+    if CashDoc.query.filter_by(person_id=eid).first():
+        references.append("اسناد دریافت/پرداخت")
+    if PriceHistory.query.filter((PriceHistory.person_id == eid) | (PriceHistory.item_id == eid)).first():
+        references.append("سوابق قیمت")
+
+    if references:
+        flash(
+            "حذف فیزیکی این مورد مجاز نیست چون در " + "، ".join(references) + " سابقه دارد.",
+            "warning",
+        )
+        return redirect(URL_PREFIX + f"/entities?kind={t}")
+
     payload = {"id": ent.id, "type": ent.type, "code": ent.code, "name": ent.name}
-    db.session.delete(ent); db.session.commit()
+    db.session.delete(ent)
+    db.session.commit()
     try:
         record_ledger("entity", eid, "delete", payload)
     except Exception:
@@ -3008,17 +3041,36 @@ def cash_edit(doc_id):
     doc = CashDoc.query.get_or_404(doc_id)
     if request.method == "POST":
         try:
-            new_amount = _to_float(request.form.get("amount"), doc.amount)
+            old_amount = float(doc.amount or 0.0)
+            new_amount = _to_float(request.form.get("amount"), old_amount)
             if new_amount <= 0:
                 flash("مبلغ سند باید بزرگ‌تر از صفر باشد.", "danger")
                 return redirect(URL_PREFIX + f"/cash/{doc.id}/edit")
+            _adjust_cash_person_balance(doc.doc_type, doc.person, old_amount, new_amount)
             doc.amount = new_amount
             doc.note = (request.form.get("note") or "").strip() or None
             m = (request.form.get("method") or "").strip().lower()
-            if m in ("pos","cash","bank","cheque"): doc.method = m
+            if m in ("pos","cash","bank","cheque"):
+                doc.method = m
             db.session.commit()
+            try:
+                record_ledger(
+                    "cashdoc",
+                    doc.id,
+                    "update",
+                    {
+                        "before_amount": old_amount,
+                        "after_amount": new_amount,
+                        "person_id": doc.person_id,
+                        "doc_type": doc.doc_type,
+                        "method": doc.method,
+                    },
+                )
+            except Exception:
+                app.logger.exception("failed to write cashdoc update ledger entry")
             flash("ویرایش شد.", "success")
         except Exception as ex:
+            db.session.rollback()
             flash(f"خطا: {ex}", "danger")
         return redirect(URL_PREFIX + f"/cash/{doc.id}")
     current_method = (doc.method or "").lower()
