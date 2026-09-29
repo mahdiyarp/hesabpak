@@ -1268,14 +1268,17 @@ def _resolve_entity(kind: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     return info
 
 def _prepare_invoice_plan(invoice_data: Dict[str, Any]) -> Dict[str, Any]:
-    kind = (invoice_data.get("kind") or "sales").strip().lower()
+    kind = (invoice_data.get("kind") or "").strip().lower()
     if kind not in ("sales", "purchase"):
-        kind = "sales"
+        raise ValueError("نوع فاکتور مشخص نیست.")
 
     partner_payload = invoice_data.get("partner") or {}
     partner_info = _resolve_entity("person", partner_payload)
 
-    parsed_date = _parse_invoice_date(invoice_data.get("date"))
+    raw_date = (invoice_data.get("date") or "").strip()
+    parsed_date = _parse_invoice_date(raw_date)
+    if raw_date and parsed_date is None:
+        raise ValueError("تاریخ فاکتور معتبر نیست.")
     number = (invoice_data.get("number") or "").strip()
 
     items_preview = []
@@ -1287,6 +1290,10 @@ def _prepare_invoice_plan(invoice_data: Dict[str, Any]) -> Dict[str, Any]:
             continue
         qty = _to_float(row.get("qty"), 0.0)
         unit_price = _to_float(row.get("unit_price"), 0.0)
+        if qty <= 0:
+            raise ValueError(f"تعداد کالای «{name}» باید بزرگ‌تر از صفر باشد.")
+        if unit_price < 0:
+            raise ValueError(f"قیمت واحد کالای «{name}» نمی‌تواند منفی باشد.")
         unit = (row.get("unit") or "عدد").strip() or "عدد"
         code = (row.get("code") or "").strip()
 
@@ -1341,21 +1348,27 @@ def _prepare_invoice_plan(invoice_data: Dict[str, Any]) -> Dict[str, Any]:
 
 def _prepare_cash_plan(cash_data: Dict[str, Any]) -> Dict[str, Any]:
     """Normalize assistant-provided cash/transfer payload into an internal plan."""
-    doc_type = (cash_data.get("doc_type") or "unknown").strip().lower()
+    doc_type = (cash_data.get("doc_type") or "").strip().lower()
     if doc_type not in ("receive", "payment"):
-        doc_type = "unknown"
+        raise ValueError("نوع سند دریافت/پرداخت مشخص نیست.")
 
     person_payload = cash_data.get("person") or {}
     person_info = _resolve_entity("person", person_payload)
 
     amount = _to_float(cash_data.get("amount"), 0.0)
     number = (cash_data.get("number") or "").strip()
-    parsed_date = _parse_invoice_date(cash_data.get("date"))
+    raw_date = (cash_data.get("date") or "").strip()
+    parsed_date = _parse_invoice_date(raw_date)
+    if raw_date and parsed_date is None:
+        raise ValueError("تاریخ سند معتبر نیست.")
     method = (cash_data.get("method") or "").strip().lower() or None
     bank_account = (cash_data.get("bank_account") or "").strip() or None
     bank_name = (cash_data.get("bank_name") or "").strip() or None
     cheque_number = (cash_data.get("cheque_number") or "").strip() or None
-    cheque_due = _parse_invoice_date(cash_data.get("cheque_due"))
+    raw_cheque_due = (cash_data.get("cheque_due") or "").strip()
+    cheque_due = _parse_invoice_date(raw_cheque_due)
+    if raw_cheque_due and cheque_due is None:
+        raise ValueError("تاریخ سررسید چک معتبر نیست.")
 
     plan = {
         "doc_type": doc_type,
@@ -1383,10 +1396,9 @@ def _prepare_cash_plan(cash_data: Dict[str, Any]) -> Dict[str, Any]:
 
 def _apply_cash_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
     """Apply a prepared cash plan: create CashDoc and update balances."""
-    doc_type = (plan.get("doc_type") or "unknown").strip().lower()
+    doc_type = (plan.get("doc_type") or "").strip().lower()
     if doc_type not in ("receive", "payment"):
-        # default to receive for positive amounts if unspecified
-        doc_type = "receive" if float(plan.get("amount") or 0.0) >= 0 else "payment"
+        raise ValueError("نوع سند دریافت/پرداخت معتبر نیست.")
 
     person_entity = None
     if plan.get("person") and plan["person"].get("entity_id"):
@@ -1414,21 +1426,24 @@ def _apply_cash_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
     # if method indicates cheque, set cheque fields
     cheque_number = plan.get("cheque_number")
     cheque_due = None
-    if plan.get("cheque_due"):
-        try:
-            cheque_due = parse_gregorian_date(plan.get("cheque_due"), allow_none=True) or parse_jalali_date(plan.get("cheque_due"), allow_none=True)
-        except Exception:
-            cheque_due = None
+    raw_cheque_due = (plan.get("cheque_due") or "").strip()
+    if raw_cheque_due:
+        cheque_due = parse_gregorian_date(raw_cheque_due, allow_none=True) or parse_jalali_date(raw_cheque_due, allow_none=True)
+        if cheque_due is None:
+            raise ValueError("تاریخ سررسید چک معتبر نیست.")
 
     # generate number if missing
     number = plan.get("number") or None
     if not number:
         number = jalali_reference("RCV" if doc_type=="receive" else "PAY", datetime.utcnow())
 
+    raw_date = (plan.get("date") or "").strip()
     date_val = None
-    if plan.get("date"):
-        date_val = parse_gregorian_date(plan.get("date"), allow_none=True) or parse_jalali_date(plan.get("date"), allow_none=True)
-    if date_val is None:
+    if raw_date:
+        date_val = parse_gregorian_date(raw_date, allow_none=True) or parse_jalali_date(raw_date, allow_none=True)
+        if date_val is None:
+            raise ValueError("تاریخ سند معتبر نیست.")
+    else:
         date_val = datetime.utcnow().date()
 
     amount = float(plan.get("amount") or 0.0)
@@ -1516,7 +1531,9 @@ def _ensure_entity(kind: str, data: Dict[str, Any]) -> Entity:
     return ent
 
 def _apply_invoice_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
-    kind = plan.get("kind", "sales")
+    kind = (plan.get("kind") or "").strip().lower()
+    if kind not in ("sales", "purchase"):
+        raise ValueError("نوع فاکتور معتبر نیست.")
     partner_payload = plan.get("partner") or {}
     partner_entity = None
     if partner_payload.get("entity_id"):
@@ -1530,7 +1547,13 @@ def _apply_invoice_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
     if Invoice.query.filter_by(number=number).first():
         number = generate_invoice_number()
 
-    inv_date = _parse_invoice_date(plan.get("date")) or datetime.utcnow().date()
+    raw_date = (plan.get("date") or "").strip()
+    if raw_date:
+        inv_date = _parse_invoice_date(raw_date)
+        if inv_date is None:
+            raise ValueError("تاریخ فاکتور معتبر نیست.")
+    else:
+        inv_date = datetime.utcnow().date()
 
     allow_negative = _allow_negative_sales()
     items_payload = []
@@ -1540,6 +1563,8 @@ def _apply_invoice_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
         if qty <= 0:
             continue
         unit_price = _to_float(row.get("unit_price"), 0.0)
+        if unit_price < 0:
+            raise ValueError(f"قیمت واحد کالای «{row.get('name') or 'نامشخص'}» نمی‌تواند منفی باشد.")
         unit = (row.get("unit") or "عدد").strip() or "عدد"
         item_entity = None
         if row.get("entity_id"):
