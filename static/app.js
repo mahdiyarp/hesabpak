@@ -106,15 +106,13 @@ function badgeOf(t){
   };
 
   if(actions){
-    // quick links removed from top search per user request
-    const quickLinks = [].filter(link => allow(link.perm));
-    if(quickLinks.length){
-      actions.innerHTML = quickLinks.map(x=>`<a class="act" href="${x.href}">${x.label}</a>`).join('');
-      showActions();
-    } else {
-      actions.innerHTML = '<span class="muted">مجوزی برای میانبرها ندارید.</span>';
-      showActions();
-    }
+    // Quick links are intentionally disabled; render the empty state without HTML sinks.
+    actions.replaceChildren();
+    const empty = document.createElement('span');
+    empty.className = 'muted';
+    empty.textContent = 'مجوزی برای میانبرها ندارید.';
+    actions.appendChild(empty);
+    showActions();
   }
 
   let tmr = null;
