@@ -137,3 +137,28 @@ def test_reports_fallback_escapes_query_and_date_values(monkeypatch):
     assert malicious_to not in rendered
     assert "&lt;img" in rendered
     assert "&lt;script&gt;" in rendered
+
+
+def test_record_ledger_serializes_concurrent_appends():
+    from concurrent.futures import ThreadPoolExecutor
+
+    with app_module.app.app_context():
+        app_module.db.drop_all()
+        app_module.db.create_all()
+
+    def write_entry(index):
+        with app_module.app.app_context():
+            entry = app_module.record_ledger(
+                "concurrency",
+                str(index),
+                "create",
+                {"index": index},
+            )
+            return entry.id, entry.hash, entry.prev_hash
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        results = list(pool.map(write_entry, (1, 2)))
+
+    ordered = sorted(results, key=lambda row: row[0])
+    assert ordered[0][2] is None
+    assert ordered[1][2] == ordered[0][1]
