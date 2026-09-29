@@ -688,6 +688,7 @@ def switch_year():
             required = {
                 "settings", "user_settings", "entities", "invoices",
                 "invoice_lines", "cash_docs", "cash_boxes", "price_history",
+                "ledger_entries",
             }
             existing = {
                 row[0] for row in con.execute(
@@ -722,12 +723,17 @@ def switch_year():
     data_dir = Path(current_app.config.get("DATA_DIR", "data"))
     live_db = data_dir / current_app.config.get("DB_FILE", "app.db")
     staged_db = live_db.with_name(live_db.name + ".switching")
+    rollback_db = live_db.with_name(live_db.name + ".before-switching")
+    switched = False
     try:
         db.session.remove()
         db.engine.dispose()
+        if live_db.exists():
+            shutil.copy2(live_db, rollback_db)
         try:
             shutil.copy2(target_db, staged_db)
             os.replace(staged_db, live_db)
+            switched = True
         finally:
             try:
                 staged_db.unlink(missing_ok=True)
@@ -742,10 +748,25 @@ def switch_year():
         if target_entry and target_entry.get("label"):
             Setting.set("fiscal_year_label", target_entry.get("label"))
         db.session.commit()
+
+        try:
+            rollback_db.unlink(missing_ok=True)
+        except TypeError:
+            if rollback_db.exists():
+                rollback_db.unlink()
     except Exception as exc:
         current_app.logger.exception("fiscal year switch failed: %s", exc)
-        db.session.rollback()
-        flash("تغییر سال مالی انجام نشد.", "danger")
+        try:
+            db.session.remove()
+            db.engine.dispose()
+            if switched and rollback_db.exists():
+                os.replace(rollback_db, live_db)
+            else:
+                rollback_db.unlink(missing_ok=True)
+        except Exception:
+            current_app.logger.exception("failed to roll back fiscal year database")
+        db.engine.dispose()
+        flash("تغییر سال مالی انجام نشد و وضعیت قبلی بازیابی شد.", "danger")
         return redirect(url_for("backup.index"))
 
     flash(f"✅ سال مالی {year} فعال شد و اطلاعات همان پرونده بارگذاری گردید.", "success")
