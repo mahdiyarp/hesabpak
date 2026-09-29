@@ -35,14 +35,18 @@
 
     <aside class="assistant-sidebar">
       <div id="assistant-preview" class="assistant-preview card" hidden>
-        <h3>پیش‌نمایش فاکتور</h3>
-        <div class="preview-meta">
+        <h3 data-preview-title>پیش‌نمایش فاکتور</h3>
+        <div id="assistant-action-preview" class="assistant-action-preview" hidden>
+          <p class="muted">دستیار پیشنهاد داده فایل‌های زیر تغییر کنند. قبل از اعمال، مسیرها و توضیحات را بررسی کنید.</p>
+          <div id="assistant-action-list" class="assistant-action-list"></div>
+        </div>
+        <div class="preview-meta" data-preview-section="invoice">
           <div><span>نوع:</span> <strong data-field="kind">—</strong></div>
           <div><span>مشتری/تأمین‌کننده:</span> <strong data-field="partner">—</strong></div>
           <div><span>تاریخ:</span> <strong data-field="date">—</strong></div>
           <div><span>شماره:</span> <strong data-field="number">—</strong></div>
         </div>
-        <div class="preview-items">
+        <div class="preview-items" data-preview-section="invoice">
           <table>
             <thead>
               <tr>
@@ -56,8 +60,8 @@
             <tbody></tbody>
           </table>
         </div>
-        <div class="preview-total">مبلغ کل: <strong data-field="total">۰</strong> تومان</div>
-        <div id="assistant-missing" class="assistant-missing" hidden></div>
+        <div class="preview-total" data-preview-section="invoice">مبلغ کل: <strong data-field="total">۰</strong> تومان</div>
+        <div id="assistant-missing" class="assistant-missing" data-preview-section="invoice" hidden></div>
         <div id="assistant-error" class="assistant-error" hidden></div>
         <div class="preview-actions">
           <button type="button" id="assistant-confirm" class="btn-primary">تأیید و ثبت در سیستم</button>
