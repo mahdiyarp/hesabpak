@@ -66,13 +66,17 @@ pip install -r requirements.txt
 mkdir -p data/backups/autosave
 
 # 8. تنظیمات محیطی
-cat > .env << 'EOF'
+SECRET=$(openssl rand -hex 32)
+ADMIN_PASS=$(openssl rand -hex 12)
+cat > .env << EOF
 PORT=8000
-SECRET_KEY=your-secret-key-here-change-me
+SECRET_KEY=$SECRET
 ADMIN_USERNAME=admin
-ADMIN_PASSWORD=admin123
+ADMIN_PASSWORD=$ADMIN_PASS
 DATA_DIR=data
 URL_PREFIX=
+SESSION_COOKIE_SECURE=false
+MAX_UPLOAD_MB=15
 EOF
 
 # 9. راه‌اندازی دیتابیس
@@ -145,10 +149,12 @@ sudo supervisorctl restart hesabpak
 
 ## 🔒 تنظیمات امنیتی (بعد از نصب)
 
-### تغییر رمز ادمین:
-1. وارد سیستم شوید
-2. به قسمت تنظیمات بروید
-3. رمز عبور را تغییر دهید
+### مشاهده/تغییر رمز مدیر:
+رمز اولیه به‌صورت تصادفی در `.env` ساخته می‌شود:
+```bash
+sudo grep '^ADMIN_PASSWORD=' /var/www/hesabpak/.env
+```
+سپس از داخل مدیریت کاربران رمز را تغییر دهید.
 
 ### فعال‌سازی HTTPS (با Let's Encrypt):
 ```bash
