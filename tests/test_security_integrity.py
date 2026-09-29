@@ -447,3 +447,16 @@ def test_production_admin_password_fallback_is_disabled():
     source = Path(app_module.__file__).resolve().read_text(encoding="utf-8")
     assert 'if not ADMIN_PASSWORD and FLASK_ENV != "production":' in source
     assert 'ADMIN_PASSWORD = "admin123"' in source
+def test_legacy_purchase_and_sales_routes_infer_document_kind(monkeypatch):
+    observed = []
+    monkeypatch.setattr(app_module, "ensure_permission", lambda perm: observed.append(perm))
+
+    with app_module.app.test_request_context("/purchase", method="GET"):
+        # Reach only the initial kind/permission logic; stop before database-dependent rendering.
+        original = app_module._now_info
+        monkeypatch.setattr(app_module, "_now_info", lambda: {"datetime": app_module.datetime.utcnow()})
+        try:
+            app_module.unified_invoice.__wrapped__()
+        except Exception:
+            pass
+    assert observed[0] == "purchase"
