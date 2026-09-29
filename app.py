@@ -2399,6 +2399,8 @@ def unified_invoice():
         form_kind = (request.form.get("invoice_kind") or kind).strip().lower()
         if form_kind not in ("sales", "purchase"):
             form_kind = kind
+        # The submitted document type is authoritative for POST authorization.
+        ensure_permission(form_kind)
         
         number = (request.form.get("inv_number") or "").strip() or inv_number_generated
         inv_date = parse_gregorian_date(
@@ -3101,6 +3103,8 @@ def unified_cash():
         form_kind = request.form.get("cash_kind", kind).strip().lower()
         if form_kind not in ("receive", "payment"):
             form_kind = kind
+        # The submitted document type is authoritative for POST authorization.
+        ensure_permission(form_kind)
 
         number = (request.form.get("doc_number") or "").strip() or doc_number
         doc_date = parse_gregorian_date(request.form.get("doc_date_greg"))
