@@ -62,11 +62,13 @@ if [ ! -f ".env" ]; then
     echo -e "${YELLOW}⚙️  ایجاد فایل تنظیمات .env${NC}"
     SECRET=$(openssl rand -hex 32)
     ADMIN_PASS=$(openssl rand -hex 12)
+    CRED_KEY=$(openssl rand -base64 32 | tr -d "\n")
     cat > .env << EOF
 PORT=8000
 SECRET_KEY=$SECRET
 ADMIN_USERNAME=admin
 ADMIN_PASSWORD=$ADMIN_PASS
+CREDENTIAL_ENCRYPTION_KEY=$CRED_KEY
 DATA_DIR=data
 URL_PREFIX=
 SESSION_COOKIE_SECURE=false
