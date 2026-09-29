@@ -4241,6 +4241,24 @@ def api_search():
     if not targets.intersection(default_targets):
         targets = default_targets
 
+    # A logged-in user may search only the modules they are allowed to use.
+    # Admins retain the full search surface.
+    if not is_admin():
+        permission_targets = set()
+        if has_permission("entities"):
+            permission_targets.update({"item", "person"})
+        if has_permission("sales"):
+            permission_targets.add("invoice")
+        if has_permission("purchase"):
+            permission_targets.add("invoice")
+        if has_permission("reports"):
+            permission_targets.update({"invoice", "receive", "payment"})
+        if has_permission("receive"):
+            permission_targets.add("receive")
+        if has_permission("payment"):
+            permission_targets.add("payment")
+        targets = targets.intersection(permission_targets)
+
     ordered_targets = [t for t in ["item", "person", "invoice", "receive", "payment"] if t in targets]
 
     results = []
