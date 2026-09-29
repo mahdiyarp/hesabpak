@@ -1806,20 +1806,14 @@ def _apply_invoice_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
         )
 
         if kind == "sales":
-            try:
-                item.stock_qty = float(item.stock_qty or 0.0) - qty
-            except Exception:
-                item.stock_qty = 0.0 - qty
+            _adjust_item_stock_delta(item, -qty, allow_negative=allow_negative)
             ph = PriceHistory.query.filter_by(person_id=partner_entity.id, item_id=item.id).first()
             if not ph:
                 db.session.add(PriceHistory(person_id=partner_entity.id, item_id=item.id, last_price=unit_price))
             else:
                 ph.last_price = unit_price
         else:
-            try:
-                item.stock_qty = float(item.stock_qty or 0.0) + qty
-            except Exception:
-                item.stock_qty = 0.0 + qty
+            _adjust_item_stock_delta(item, qty)
 
     # total must be positive
     if float(total) <= 0:
@@ -2501,17 +2495,12 @@ def unified_invoice():
                 line_total=line_total
             ))
 
-            # Update stock: sales decreases, purchase increases
-            if form_kind == "sales":
-                try:
-                    item.stock_qty = float(item.stock_qty or 0.0) - qty
-                except Exception:
-                    item.stock_qty = 0.0 - qty
-            else:  # purchase
-                try:
-                    item.stock_qty = float(item.stock_qty or 0.0) + qty
-                except Exception:
-                    item.stock_qty = 0.0 + qty
+            # Update stock atomically: sales decreases, purchase increases.
+            _adjust_item_stock_delta(
+                item,
+                -qty if form_kind == "sales" else qty,
+                allow_negative=(allow_negative or form_kind == "purchase"),
+            )
 
             ph = PriceHistory.query.filter_by(person_id=person.id, item_id=item.id).first()
             if not ph:
@@ -2548,6 +2537,41 @@ def unified_invoice():
         current_gdate=now_info["greg_date"],
         invoice_kind=kind,
     )
+
+def _adjust_item_stock_delta(item, delta: float, allow_negative: bool = False) -> None:
+    """Atomically change item stock inside the current transaction."""
+    delta = float(delta or 0.0)
+    if abs(delta) < 1e-12:
+        return
+    item_id = getattr(item, "id", None)
+    if item_id is None:
+        item.stock_qty = float(item.stock_qty or 0.0) + delta
+        return
+
+    if delta < 0 and not allow_negative:
+        result = db.session.execute(
+            text(
+                "UPDATE entities "
+                "SET stock_qty = COALESCE(stock_qty, 0) + :delta "
+                "WHERE id = :id AND type = 'item' "
+                "AND COALESCE(stock_qty, 0) + :delta >= 0"
+            ),
+            {"delta": delta, "id": int(item_id)},
+        )
+    else:
+        result = db.session.execute(
+            text(
+                "UPDATE entities "
+                "SET stock_qty = COALESCE(stock_qty, 0) + :delta "
+                "WHERE id = :id AND type = 'item'"
+            ),
+            {"delta": delta, "id": int(item_id)},
+        )
+
+    if result.rowcount != 1:
+        raise ValueError("موجودی کالای «{}» کافی نیست.".format(getattr(item, "name", "نامشخص")))
+    db.session.refresh(item, attribute_names=["stock_qty"])
+
 
 def _adjust_person_balance_delta(person, delta: float) -> None:
     """Atomically update a person's denormalized balance inside the current transaction."""
