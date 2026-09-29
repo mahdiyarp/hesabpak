@@ -115,15 +115,25 @@
   function renderPerson(results){
     if(!Array.isArray(results) || results.length === 0){
       hide(personBox);
-      personBox.innerHTML = '';
+      personBox.replaceChildren();
       return;
     }
     // ensure we only show person-type results here (defensive filter)
     try{
       results = results.filter(r => !r.type || String(r.type).toLowerCase() === 'person');
     }catch(e){/* ignore */}
-    if(!results || results.length === 0){ hide(personBox); personBox.innerHTML=''; return; }
-    personBox.innerHTML = results.map(r => `<a class="res" href="#" data-id="${r.id}" data-name="${r.name}" data-code="${r.code}">${r.code} — ${r.name}</a>`).join('');
+    if(!results || results.length === 0){ hide(personBox); personBox.replaceChildren(); return; }
+    personBox.replaceChildren();
+    results.forEach(r => {
+      const a = document.createElement('a');
+      a.className = 'res';
+      a.href = '#';
+      a.dataset.id = r.id == null ? '' : String(r.id);
+      a.dataset.name = r.name == null ? '' : String(r.name);
+      a.dataset.code = r.code == null ? '' : String(r.code);
+      a.textContent = (r.code || '') + ' — ' + (r.name || '');
+      personBox.appendChild(a);
+    });
     // show dropdown without activating the full overlay
     try{ showLight(personBox); }catch(e){ show(personBox); }
   }
@@ -132,7 +142,7 @@
     fetch(`${prefix}/api/search?q=${encodeURIComponent(q)}&kind=person&limit=12`, {credentials:'same-origin'})
       .then(r => r.ok ? r.json() : [])
       .then(renderPerson)
-      .catch(()=>{ hide(personBox); personBox.innerHTML=''; });
+      .catch(()=>{ hide(personBox); personBox.replaceChildren(); });
   }
 
   // small modal that asks user to choose between Invoice (فاکتور) or Cardex (کارتکس)
@@ -141,15 +151,29 @@
       try{
         const modal = document.createElement('div');
         modal.className = 'hp-modal-overlay';
-        modal.innerHTML = `
-          <div class="hp-modal" role="dialog" aria-modal="true">
-            <div style="font-weight:700;margin-bottom:8px">${title || 'انتخاب کنید'}</div>
-            <div style="display:flex;gap:8px;justify-content:center;margin-top:8px">
-              <button class="hp-btn hp-btn-primary" data-choice="invoice">📄 استفاده در فاکتور</button>
-              <button class="hp-btn hp-btn-secondary" data-choice="cardex">🗂️ مشاهده کارتکس</button>
-              <button class="hp-btn" data-choice="cancel">انصراف</button>
-            </div>
-          </div>`;
+        const inner = document.createElement('div');
+        inner.className = 'hp-modal';
+        inner.setAttribute('role','dialog');
+        inner.setAttribute('aria-modal','true');
+        const heading = document.createElement('div');
+        heading.style.cssText = 'font-weight:700;margin-bottom:8px';
+        heading.textContent = title || 'انتخاب کنید';
+        inner.appendChild(heading);
+        const actions = document.createElement('div');
+        actions.style.cssText = 'display:flex;gap:8px;justify-content:center;margin-top:8px';
+        [
+          ['invoice','📄 استفاده در فاکتور','hp-btn hp-btn-primary'],
+          ['cardex','🗂️ مشاهده کارتکس','hp-btn hp-btn-secondary'],
+          ['cancel','انصراف','hp-btn']
+        ].forEach(([choice,label,cls])=>{
+          const btn=document.createElement('button');
+          btn.className=cls;
+          btn.dataset.choice=choice;
+          btn.textContent=label;
+          actions.appendChild(btn);
+        });
+        inner.appendChild(actions);
+        modal.appendChild(inner);
         // basic styles
         const s = modal.style;
         s.position = 'fixed'; s.left = 0; s.top = 0; s.right = 0; s.bottom = 0; s.zIndex = 2147483647; s.display='flex'; s.alignItems='center'; s.justifyContent='center'; s.background='rgba(0,0,0,0.35)';
@@ -186,7 +210,7 @@
     // If there is a dedicated lock-indicator inside a .customer-lock, update it.
     try{
       const indicator = personWrapper ? personWrapper.querySelector('.lock-indicator') : null;
-      if(indicator){ indicator.innerHTML = `<span>🔒 مشتری قفل شد</span>`; }
+      if(indicator){ indicator.replaceChildren(); const span=document.createElement('span'); span.textContent='🔒 مشتری قفل شد'; indicator.appendChild(span); }
     }catch(e){/* ignore DOM quirks */}
   }
 
@@ -212,7 +236,7 @@
       clearTimeout(personTimer);
       if(!q){
         hide(personBox);
-        personBox.innerHTML='';
+        personBox.replaceChildren();
         return;
       }
       personTimer = setTimeout(()=>searchPerson(q), 160);
