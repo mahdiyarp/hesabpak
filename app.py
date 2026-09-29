@@ -34,6 +34,7 @@ from utils.date_utils import (
 )
 from utils import rates as rates_utils
 from utils import bank_utils
+from utils.secret_store import encrypt_secret, decrypt_secret, is_encrypted
 import hashlib
 
 # --- Simple append-only ledger for traceability (blockchain-like) ----------
@@ -95,6 +96,7 @@ SECRET_KEY = os.environ.get("SECRET_KEY", "change-me-please")
 URL_PREFIX = os.environ.get("URL_PREFIX", "") or ""   # مثلا: /hesabpak
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
+CREDENTIAL_ENCRYPTION_KEY = os.environ.get("CREDENTIAL_ENCRYPTION_KEY", "").strip()
 DATA_DIR = os.environ.get("DATA_DIR", "data")
 
 ALLOWED_CMDS = {"ADD_ITEM","ADD_PERSON","RENAME","DELETE","SEED_ITEMS","SEED_ACCOUNTS"}
@@ -739,11 +741,18 @@ def _assistant_model() -> str:
     return key
 
 def _openai_api_key() -> str:
-    key = (Setting.get("openai_api_key", "") or "").strip()
+    stored = (Setting.get("openai_api_key", "") or "").strip()
+    key = decrypt_secret(current_app, stored)
+    # Transparently migrate legacy plaintext global keys on first successful read.
+    if stored and key and not is_encrypted(stored):
+        Setting.set("openai_api_key", encrypt_secret(current_app, key))
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
     if not key:
         key = (os.environ.get("OPENAI_API_KEY") or "").strip()
     return key
-
 def _mask_secret(value: str) -> str:
     value = (value or "").strip()
     if not value:
@@ -1004,13 +1013,26 @@ def _apply_assistant_actions(actions: List[Dict[str, Any]]) -> Dict[str, Any]:
     return summary
 
 
+def _user_openai_api_key(user_settings: UserSettings) -> str:
+    stored = (user_settings.openai_api_key or "").strip()
+    key = decrypt_secret(current_app, stored)
+    if stored and key and not is_encrypted(stored):
+        user_settings.openai_api_key = encrypt_secret(current_app, key)
+        try:
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+    return key
+
+
 def _call_openai_assistant(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
     # دریافت تنظیمات شخصی کاربر
     username = getattr(current_user, "username", "admin")
     user_settings = UserSettings.get_for_user(username)
     
     # استفاده از کلید API شخصی یا سراسری
-    api_key = user_settings.openai_api_key if user_settings.openai_api_key else _openai_api_key()
+    user_key = _user_openai_api_key(user_settings)
+    api_key = user_key if user_key else _openai_api_key()
     if not api_key:
         raise RuntimeError("کلید API تنظیم نشده است.")
     if OpenAI is None:
@@ -3293,7 +3315,7 @@ def settings_stub():
             valid_models = {k for k, _ in ASSISTANT_MODEL_CHOICES}
             if model not in valid_models:
                 model = _assistant_model()
-            Setting.set("openai_api_key", api_key)
+            Setting.set("openai_api_key", encrypt_secret(current_app, api_key))
             Setting.set("openai_model", model)
             db.session.commit()
             if api_key:
@@ -3302,7 +3324,8 @@ def settings_stub():
                 flash("کلید دستیار پاک شد.", "info")
         elif form_id == "user_ai":
             # ذخیره تنظیمات شخصی هر کاربر
-            user_settings.openai_api_key = (request.form.get("user_openai_api_key") or "").strip() or None
+            raw_user_key = (request.form.get("user_openai_api_key") or "").strip()
+            user_settings.openai_api_key = encrypt_secret(current_app, raw_user_key) if raw_user_key else None
             user_settings.openai_model = (request.form.get("user_openai_model") or "").strip() or None
             user_settings.system_prompt = (request.form.get("user_system_prompt") or "").strip() or None
             
@@ -3342,8 +3365,8 @@ def settings_stub():
         assistant_model_choices=ASSISTANT_MODEL_CHOICES,
         assistant_api_mask=_mask_secret(_openai_api_key()),
         assistant_api_has=bool(_openai_api_key()),
-        user_api_mask=_mask_secret(user_settings.openai_api_key),
-        user_api_has=bool(user_settings.openai_api_key),
+        user_api_mask=_mask_secret(decrypt_secret(current_app, user_settings.openai_api_key or "")),
+        user_api_has=bool(decrypt_secret(current_app, user_settings.openai_api_key or "")),
         user_settings=user_settings,
     )
 
@@ -3817,7 +3840,7 @@ def admin_assistant_tokens():
         if action == "update_global":
             key = (request.form.get("global_api_key") or "").strip()
             if key:
-                Setting.set("openai_api_key", key)
+                Setting.set("openai_api_key", encrypt_secret(current_app, key))
                 db.session.commit()
                 flash("کلید سراسری API ذخیره شد.", "success")
             else:
@@ -3834,7 +3857,7 @@ def admin_assistant_tokens():
                 flash("کاربر نامعتبر است.", "danger")
                 return redirect(URL_PREFIX + "/admin/assistant-tokens")
             us = UserSettings.get_for_user(username)
-            us.openai_api_key = user_key or None
+            us.openai_api_key = encrypt_secret(current_app, user_key) if user_key else None
             db.session.commit()
             flash(f"کلید کاربر «{username}» به‌روزرسانی شد.", "success")
             return redirect(URL_PREFIX + "/admin/assistant-tokens")
@@ -3851,15 +3874,15 @@ def admin_assistant_tokens():
             return redirect(URL_PREFIX + "/admin/assistant-tokens")
 
     # GET: show current keys (masked)
-    global_key = Setting.get("openai_api_key", "") or ""
+    global_key = _openai_api_key()
     users = []
     for username, meta in sorted(catalog.items(), key=lambda kv: kv[0].lower()):
         us = UserSettings.get_for_user(username)
         users.append({
             "username": username,
             "role": meta.get("role"),
-            "api_key_masked": _mask_secret(us.openai_api_key or ""),
-            "has_key": bool(us.openai_api_key),
+            "api_key_masked": _mask_secret(decrypt_secret(current_app, us.openai_api_key or "")),
+            "has_key": bool(decrypt_secret(current_app, us.openai_api_key or "")),
         })
 
     return render_template("admin/assistant_tokens.html", prefix=URL_PREFIX, global_key_masked=_mask_secret(global_key), users=users)
