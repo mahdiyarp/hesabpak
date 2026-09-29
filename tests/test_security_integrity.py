@@ -369,3 +369,12 @@ def test_rate_snapshot_normalizes_currency_codes_and_units(monkeypatch, tmp_path
     rates.save_rates({"updated_at": "x", "currencies": {"usd": {"rate": "123", "unit": "تومان"}}})
     snapshot = rates.load_rates()
     assert snapshot["currencies"]["USD"]["rate"] == 123.0
+def test_sensitive_query_values_are_redacted_from_request_logs():
+    with app_module.app.test_request_context(
+        "/test?token=secret-token&api_key=secret-key&name=Mahdi&authorization=bearer-secret"
+    ):
+        safe = app_module._safe_request_args_for_log()
+    assert safe["token"] == "***"
+    assert safe["api_key"] == "***"
+    assert safe["authorization"] == "***"
+    assert safe["name"] == "Mahdi"
