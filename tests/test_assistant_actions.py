@@ -165,3 +165,24 @@ def test_current_assistant_default_is_gpt56_luna():
 
 def test_all_current_gpt56_models_are_reasoning_models():
     assert {"gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"} <= app_module.ASSISTANT_REASONING_MODELS
+
+
+def test_assistant_api_ready_uses_personal_key(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(app_module, "OpenAI", object())
+    monkeypatch.setattr(app_module, "_openai_api_key", lambda: "")
+    monkeypatch.setattr(
+        app_module,
+        "current_user",
+        SimpleNamespace(is_authenticated=True, username="personal-user"),
+    )
+
+    with app_module.app.app_context():
+        app_module.db.drop_all()
+        app_module.db.create_all()
+        settings = app_module.UserSettings.get_for_user("personal-user")
+        settings.openai_api_key = "personal-test-key"
+        app_module.db.session.commit()
+
+        assert app_module._assistant_api_ready() is True
