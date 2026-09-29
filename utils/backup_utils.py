@@ -322,6 +322,8 @@ def restore_backup(app, zip_filename):
                 staged_uploads.mkdir(parents=True, exist_ok=True)
                 _extract_backup_uploads(z, staged_uploads)
 
+            format_version = int(metadata.get("format_version", 0) or 0)
+            include_users_marker = "include_users_file" in metadata
             include_users = str(metadata.get("include_users_file", "")).strip().lower() == "true"
             include_fiscal_cases = str(metadata.get("include_fiscal_cases", "")).strip().lower() == "true"
             runtime_members_present = any(
@@ -332,7 +334,13 @@ def restore_backup(app, zip_filename):
                 _extract_archive_tree(z, "runtime", runtime_stage)
 
             staged_users = runtime_stage / "users.json"
-            if include_users:
+            # Format 3 records whether the users catalog existed at backup time.
+            # That marker is authoritative even when the file was absent.
+            if format_version >= 3 and include_users_marker:
+                if include_users and not staged_users.is_file():
+                    raise RuntimeError("فایل users.json داخل بکاپ وجود ندارد.")
+                restore_users = True
+            elif include_users:
                 if not staged_users.is_file():
                     raise RuntimeError("فایل users.json داخل بکاپ وجود ندارد.")
                 restore_users = True
@@ -396,7 +404,10 @@ def restore_backup(app, zip_filename):
                 old_users.unlink()
             if users_had_previous:
                 shutil.copy2(users_path, old_users)
-            os.replace(staged_users, users_path)
+            if staged_users.is_file():
+                os.replace(staged_users, users_path)
+            elif users_path.exists():
+                users_path.unlink()
             users_replaced = True
 
         if restore_fiscal_cases:

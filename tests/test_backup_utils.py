@@ -416,3 +416,25 @@ def test_restore_authoritative_empty_runtime_state_removes_stale_files(tmp_path)
     restore_backup(app, "1405/" + archive.name)
     assert not (data / "rates.json").exists()
     assert not stale_case.exists()
+def test_format3_backup_without_users_file_removes_stale_users(tmp_path):
+    app = make_app(tmp_path)
+    data = Path(app.config["DATA_DIR"])
+    data.mkdir(parents=True, exist_ok=True)
+    (data / "users.json").write_text('{"users":[{"username":"stale"}]}', encoding="utf-8")
+
+    db = data / app.config["DB_FILE"]
+    con = sqlite3.connect(db)
+    con.execute("create table t (value text)")
+    con.execute("insert into t(value) values ('restored')")
+    con.commit()
+    con.close()
+
+    backup_dir = data / "backups" / "1405"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    archive = backup_dir / "backup_2026-09-29_12-00-08_deadbeef.zip"
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.write(db, f"db/{db.name}")
+        zf.writestr("metadata.json", '{"format_version":3,"include_uploads":false,"include_users_file":false,"include_runtime_json":true,"include_fiscal_cases":true,"runtime_json_files":0,"fiscal_case_files":0}')
+
+    restore_backup(app, "1405/" + archive.name)
+    assert not (data / "users.json").exists()
