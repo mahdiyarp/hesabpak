@@ -2313,30 +2313,30 @@ def _reset_demo_workspace():
         return
     with DEMO_RESET_LOCK:
         try:
-        db.session.remove()
-        db.drop_all()
-        db.create_all()
-        for path in (DB_DIR / "backups", DB_DIR / "fiscal_cases", DB_DIR / "uploads"):
-            shutil.rmtree(path, ignore_errors=True)
-        (DB_DIR / "backups").mkdir(parents=True, exist_ok=True)
-        (DB_DIR / "fiscal_cases").mkdir(parents=True, exist_ok=True)
-        ASSISTANT_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-        _reset_activity_log_file()
-        save_users_catalog({
-            DEMO_USERNAME: {
-                "password": DEMO_PASSWORD,
-                "role": "staff",
-                "permissions": DEFAULT_PERMISSIONS,
-                "is_active": True,
-                "email": "",
-            }
-        })
-        _seed_demo_data()
-        db.session.commit()
-    except Exception:
-        db.session.rollback()
-        app.logger.exception("demo workspace reset failed")
-        raise
+            db.session.remove()
+            db.drop_all()
+            db.create_all()
+            for path in (DB_DIR / "backups", DB_DIR / "fiscal_cases", DB_DIR / "uploads"):
+                shutil.rmtree(path, ignore_errors=True)
+            (DB_DIR / "backups").mkdir(parents=True, exist_ok=True)
+            (DB_DIR / "fiscal_cases").mkdir(parents=True, exist_ok=True)
+            ASSISTANT_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+            _reset_activity_log_file()
+            save_users_catalog({
+                DEMO_USERNAME: {
+                    "password": DEMO_PASSWORD,
+                    "role": "staff",
+                    "permissions": DEFAULT_PERMISSIONS,
+                    "is_active": True,
+                    "email": "",
+                }
+            })
+            _seed_demo_data()
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            app.logger.exception("demo workspace reset failed")
+            raise
 
 
 @app.route(URL_PREFIX + "/demo/start", methods=["GET"])
