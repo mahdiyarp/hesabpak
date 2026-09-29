@@ -39,3 +39,12 @@ def test_deploy_site_does_not_swallow_git_update_failures():
     assert 'git fetch origin main --prune' in deploy
     assert 'git merge --ff-only origin/main' in deploy
     assert 'git status --porcelain' in deploy
+def test_legacy_auto_deploy_is_only_a_compatibility_wrapper():
+    auto = (ROOT / "deploy_auto.sh").read_text(encoding="utf-8")
+    quick = (ROOT / "DEPLOY_QUICK.md").read_text(encoding="utf-8")
+
+    assert "git pull origin main" not in auto
+    assert "deploy_site.sh" in auto
+    assert "gunicorn" in quick
+    assert "git pull origin main" not in quick
+    assert "HTTPS" in quick
