@@ -3,6 +3,7 @@ import os
 import json
 import shutil
 import sqlite3
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
@@ -264,7 +265,25 @@ def _snapshot_current_year(years):
 
     db_path = Path(current_app.config.get("DATA_DIR", "data")) / current_app.config.get("DB_FILE", "app.db")
     if db_path.exists():
-        shutil.copy2(db_path, folder / "data.sqlite3")
+        snapshot_db = folder / "data.sqlite3"
+        fd, tmp_name = tempfile.mkstemp(prefix="hesabpak_fiscal_snapshot_", suffix=".sqlite3")
+        os.close(fd)
+        temp_db = Path(tmp_name)
+        try:
+            src = sqlite3.connect(str(db_path))
+            dst = sqlite3.connect(str(temp_db))
+            try:
+                src.backup(dst)
+            finally:
+                dst.close()
+                src.close()
+            os.replace(temp_db, snapshot_db)
+        finally:
+            try:
+                temp_db.unlink(missing_ok=True)
+            except TypeError:
+                if temp_db.exists():
+                    temp_db.unlink()
 
     meta = {
         "saved_at": datetime.utcnow().isoformat(timespec="seconds"),
