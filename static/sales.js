@@ -367,7 +367,7 @@
         clearTimeout(timer);
         if(!q){
           hide(resultsBox);
-          resultsBox.innerHTML='';
+          resultsBox.replaceChildren();
           return;
         }
         timer = setTimeout(()=>searchItem(q), 160);
