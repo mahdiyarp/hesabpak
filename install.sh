@@ -7,7 +7,7 @@ echo "🚀 نصب حساب‌پاک..."
 
 # نصب وابستگی‌ها
 sudo apt-get update -qq
-sudo apt-get install -y python3 python3-pip python3-venv git nginx supervisor sqlite3 -qq
+sudo apt-get install -y python3 python3-pip python3-venv git nginx supervisor sqlite3 openssl -qq
 
 # ایجاد دایرکتوری و انتخاب کاربر غیر root برای سرویس
 APP_DIR="/var/www/hesabpak"
