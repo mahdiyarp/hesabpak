@@ -186,3 +186,37 @@ def test_assistant_api_ready_uses_personal_key(monkeypatch):
         app_module.db.session.commit()
 
         assert app_module._assistant_api_ready() is True
+
+
+def test_assistant_chat_uses_personal_key_gate(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(app_module, "OpenAI", object())
+    monkeypatch.setattr(app_module, "_assistant_api_ready", lambda: True)
+    monkeypatch.setattr(app_module, "ensure_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        app_module,
+        "current_user",
+        SimpleNamespace(is_authenticated=True, username="personal-user"),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "_call_openai_assistant",
+        lambda messages: {
+            "reply": "ok",
+            "needs_confirmation": False,
+            "invoice": None,
+            "cash": None,
+            "actions": [],
+        },
+    )
+
+    with app_module.app.test_request_context(
+        "/assistant/api/chat",
+        method="POST",
+        json={"messages": [{"role": "user", "text": "سلام"}]},
+    ):
+        response = app_module.assistant_chat.__wrapped__()
+
+    assert response.status_code == 200
+    assert response.get_json()["reply"] == "ok"
