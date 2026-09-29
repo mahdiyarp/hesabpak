@@ -73,3 +73,64 @@ def test_assistant_schema_is_strict_compatible():
 
         check(node.get("items"))
     check(schema)
+
+
+def test_prepare_invoice_plan_rejects_unknown_kind():
+    import pytest
+    with pytest.raises(ValueError):
+        app_module._prepare_invoice_plan({
+            "kind": "unknown",
+            "partner": {"name": "مشتری"},
+            "items": [{"name": "کالا", "qty": 1, "unit_price": 100}],
+        })
+
+
+def test_prepare_invoice_plan_rejects_invalid_date():
+    import pytest
+    with pytest.raises(ValueError):
+        app_module._prepare_invoice_plan({
+            "kind": "sales",
+            "partner": {"name": "مشتری"},
+            "date": "not-a-date",
+            "items": [{"name": "کالا", "qty": 1, "unit_price": 100}],
+        })
+
+
+def test_prepare_invoice_plan_rejects_negative_price_and_nonpositive_qty():
+    import pytest
+    with pytest.raises(ValueError):
+        app_module._prepare_invoice_plan({
+            "kind": "sales",
+            "partner": {"name": "مشتری"},
+            "items": [{"name": "کالا", "qty": 1, "unit_price": -100}],
+        })
+    with pytest.raises(ValueError):
+        app_module._prepare_invoice_plan({
+            "kind": "sales",
+            "partner": {"name": "مشتری"},
+            "items": [{"name": "کالا", "qty": 0, "unit_price": 100}],
+        })
+
+
+def test_prepare_cash_plan_rejects_unknown_type_and_invalid_dates():
+    import pytest
+    with pytest.raises(ValueError):
+        app_module._prepare_cash_plan({
+            "doc_type": "unknown",
+            "person": {"name": "مشتری"},
+            "amount": 100,
+        })
+    with pytest.raises(ValueError):
+        app_module._prepare_cash_plan({
+            "doc_type": "receive",
+            "person": {"name": "مشتری"},
+            "amount": 100,
+            "date": "not-a-date",
+        })
+    with pytest.raises(ValueError):
+        app_module._prepare_cash_plan({
+            "doc_type": "receive",
+            "person": {"name": "مشتری"},
+            "amount": 100,
+            "cheque_due": "not-a-date",
+        })
