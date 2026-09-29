@@ -328,7 +328,7 @@ const SEARCH_DELAY = 150;
       fetch(`${window.prefix}/api/search?q=${encodeURIComponent(v)}&kind=item&limit=15`, {credentials:'same-origin'})
         .then(r => r.ok ? r.json() : [])
         .then(renderItems)
-        .catch(()=>{ hide(results); results.innerHTML=''; });
+        .catch(()=>{ hide(results); results.replaceChildren(); });
     }
 
     if(searchBox){
