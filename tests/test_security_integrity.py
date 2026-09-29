@@ -349,3 +349,23 @@ def test_cash_edit_method_options_are_not_mutable():
     source = Path(app_module.__file__).read_text(encoding="utf-8")
     assert "روش سند هنگام ویرایش قابل تغییر نیست" in source
     assert 'value="{escape(CASH_METHOD_LABELS.get(current_method, \'نامشخص\'))}" disabled' in source
+
+def test_rate_snapshot_rejects_negative_and_non_numeric_values(monkeypatch, tmp_path):
+    import pytest
+    import utils.rates as rates
+    monkeypatch.setattr(rates, "DATA_FILE", tmp_path / "rates.json")
+
+    with pytest.raises(ValueError):
+        rates.save_rates({"currencies": {"USD": {"rate": -1, "unit": "تومان"}}})
+    with pytest.raises(ValueError):
+        rates.save_rates({"currencies": {"USD": {"rate": "bad", "unit": "تومان"}}})
+    with pytest.raises(ValueError):
+        rates.save_rates({"gold": []})
+
+def test_rate_snapshot_normalizes_currency_codes_and_units(monkeypatch, tmp_path):
+    import utils.rates as rates
+    target = tmp_path / "rates.json"
+    monkeypatch.setattr(rates, "DATA_FILE", target)
+    rates.save_rates({"updated_at": "x", "currencies": {"usd": {"rate": "123", "unit": "تومان"}}})
+    snapshot = rates.load_rates()
+    assert snapshot["currencies"]["USD"]["rate"] == 123.0
