@@ -443,3 +443,7 @@ def test_development_config_has_nonempty_secret_without_environment_secret():
     import secrets as secrets_module
     assert app_module.SECRET_KEY
     assert app_module.ADMIN_PASSWORD
+def test_production_admin_password_fallback_is_disabled():
+    source = Path(app_module.__file__).resolve().read_text(encoding="utf-8")
+    assert 'if not ADMIN_PASSWORD and FLASK_ENV != "production":' in source
+    assert 'ADMIN_PASSWORD = "admin123"' in source
