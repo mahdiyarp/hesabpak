@@ -1,3 +1,4 @@
+import sqlite3
 import os
 import tempfile
 
@@ -40,3 +41,32 @@ def test_global_state_preserves_runtime_settings_when_switching():
         assert "theme" not in FISCAL_ONLY_SETTING_KEYS
         assert "fiscal_year_current" in FISCAL_ONLY_SETTING_KEYS
         assert "fiscal_year_start" in FISCAL_ONLY_SETTING_KEYS
+
+
+def test_snapshot_current_year_uses_valid_sqlite_backup(tmp_path):
+    with app_module.app.app_context():
+        app_module.db.drop_all()
+        app_module.db.create_all()
+        Setting.set("fiscal_year_current", "2026-03-21")
+        Setting.set("fiscal_year_start", "2026-03-21")
+        Setting.set(
+            "fiscal_years",
+            '[{"start":"2026-03-21","label":"۱۴۰۵-۰۱-۰۱","key":"۱۴۰۵-۰۱-۰۱"}]',
+        )
+        app_module.db.session.commit()
+
+        account = app_module.Account(code="101", name="صندوق", level=1)
+        app_module.db.session.add(account)
+        app_module.db.session.commit()
+
+        from blueprints.backup import _snapshot_current_year, _load_fiscal_years
+        folder = _snapshot_current_year(_load_fiscal_years())
+
+        snapshot_db = folder / "data.sqlite3"
+        assert snapshot_db.is_file()
+        con = sqlite3.connect(f"file:{snapshot_db}?mode=ro", uri=True)
+        try:
+            assert con.execute("PRAGMA integrity_check").fetchone()[0] == "ok"
+            assert con.execute("select code from accounts where code='101'").fetchone()[0] == "101"
+        finally:
+            con.close()
