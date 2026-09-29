@@ -144,7 +144,7 @@ if FLASK_ENV == "production":
 elif not SECRET_KEY:
     SECRET_KEY = secrets.token_hex(32)
 
-if not ADMIN_PASSWORD:
+if not ADMIN_PASSWORD and FLASK_ENV != "production":
     ADMIN_PASSWORD = "admin123"
 
 ALLOWED_CMDS = {"ADD_ITEM","ADD_PERSON","RENAME","DELETE","SEED_ITEMS","SEED_ACCOUNTS"}
