@@ -70,3 +70,13 @@ def test_snapshot_current_year_uses_valid_sqlite_backup(tmp_path):
             assert con.execute("select code from accounts where code='101'").fetchone()[0] == "101"
         finally:
             con.close()
+
+
+def test_fiscal_year_key_is_filesystem_safe():
+    from blueprints.backup import _year_key
+
+    key = _year_key(r"../../..\\outside")
+    assert ".." not in key
+    assert "/" not in key
+    assert "\\" not in key
+    assert key != "outside"
