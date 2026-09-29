@@ -123,6 +123,8 @@ def record_ledger(
 # ----------------- Config -----------------
 load_dotenv()
 PROJECT_ROOT = Path(__file__).resolve().parent
+VERSION_FILE = PROJECT_ROOT / "VERSION"
+APP_VERSION = VERSION_FILE.read_text(encoding="utf-8").strip() if VERSION_FILE.exists() else "0.9.0"
 PORT = int(os.environ.get("PORT", "8000"))
 FLASK_ENV = os.environ.get("FLASK_ENV", "development").strip().lower()
 SECRET_KEY = os.environ.get("SECRET_KEY", "").strip()
@@ -2201,6 +2203,17 @@ def index():
         assistant_model_label=dict(ASSISTANT_MODEL_CHOICES).get(_assistant_model(), _assistant_model()),
         api_ready=_assistant_api_ready(),
     )
+
+@app.route(URL_PREFIX + "/healthz", methods=["GET"])
+def healthz():
+    """Lightweight deployment health probe; never exposes application data."""
+    try:
+        db.session.execute(text("SELECT 1"))
+        return jsonify({"status": "ok", "version": APP_VERSION}), 200
+    except Exception:
+        db.session.rollback()
+        return jsonify({"status": "error", "version": APP_VERSION}), 503
+
 
 @app.route(URL_PREFIX + "/login", methods=["GET", "POST"])
 def login():
