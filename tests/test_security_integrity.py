@@ -108,3 +108,23 @@ from utils.rates import _parse_number
 def test_rate_parser_accepts_persian_and_arabic_digits():
     assert _parse_number("۱٬۲۳۴٬۵۶۷") == 1234567
     assert _parse_number("١،٢٣٤٫٥") == 1234.5
+from flask import Flask
+
+from utils.secret_store import decrypt_secret, encrypt_secret, is_encrypted
+
+
+def test_secret_store_roundtrip():
+    app = Flask(__name__)
+    app.config["SECRET_KEY"] = "session-secret"
+    app.config["CREDENTIAL_ENCRYPTION_KEY"] = "stable-credential-secret"
+    token = encrypt_secret(app, "sk-sensitive-value")
+    assert is_encrypted(token)
+    assert token != "sk-sensitive-value"
+    assert decrypt_secret(app, token) == "sk-sensitive-value"
+
+
+def test_secret_store_keeps_legacy_plaintext_readable_for_migration():
+    app = Flask(__name__)
+    app.config["SECRET_KEY"] = "session-secret"
+    app.config["CREDENTIAL_ENCRYPTION_KEY"] = "stable-credential-secret"
+    assert decrypt_secret(app, "legacy-value") == "legacy-value"
