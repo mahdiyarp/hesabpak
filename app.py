@@ -407,6 +407,7 @@ if not os.path.exists(USERS_FILE):
 
 def _normalize_user_entry(username: str, data: dict) -> dict:
     password = (data.get("password") or "").strip()
+    email = (data.get("email") or "").strip()
     role = (data.get("role") or ("admin" if username == ADMIN_USERNAME else "staff")).strip()
     perms_raw = data.get("permissions")
     if not isinstance(perms_raw, (list, tuple, set)):
@@ -419,6 +420,7 @@ def _normalize_user_entry(username: str, data: dict) -> dict:
         "role": role or "staff",
         "permissions": perms,
         "is_active": is_active,
+        "email": email,
     }
 
 
@@ -458,6 +460,7 @@ def save_users_catalog(catalog: dict) -> None:
                 "role": data.get("role", "staff"),
                 "permissions": _permissions_for_role(data.get("role", "staff"), data.get("permissions", [])),
                 "is_active": bool(data.get("is_active", True)),
+                "email": (data.get("email") or "").strip(),
             }
             for username, data in sorted(catalog.items(), key=lambda kv: kv[0].lower())
         ]
@@ -478,12 +481,14 @@ class User(UserMixin):
         role: str = "staff",
         permissions=None,
         is_active: bool = True,
+        email: str = "",
     ):
         self.id = username
         self.username = username
         self.role = role or "staff"
         self.permissions = set(permissions or [])
         self._active = bool(is_active)
+        self.email = (email or "").strip()
 
     def has_permission(self, perm: str) -> bool:
         if self.role == "admin":
@@ -506,6 +511,7 @@ def load_user(user_id):
         role=entry.get("role", "staff"),
         permissions=entry.get("permissions", []),
         is_active=entry.get("is_active", True),
+        email=entry.get("email", ""),
     )
 
 
@@ -3525,6 +3531,7 @@ def admin_users():
             role = "staff"
         requested_perms = request.form.getlist("permissions")
         is_active = request.form.get("is_active") == "on"
+        email = (request.form.get("email") or "").strip()
 
         if action == "update":
             if not username or username not in catalog:
@@ -3538,6 +3545,7 @@ def admin_users():
             entry["role"] = role
             entry["permissions"] = _permissions_for_role(role, requested_perms)
             entry["is_active"] = is_active
+            entry["email"] = email
 
             new_password = (request.form.get("password") or "").strip()
             if new_password:
@@ -3571,6 +3579,7 @@ def admin_users():
                 "role": role,
                 "permissions": requested_perms,
                 "is_active": is_active,
+                "email": email,
             },
         )
         catalog[username] = entry
