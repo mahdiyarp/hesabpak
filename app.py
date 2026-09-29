@@ -2091,7 +2091,7 @@ def login():
         app.logger.warning(f"LOGIN_FAIL  USER={username}  IP={request.remote_addr}")
     return render_template("login.html", prefix=URL_PREFIX)
 
-@app.route(URL_PREFIX + "/logout")
+@app.route(URL_PREFIX + "/logout", methods=["POST"])
 def logout():
     if current_user.is_authenticated:
         app.logger.info(f"LOGOUT USER={current_user.username} IP={request.remote_addr}")
