@@ -135,11 +135,32 @@
     fetch(window.prefix+'/api/search?q='+encodeURIComponent(q)+'&kind=person&limit=10',{credentials:'same-origin'})
       .then(r=>r.ok?r.json():[])
       .then(list=>{
-        if(!Array.isArray(list) || list.length===0){ personBox.innerHTML='<div class="empty">یافت نشد</div>'; show(personBox); return; }
-        personBox.innerHTML=list.map(m=>`<a href="#" data-id="${m.id}" data-code="${m.code}">${m.name} — <code>${m.code}</code></a>`).join('');
+        if(!Array.isArray(list) || list.length===0){
+          personBox.replaceChildren();
+          const empty=document.createElement('div');
+          empty.className='empty';
+          empty.textContent='یافت نشد';
+          personBox.appendChild(empty);
+          show(personBox);
+          return;
+        }
+        personBox.replaceChildren();
+        list.forEach(m=>{
+          const a=document.createElement('a');
+          a.href='#';
+          a.dataset.id=m.id == null ? '' : String(m.id);
+          a.dataset.code=m.code == null ? '' : String(m.code);
+          a.textContent=(m.name || '') + ' — ' + (m.code || '');
+          personBox.appendChild(a);
+        });
         show(personBox);
       })
-      .catch(()=>{ personBox.innerHTML='<div class="empty">خطا در جستجو</div>'; show(personBox); });
+      .catch(()=>{ personBox.replaceChildren();
+        const empty=document.createElement('div');
+        empty.className='empty';
+        empty.textContent='خطا در جستجو';
+        personBox.appendChild(empty);
+        show(personBox); });
   }
 
   personSearch.addEventListener('input', function(){
