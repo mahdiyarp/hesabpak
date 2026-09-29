@@ -454,3 +454,12 @@ def test_legacy_purchase_and_sales_routes_infer_document_kind():
         assert app_module._invoice_kind_from_request() == "sales"
     with app_module.app.test_request_context("/invoice", method="GET", query_string={"kind": "purchase"}):
         assert app_module._invoice_kind_from_request() == "purchase"
+def test_admin_git_update_requires_exact_official_remote():
+    source = Path(app_module.__file__).resolve().read_text(encoding="utf-8")
+    assert "normalized_remote = out.strip().rstrip(\"/\")" in source
+    assert "if normalized_remote != expected_remote:" in source
+
+def test_admin_git_update_does_not_report_ok_after_dependency_or_restart_failure():
+    source = Path(app_module.__file__).resolve().read_text(encoding="utf-8")
+    assert 'return jsonify(result), 500' in source
+    assert 'result["ok"] = all(bool(s.get("ok")) for s in result["steps"])' in source

@@ -3758,7 +3758,9 @@ def admin_update_from_git():
             step(f"failed to read git remote: {e.output}", ok=False)
             return jsonify(result), 500
 
-        if EXPECTED_REMOTE not in out and out.strip() != EXPECTED_REMOTE:
+        normalized_remote = out.strip().rstrip("/")
+        expected_remote = EXPECTED_REMOTE.rstrip("/")
+        if normalized_remote != expected_remote:
             step(f"remote origin URL mismatch: {out}", ok=False)
             return jsonify(result), 403
         step(f"remote origin OK: {out}")
@@ -3801,6 +3803,7 @@ def admin_update_from_git():
                 step("requirements installed inside venv")
             except subprocess.CalledProcessError as e:
                 step(f"pip install in venv failed: {e}", ok=False)
+                return jsonify(result), 500
         else:
             step("No venv found; skipping pip install")
 
@@ -3812,8 +3815,9 @@ def admin_update_from_git():
             step("Passenger restart triggered (tmp/restart.txt)")
         except Exception as e:
             step(f"failed to trigger restart: {e}", ok=False)
+            return jsonify(result), 500
 
-        result["ok"] = True
+        result["ok"] = all(bool(s.get("ok")) for s in result["steps"])
         return jsonify(result)
 
     except Exception:
