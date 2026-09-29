@@ -1,10 +1,13 @@
 __pycache__/
 *.pyc
 
-# Runtime secrets and user data
-data/users.json
-data/activity.log
+# Runtime secrets and generated user data
+.env
 data/*.sqlite3
+data/*.json
+!data/users.json.example
+data/activity.log
 data/backups/
 data/autosave/
-.env
+data/uploads/
+data/fiscal_cases/
