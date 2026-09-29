@@ -42,7 +42,7 @@
       <span class="sep">|</span>
       <span>مدت فعالیت: {{ login_duration }}</span>
       <span class="sep">|</span>
-      <a class="logout" href="{{ prefix }}/logout">خروج</a>
+      <form method="post" action="{{ prefix }}/logout" class="logout-form" onsubmit="return confirm('از حساب خارج شوید؟');"><button type="submit" class="logout">خروج</button></form>
     {% endif %}
   </div>
 </header>
