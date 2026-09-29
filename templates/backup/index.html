@@ -16,9 +16,20 @@
   <div class="card">
     <h3>بکاپ کامل</h3>
     <p class="muted">فایل‌ها در پوشهٔ {% if current_year_key %}<code>{{ current_year_key }}</code>{% else %}<code>backups</code>{% endif %} ذخیره می‌شوند.</p>
-    <form method="post" action="{{ url_for('backup.create') }}">
+    <form method="post" action="{{ url_for('backup.create') }}" class="backup-create-form">
       <input type="text" name="reason" placeholder="توضیح (اختیاری)" class="input">
-      <button class="btn btn-primary">ساخت بکاپ</button>
+      <div class="backup-delivery-grid">
+        <label class="backup-email-toggle">
+          <input type="checkbox" name="send_email" value="1" id="send-backup-email">
+          ارسال همین نسخه به ایمیل
+        </label>
+        <input type="email" name="email" class="input" value="{{ backup_email_default }}" placeholder="email@example.com" autocomplete="email">
+      </div>
+      <div class="backup-actions">
+        <button class="btn btn-primary" type="submit" name="action" value="store">ساخت بکاپ</button>
+        <button class="btn" type="submit" name="action" value="download">ساخت و دانلود روی دستگاه</button>
+      </div>
+      <p class="muted backup-mail-hint">برای ارسال ایمیل باید SMTP روی سرور تنظیم شده باشد.</p>
     </form>
   </div>
 
@@ -148,6 +159,12 @@
   .carry-config { border: 1px dashed var(--c-border); padding: 12px; border-radius: 8px; background: var(--c-surface-soft); }
   .carry-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 8px; margin-top: 8px; }
   .stack-form { display: flex; flex-direction: column; gap: 8px; }
+  .backup-create-form { display: grid; gap: 10px; }
+  .backup-delivery-grid { display: grid; grid-template-columns: minmax(220px,auto) minmax(260px,1fr); gap: 10px; align-items: center; }
+  .backup-email-toggle { display:flex; align-items:center; gap:8px; }
+  .backup-actions { display:flex; gap:8px; flex-wrap:wrap; }
+  .backup-mail-hint { margin:0; font-size:12px; }
+  @media (max-width: 680px) { .backup-delivery-grid { grid-template-columns:1fr; } }
 </style>
 <script>
 (function(){

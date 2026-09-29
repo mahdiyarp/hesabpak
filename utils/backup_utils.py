@@ -1,5 +1,5 @@
 # utils/backup_utils.py
-import os, io, json, gzip, shutil, datetime, zipfile, tempfile, decimal, uuid
+import os, io, json, gzip, shutil, datetime, zipfile, tempfile, decimal, uuid, re, sqlite3
 from pathlib import Path
 from typing import Optional
 
@@ -45,6 +45,24 @@ def db_path(app):
     data_dir = Path(app.config.get("DATA_DIR", "data"))
     return data_dir / app.config.get("DB_FILE", "app.db")
 
+def resolve_backup_path(app, zip_filename):
+    """Resolve a backup path without allowing traversal outside the backup root."""
+    _, backup_dir, _, _ = ensure_dirs(app)
+    raw = str(zip_filename or "").strip().replace("\\", "/")
+    rel = Path(raw)
+    if not raw or rel.is_absolute() or ".." in rel.parts or rel.name != raw.split("/")[-1]:
+        raise ValueError("مسیر فایل بکاپ نامعتبر است.")
+    if rel.suffix.lower() != ".zip" or not rel.name.startswith("backup_") or len(rel.name) > 180:
+        raise ValueError("نام فایل بکاپ نامعتبر است.")
+    target = (backup_dir / rel).resolve()
+    root = backup_dir.resolve()
+    try:
+        target.relative_to(root)
+    except ValueError as exc:
+        raise ValueError("مسیر فایل بکاپ خارج از پوشه مجاز است.") from exc
+    return target
+
+
 def create_full_backup(app, user="system", reason="manual"):
     """
     می‌سازد: ZIP شامل DB + uploads/ (اختیاری) + metadata.json
@@ -52,7 +70,7 @@ def create_full_backup(app, user="system", reason="manual"):
     """
     data_dir, backup_dir, autosave_dir, uploads_dir = ensure_dirs(app)
     stamp = now_stamp()
-    fn = f"backup_{stamp}.zip"
+    fn = f"backup_{stamp}_{uuid.uuid4().hex[:8]}.zip"
     out = backup_dir / fn
 
     meta = {
@@ -65,10 +83,30 @@ def create_full_backup(app, user="system", reason="manual"):
     }
 
     with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as z:
-        # DB
+        # DB: use SQLite's online backup API so active databases are copied consistently.
         dbfile = db_path(app)
         if dbfile.exists():
-            z.write(dbfile, arcname=f"db/{dbfile.name}")
+            fd, tmp_name = tempfile.mkstemp(prefix="hesabpak_backup_", suffix=".sqlite3")
+            os.close(fd)
+            temp_db = Path(tmp_name)
+            try:
+                if dbfile.suffix.lower() in {".db", ".sqlite", ".sqlite3"}:
+                    src = sqlite3.connect(str(dbfile))
+                    dst = sqlite3.connect(str(temp_db))
+                    try:
+                        src.backup(dst)
+                    finally:
+                        dst.close()
+                        src.close()
+                else:
+                    shutil.copy2(dbfile, temp_db)
+                z.write(temp_db, arcname=f"db/{dbfile.name}")
+            finally:
+                try:
+                    temp_db.unlink(missing_ok=True)
+                except TypeError:
+                    if temp_db.exists():
+                        temp_db.unlink()
         # uploads (اختیاری)
         if str(app.config.get("INCLUDE_UPLOADS_IN_BACKUP", "true")).lower() == "true":
             if uploads_dir.exists():
@@ -131,7 +169,7 @@ def restore_backup(app, zip_filename):
     - نیاز به ری‌استارت سرویس دارد
     """
     data_dir, backup_dir, _, _ = ensure_dirs(app)
-    zpath = backup_dir / zip_filename
+    zpath = resolve_backup_path(app, zip_filename)
     if not zpath.exists():
         raise FileNotFoundError("بکاپ پیدا نشد")
 
@@ -153,16 +191,19 @@ def restore_backup(app, zip_filename):
         if not db_inside:
             raise RuntimeError("DB داخل بکاپ پیدا نشد")
 
-        # استخراج به temp
-        tmpdir = Path(tempfile.mkdtemp())
-        z.extract(db_inside, tmpdir)
-        extracted = tmpdir / db_inside
+        # Extract only the selected DB member; never extract the full archive.
+        tmpdir = Path(tempfile.mkdtemp(prefix="hesabpak_restore_"))
+        extracted = tmpdir / dbfile.name
+        try:
+            with z.open(db_inside, "r") as src, extracted.open("wb") as dst:
+                shutil.copyfileobj(src, dst)
 
-        # جایگزینی امن
-        if dbfile.exists():
-            backup_old = dbfile.with_suffix(".before-restore")
-            shutil.copy2(dbfile, backup_old)
-        shutil.copy2(extracted, dbfile)
+            if dbfile.exists():
+                backup_old = Path(str(dbfile) + ".before-restore")
+                shutil.copy2(dbfile, backup_old)
+            shutil.copy2(extracted, dbfile)
+        finally:
+            shutil.rmtree(tmpdir, ignore_errors=True)
     # یادداشت: برای اعمال کامل، بهتر است سرویس را ری‌استارت کنی.
     return str(dbfile)
 

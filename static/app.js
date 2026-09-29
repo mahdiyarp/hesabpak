@@ -12,7 +12,66 @@ function $(s, r){ return (r||document).querySelector(s); }
 function $all(s, r){ return Array.from((r||document).querySelectorAll(s)); }
 function show(el){ if(!el) return; el.hidden=false; el.style.display='block'; }
 function hide(el){ if(!el) return; el.hidden=true; el.style.display='none'; }
-function toNum(x){ if(x==null) return 0; x=(""+x).replace(/,/g,'').trim(); var f=parseFloat(x); return isNaN(f)?0:f; }
+function normalizeNumberString(value){
+  return String(value == null ? '' : value).trim()
+    .replace(/[۰-۹]/g, d => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+    .replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+    .replace(/[٬،]/g, '')
+    .replace(/[٫]/g, '.')
+    .replace(/,/g, '')
+    .replace(/\s+/g, '');
+}
+function toNum(x){
+  const normalized = normalizeNumberString(x);
+  const f = parseFloat(normalized);
+  return isNaN(f) ? 0 : f;
+}
+function formatGroupedNumber(value){
+  const normalized = normalizeNumberString(value);
+  if(!normalized) return '';
+  const match = normalized.match(/^(-?)(\d+)(?:\.(\d+))?$/);
+  if(!match) return normalized;
+  const sign = match[1] || '';
+  const integer = match[2].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  return sign + integer + (match[3] ? '.' + match[3] : '');
+}
+function isAmountField(input){
+  if(!input || input.tagName !== 'INPUT') return false;
+  return input.matches('input[name="amount"], input[name="unit_price[]"], input[name="qty[]"], input[name="discount"], input[name="tax"], input[data-format-number]');
+}
+function setupAmountFormatting(root){
+  const scope = root || document;
+  if(scope.dataset && scope.dataset.amountFormattingDelegated === '1') return;
+  if(scope.dataset) scope.dataset.amountFormattingDelegated = '1';
+
+  const formatExisting = function(){
+    scope.querySelectorAll('input[name="amount"], input[name="unit_price[]"], input[name="qty[]"], input[name="discount"], input[name="tax"], input[data-format-number]')
+      .forEach(function(input){
+        if(!input.readOnly && input.value) input.value = formatGroupedNumber(input.value);
+      });
+  };
+
+  scope.addEventListener('focusin', function(ev){
+    if(isAmountField(ev.target)) ev.target.value = normalizeNumberString(ev.target.value);
+  });
+  scope.addEventListener('focusout', function(ev){
+    if(isAmountField(ev.target)) ev.target.value = formatGroupedNumber(ev.target.value);
+  });
+  scope.addEventListener('submit', function(ev){
+    const form = ev.target;
+    if(!(form instanceof HTMLFormElement)) return;
+    form.querySelectorAll('input[name="amount"], input[name="unit_price[]"], input[name="qty[]"], input[name="discount"], input[name="tax"], input[data-format-number]')
+      .forEach(function(field){
+        field.value = normalizeNumberString(field.value);
+      });
+  }, true);
+
+  formatExisting();
+}
+window.normalizeNumberString = normalizeNumberString;
+window.formatGroupedNumber = formatGroupedNumber;
+window.isAmountField = isAmountField;
+window.setupAmountFormatting = setupAmountFormatting;
 function badgeOf(t){
   if(t==='person') return 'شخص';
   if(t==='item') return 'کالا';
@@ -125,19 +184,54 @@ function badgeOf(t){
           show(panel);
           return;
         }
-        panel.innerHTML = data.map(m => {
-          const pieces = (m.meta || '').split('•').map(part => part.trim()).filter(Boolean);
-          if(m.stock){ pieces.push(`موجودی: ${m.stock}`); }
-          if(m.price){ pieces.push(`قیمت: ${m.price}`); }
-          if(m.balance && (!m.type || m.type === 'person')){ pieces.push(`مانده: ${m.balance}`); }
-          const meta = pieces.length ? `<div class="res-meta">${pieces.map(p=>`<span class="res-sub">${p}</span>`).join('')}</div>` : '';
-          const badge = `<span class="res-badge">${badgeOf(m.type)}</span>`;
-          const code = m.code ? `<span class="res-code">${m.code}</span>` : '';
-          return `<a class="res" href="#" data-id="${m.id}" data-type="${m.type}" data-code="${m.code || ''}">
-                    <div class="res-head">${badge}${code}<span class="res-title">${m.name || ''}</span></div>
-                    ${meta}
-                  </a>`;
-        }).join('');
+        panel.replaceChildren();
+        data.forEach(m => {
+          const item = document.createElement('a');
+          item.className = 'res';
+          item.href = '#';
+          item.dataset.id = m.id == null ? '' : String(m.id);
+          item.dataset.type = m.type || '';
+          item.dataset.code = m.code == null ? '' : String(m.code);
+
+          const head = document.createElement('div');
+          head.className = 'res-head';
+          const badge = document.createElement('span');
+          badge.className = 'res-badge';
+          badge.textContent = badgeOf(m.type);
+          head.appendChild(badge);
+          if(m.code){
+            const code = document.createElement('span');
+            code.className = 'res-code';
+            code.textContent = String(m.code);
+            head.appendChild(code);
+          }
+          const title = document.createElement('span');
+          title.className = 'res-title';
+          title.textContent = m.name == null ? '' : String(m.name);
+          head.appendChild(title);
+          item.appendChild(head);
+
+          const details = [];
+          if(m.meta) String(m.meta).split('•').map(p=>p.trim()).filter(Boolean).forEach(p=>details.push(p));
+          if(m.stock) details.push('موجودی: ' + String(m.stock));
+          const price = window.formatGroupedNumber ? window.formatGroupedNumber(m.price) : m.price;
+          if(price) details.push('قیمت: ' + String(price));
+          const balance = window.formatGroupedNumber ? window.formatGroupedNumber(m.balance) : m.balance;
+          if(balance && (!m.type || m.type === 'person')) details.push('مانده: ' + String(balance));
+
+          if(details.length){
+            const meta = document.createElement('div');
+            meta.className = 'res-meta';
+            details.forEach(p=>{
+              const sub = document.createElement('span');
+              sub.className = 'res-sub';
+              sub.textContent = p;
+              meta.appendChild(sub);
+            });
+            item.appendChild(meta);
+          }
+          panel.appendChild(item);
+        });
         show(panel);
       })
       .catch(err=>{
@@ -547,3 +641,8 @@ function badgeOf(t){
   });
 })();
 
+
+
+document.addEventListener('DOMContentLoaded', function(){
+  if(typeof setupAmountFormatting === 'function') setupAmountFormatting(document);
+});

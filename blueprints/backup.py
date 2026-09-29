@@ -6,16 +6,22 @@ from datetime import datetime
 from pathlib import Path
 from typing import Optional
 
-from flask import Blueprint, render_template, request, send_from_directory, redirect, url_for, flash, current_app
+from flask import Blueprint, render_template, request, send_from_directory, redirect, url_for, flash, current_app, abort
 from flask_login import login_required, current_user
 from sqlalchemy import text
 
 from models.backup_models import BackupLog, Setting
 from extensions import db
-from utils.backup_utils import create_full_backup, list_backups, restore_backup, ensure_dirs, read_autosave_marker
+from utils.backup_utils import create_full_backup, list_backups, restore_backup, resolve_backup_path, ensure_dirs, read_autosave_marker
+from utils.email_utils import send_backup_email
 from utils.date_utils import parse_gregorian_date, parse_jalali_date, to_jdate_str, fa_digits
 
 backup_bp = Blueprint("backup", __name__, template_folder="../templates")
+
+
+def _admin_only():
+    if not current_user.is_authenticated or getattr(current_user, "role", "") != "admin":
+        abort(403)
 
 
 def _year_key(value: Optional[str]) -> str:
@@ -350,6 +356,7 @@ def _reset_transactions():
 @backup_bp.route("/")
 @login_required
 def index():
+    _admin_only()
     fiscal_years = _load_fiscal_years()
     current_value = Setting.get("fiscal_year_current") or Setting.get("fiscal_year_start")
     current_entry = _find_year_entry(fiscal_years, current_value)
@@ -383,13 +390,18 @@ def index():
         case_info=case_info,
         current_year_key=year_key if year_label != "نامشخص" else None,
         current_year_value=current_value,
+        backup_email_default=(getattr(current_user, "email", "") or os.environ.get("BACKUP_EMAIL_TO", "")).strip(),
     )
 
 
 @backup_bp.route("/create", methods=["POST"])
 @login_required
 def create():
-    reason = request.form.get("reason", "manual")
+    _admin_only()
+    reason = (request.form.get("reason") or "manual").strip()
+    action = request.form.get("action", "store")
+    send_email = request.form.get("send_email") == "1"
+    recipient = (request.form.get("email") or getattr(current_user, "email", "") or os.environ.get("BACKUP_EMAIL_TO", "")).strip()
     path = create_full_backup(current_app, user=getattr(current_user, "username", "admin"), reason=reason)
     size = os.path.getsize(path)
     log = BackupLog(user=getattr(current_user, "username", "admin"), reason=reason, filename=os.path.basename(path), size=size)
@@ -404,37 +416,51 @@ def create():
     data_dir, backup_dir, _, _ = ensure_dirs(current_app)
     year_dir = backup_dir / year_key if year_key else backup_dir
     year_dir.mkdir(parents=True, exist_ok=True)
+    target_path = Path(path)
     try:
-        target_path = year_dir / os.path.basename(path)
-        if Path(path) != target_path:
-            shutil.move(path, target_path)
+        moved_path = year_dir / os.path.basename(path)
+        if Path(path) != moved_path:
+            shutil.move(path, moved_path)
+        target_path = moved_path
         log.filename = target_path.name
     except Exception as exc:
         current_app.logger.exception(f"Failed to move backup into fiscal folder: {exc}")
 
     db.session.commit()
-    flash("✅ بکاپ کامل ساخته شد.", "success")
+
+    email_error = None
+    if send_email:
+        try:
+            send_backup_email(current_app, recipient, str(target_path), reason=reason)
+        except Exception as exc:
+            email_error = str(exc)
+            current_app.logger.exception("backup email failed recipient=%s file=%s", recipient, target_path.name)
+
+    if action == "download":
+        if email_error:
+            flash(f"✅ بکاپ ساخته و روی دستگاه دانلود می‌شود؛ ارسال ایمیل ناموفق بود: {email_error}", "warning")
+        return send_from_directory(directory=str(target_path.parent), path=target_path.name, as_attachment=True)
+
+    if email_error:
+        flash(f"✅ بکاپ ساخته شد، اما ایمیل ارسال نشد: {email_error}", "warning")
+    elif send_email:
+        flash("✅ بکاپ ساخته و به ایمیل مقصد ارسال شد.", "success")
+    else:
+        flash("✅ بکاپ کامل ساخته شد.", "success")
     return redirect(url_for("backup.index"))
 
 
 @backup_bp.route("/download/<name>")
 @login_required
 def download(name):
+    _admin_only()
     year = request.args.get("year")
-    _, backup_dir, _, _ = ensure_dirs(current_app)
-    candidates = []
-    if year:
-        candidates.append(backup_dir / year / name)
-    candidates.append(backup_dir / name)
-    for sub in backup_dir.iterdir():
-        if sub.is_dir():
-            candidates.append(sub / name)
-    target = None
-    for candidate in candidates:
-        if candidate.exists():
-            target = candidate
-            break
-    if not target:
+    relative = f"{year}/{name}" if year else name
+    try:
+        target = resolve_backup_path(current_app, relative)
+        if not target.is_file():
+            raise FileNotFoundError
+    except (ValueError, FileNotFoundError):
         flash("فایل بکاپ موردنظر یافت نشد.", "danger")
         return redirect(url_for("backup.index"))
     return send_from_directory(directory=str(target.parent), path=target.name, as_attachment=True)
@@ -443,30 +469,15 @@ def download(name):
 @backup_bp.route("/restore", methods=["POST"])
 @login_required
 def restore():
+    _admin_only()
     name = request.form.get("name")
     year = request.form.get("year")
     if not name:
         flash("نام فایل بکاپ لازم است.", "danger")
         return redirect(url_for("backup.index"))
-    _, backup_dir, _, _ = ensure_dirs(current_app)
-    candidate_names = []
-    if year:
-        candidate_names.append(Path(year) / name)
-    candidate_names.append(Path(name))
-    for sub in backup_dir.iterdir():
-        if sub.is_dir():
-            candidate_names.append(sub.name + "/" + name)
-    selected = None
-    for rel in candidate_names:
-        rel_path = Path(rel)
-        full = backup_dir / rel_path
-        if full.exists():
-            selected = rel_path.as_posix()
-            break
-    if not selected:
-        flash("فایل بکاپ موردنظر یافت نشد.", "danger")
-        return redirect(url_for("backup.index"))
+    selected = f"{year}/{name}" if year else name
     try:
+        resolve_backup_path(current_app, selected)
         restore_backup(current_app, selected)
         flash("♻️ ری‌استور انجام شد. لطفاً سرویس را ری‌استارت کنید تا کاملاً اعمال شود.", "warning")
     except Exception as e:
@@ -478,6 +489,7 @@ def restore():
 @backup_bp.route("/new-year", methods=["POST"])
 @login_required
 def new_year():
+    _admin_only()
     start_greg_raw = request.form.get("start_date")
     start_jalali = request.form.get("start_date_fa")
     start_greg = parse_gregorian_date(start_greg_raw, allow_none=True)
@@ -578,6 +590,7 @@ def new_year():
 @backup_bp.route("/switch-year", methods=["POST"])
 @login_required
 def switch_year():
+    _admin_only()
     year = request.form.get("year")
     years = _load_fiscal_years()
     valid_years = {item["start"] for item in years}
