@@ -141,14 +141,16 @@ def test_assistant_model_migrates_deprecated_alias():
         original = app_module.Setting.get("openai_model")
         try:
             app_module.Setting.set("openai_model", "o4-mini")
-            assert app_module._assistant_model() == "gpt-5-mini"
+            assert app_module._assistant_model() == "gpt-5.6-luna"
         finally:
-            app_module.Setting.set("openai_model", original or "gpt-5-mini")
+            app_module.Setting.set("openai_model", original or "gpt-5.6-luna")
             app_module.db.session.rollback()
 
 
 def test_reasoning_model_is_marked_for_temperature_omission():
-    assert "gpt-5-mini" in app_module.ASSISTANT_REASONING_MODELS
+    assert "gpt-5-mini" not in app_module.ASSISTANT_REASONING_MODELS
+    assert "o4-mini" not in app_module.ASSISTANT_REASONING_MODELS
+    assert "gpt-5-mini" not in {key for key, _ in app_module.ASSISTANT_MODEL_CHOICES}
     assert "o4-mini" not in {key for key, _ in app_module.ASSISTANT_MODEL_CHOICES}
 
 
