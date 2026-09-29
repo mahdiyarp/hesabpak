@@ -167,16 +167,20 @@ DASHBOARD_WIDGET_CHOICES = [
 ]
 
 ASSISTANT_MODEL_CHOICES = [
-    ("gpt-5-mini", "GPT-5 mini"),
+    ("gpt-5.6-luna", "GPT-5.6 Luna (کم‌هزینه)"),
+    ("gpt-5.6-terra", "GPT-5.6 Terra"),
+    ("gpt-5.6-sol", "GPT-5.6 Sol"),
     ("gpt-4.1-mini", "GPT-4.1 mini"),
     ("gpt-4o-mini", "GPT-4o mini"),
 ]
 
-# Reasoning models do not use the sampling temperature control.
-ASSISTANT_REASONING_MODELS = {"gpt-5-mini"}
+# GPT-5.6 reasoning models should use the reasoning controls instead of sampling
+# temperature. Older sampling-based models keep the temperature setting.
+ASSISTANT_REASONING_MODELS = {"gpt-5.6-luna", "gpt-5.6-terra", "gpt-5.6-sol"}
 ASSISTANT_MODEL_ALIASES = {
-    # Deprecated model kept only as a migration alias for old saved settings.
-    "o4-mini": "gpt-5-mini",
+    # Previously saved model IDs migrate to the current low-cost default.
+    "gpt-5-mini": "gpt-5.6-luna",
+    "o4-mini": "gpt-5.6-luna",
 }
 
 CASH_METHOD_LABELS = {
