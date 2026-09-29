@@ -36,6 +36,7 @@ from utils import rates as rates_utils
 from utils import bank_utils
 from utils.secret_store import encrypt_secret, decrypt_secret, is_encrypted
 import hashlib
+import threading
 
 # --- Simple append-only ledger for traceability (blockchain-like) ----------
 class LedgerEntry(db.Model):
@@ -136,6 +137,7 @@ CREDENTIAL_ENCRYPTION_KEY = os.environ.get("CREDENTIAL_ENCRYPTION_KEY", "").stri
 DEMO_MODE = os.environ.get("DEMO_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
 DEMO_USERNAME = os.environ.get("DEMO_USERNAME", "demo").strip() or "demo"
 DEMO_PASSWORD = os.environ.get("DEMO_PASSWORD", "demo123") or "demo123"
+DEMO_RESET_LOCK = threading.Lock()
 
 if DEMO_MODE and Path(DATA_DIR).name.strip().lower() in {"data", "production", "prod"}:
     raise RuntimeError("DEMO_MODE باید روی DATA_DIR جدا از داده واقعی اجرا شود (مثلاً data-demo).")
@@ -2309,7 +2311,8 @@ def _seed_demo_data():
 def _reset_demo_workspace():
     if not DEMO_MODE:
         return
-    try:
+    with DEMO_RESET_LOCK:
+        try:
         db.session.remove()
         db.drop_all()
         db.create_all()
