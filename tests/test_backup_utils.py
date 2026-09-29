@@ -369,3 +369,51 @@ def test_restore_rollback_removes_new_users_file_when_original_was_absent(tmp_pa
         assert con.execute("select value from t").fetchone()[0] == "live"
     finally:
         con.close()
+
+def test_empty_runtime_trees_are_authoritative_in_full_backup(tmp_path):
+    app = make_app(tmp_path)
+    data = Path(app.config["DATA_DIR"])
+    data.mkdir(parents=True, exist_ok=True)
+
+    db = data / app.config["DB_FILE"]
+    con = sqlite3.connect(db)
+    con.execute("create table t (value text)")
+    con.execute("insert into t(value) values ('ok')")
+    con.commit()
+    con.close()
+
+    archive = Path(create_full_backup(app))
+    with zipfile.ZipFile(archive) as zf:
+        metadata = json.loads(zf.read("metadata.json").decode("utf-8"))
+        assert metadata["format_version"] == 3
+        assert metadata["include_runtime_json"] is True
+        assert metadata["include_fiscal_cases"] is True
+        assert metadata["runtime_json_files"] == 0
+        assert metadata["fiscal_case_files"] == 0
+
+def test_restore_authoritative_empty_runtime_state_removes_stale_files(tmp_path):
+    app = make_app(tmp_path)
+    data = Path(app.config["DATA_DIR"])
+    data.mkdir(parents=True, exist_ok=True)
+    db = data / app.config["DB_FILE"]
+    con = sqlite3.connect(db)
+    con.execute("create table t (value text)")
+    con.execute("insert into t(value) values ('restored')")
+    con.commit()
+    con.close()
+
+    (data / "rates.json").write_text('{"stale":true}', encoding="utf-8")
+    stale_case = data / "fiscal_cases" / "old"
+    stale_case.mkdir(parents=True, exist_ok=True)
+    (stale_case / "snapshot.json").write_text('{"stale":true}', encoding="utf-8")
+
+    backup_dir = data / "backups" / "1405"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    archive = backup_dir / "backup_2026-09-29_12-00-07_deadbeef.zip"
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.write(db, f"db/{db.name}")
+        zf.writestr("metadata.json", '{"format_version":3,"include_uploads":false,"include_users_file":false,"include_runtime_json":true,"include_fiscal_cases":true,"runtime_json_files":0,"fiscal_case_files":0}')
+
+    restore_backup(app, "1405/" + archive.name)
+    assert not (data / "rates.json").exists()
+    assert not stale_case.exists()
