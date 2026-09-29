@@ -21,4 +21,4 @@ installer برای وابستگی‌های Python از `vendor/wheels` با `--n
 
 نصب آفلاین برای **نصب جدید** طراحی شده است و اگر مسیر مقصد از قبل `.env` داشته باشد عمداً متوقف می‌شود تا داده موجود بدون backup/migration دستکاری نشود.
 
-دمو نیز باید روی یک instance و `DATA_DIR` جدا اجرا شود. کلید `CREDENTIAL_ENCRYPTION_KEY` را در migration/restore حفظ کنید.
+دمو نیز باید روی یک instance و `DATA_DIR` جدا اجرا شود. این دمو برای یک instance آزمایشی مستقل/تک‌محیطی طراحی شده است؛ برای چند مشتری همزمان، برای هر مشتری یک instance و `DATA_DIR` جدا ایجاد کنید. کلید `CREDENTIAL_ENCRYPTION_KEY` را در migration/restore حفظ کنید.
