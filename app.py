@@ -315,6 +315,7 @@ def _csrf_origin_guard():
 app.config["SECRET_KEY"] = SECRET_KEY
 app.config["CREDENTIAL_ENCRYPTION_KEY"] = CREDENTIAL_ENCRYPTION_KEY
 app.config["DEMO_MODE"] = DEMO_MODE
+app.config["APP_VERSION"] = APP_VERSION
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SESSION_COOKIE_SECURE", "").strip().lower() in {"1", "true", "yes", "on"}
