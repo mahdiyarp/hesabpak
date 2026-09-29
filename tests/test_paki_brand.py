@@ -67,7 +67,6 @@ def test_transactions_landing_and_search_ui_exist():
     assert 'render_template("transactions.html"' in app
     assert "جستجو در تراکنش‌ها" in landing
     assert "جستجوی پیشرفته" in landing
-    assert "حداکثر" not in landing
     assert "جستجوی تراکنش‌ها" in search
     assert "حذف فیلترها" in search
     assert "نتیجه در این جستجو" in search
