@@ -2757,9 +2757,14 @@ def unified_cash():
     if request.method == "POST":
         # kind از form data
         form_kind = request.form.get("cash_kind", kind).strip().lower()
-        
+        if form_kind not in ("receive", "payment"):
+            form_kind = kind
+
         number = (request.form.get("doc_number") or "").strip() or doc_number
         doc_date = parse_gregorian_date(request.form.get("doc_date_greg"))
+        if not doc_date:
+            flash("تاریخ سند معتبر نیست.", "danger")
+            return redirect(URL_PREFIX + f"/cash_doc?kind={form_kind}")
 
         person = None
         pid = (request.form.get("person_token") or "").strip()
@@ -2853,16 +2858,15 @@ def unified_cash():
         )
         db.session.add(doc)
 
-        # بروزرسانی balance: دریافت کم می‌کند، پرداخت اضافه می‌کند
+        # ثبت سند و تغییر مانده باید اتمیک باشند.
         try:
-            if form_kind == "receive":
-                person.balance = float(person.balance or 0.0) - float(amount)
-            else:  # payment
-                person.balance = float(person.balance or 0.0) + float(amount)
-        except Exception:
-            pass
-
-        db.session.commit()
+            _adjust_cash_person_balance(form_kind, person, 0.0, amount)
+            db.session.commit()
+        except Exception as exc:
+            db.session.rollback()
+            current_app.logger.exception("cash document posting failed")
+            flash(f"خطا در ثبت سند: {exc}", "danger")
+            return redirect(URL_PREFIX + f"/cash_doc?kind={form_kind}")
         
         action_label = "دریافت" if form_kind == "receive" else "پرداخت"
         flash(
@@ -2923,6 +2927,9 @@ def receive_old():
     if request.method == "POST":
         number = (request.form.get("rec_number") or "").strip() or rec_number
         rec_date = parse_gregorian_date(request.form.get("rec_date_greg"))
+        if not rec_date:
+            flash("تاریخ دریافت معتبر نیست.", "danger")
+            return redirect(URL_PREFIX + "/receive")
 
         person = None
         pid = (request.form.get("person_token") or "").strip()
@@ -3008,11 +3015,13 @@ def receive_old():
         db.session.add(doc)
 
         try:
-            person.balance = float(person.balance or 0.0) - float(amount)
-        except Exception:
-            pass
-
-        db.session.commit()
+            _adjust_cash_person_balance("receive", person, 0.0, amount)
+            db.session.commit()
+        except Exception as exc:
+            db.session.rollback()
+            current_app.logger.exception("legacy receive posting failed")
+            flash(f"خطا در ثبت دریافت: {exc}", "danger")
+            return redirect(URL_PREFIX + "/receive")
         flash(
             f"✅ دریافت «{number}» برای «{person.name}» — {amount_to_toman_words(amount)}",
             "success",
@@ -3131,6 +3140,9 @@ def payment():
     if request.method == "POST":
         number = (request.form.get("pay_number") or "").strip() or pay_number
         pay_date = parse_gregorian_date(request.form.get("pay_date_greg"))
+        if not pay_date:
+            flash("تاریخ پرداخت معتبر نیست.", "danger")
+            return redirect(URL_PREFIX + "/payment")
 
         person = None
         pid = (request.form.get("person_token") or "").strip()
@@ -3208,11 +3220,13 @@ def payment():
         db.session.add(doc)
 
         try:
-            person.balance = float(person.balance or 0.0) + float(amount)
-        except Exception:
-            pass
-
-        db.session.commit()
+            _adjust_cash_person_balance("payment", person, 0.0, amount)
+            db.session.commit()
+        except Exception as exc:
+            db.session.rollback()
+            current_app.logger.exception("legacy payment posting failed")
+            flash(f"خطا در ثبت پرداخت: {exc}", "danger")
+            return redirect(URL_PREFIX + "/payment")
         flash(
             f"✅ پرداخت «{number}» برای «{person.name}» — {amount_to_toman_words(amount)}",
             "success",
