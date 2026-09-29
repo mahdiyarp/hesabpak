@@ -20,6 +20,7 @@ python3 -m pip --version >/dev/null 2>&1 || {
 mkdir -p "$BUNDLE_DIR/vendor/wheels" "$OUT_DIR"
 cp -a "$ROOT_DIR"/. "$BUNDLE_DIR"/
 rm -rf "$BUNDLE_DIR/.git" "$BUNDLE_DIR/data" "$BUNDLE_DIR/dist" "$BUNDLE_DIR/__pycache__"
+find "$BUNDLE_DIR" -maxdepth 1 -type f -name '.env*' ! -name '.env.example' -delete
 find "$BUNDLE_DIR" -type d -name "__pycache__" -prune -exec rm -rf {} +
 
 echo "⬇️ دریافت wheelهای همه وابستگی‌های runtime..."
