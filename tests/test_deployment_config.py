@@ -48,3 +48,9 @@ def test_legacy_auto_deploy_is_only_a_compatibility_wrapper():
     assert "gunicorn" in quick
     assert "git pull origin main" not in quick
     assert "HTTPS" in quick
+def test_legacy_install_is_only_a_compatibility_wrapper():
+    install = (ROOT / "install.sh").read_text(encoding="utf-8")
+    assert "deploy_site.sh" in install
+    assert "git clone" not in install
+    assert "python3 -m venv" not in install
+    assert "supervisor" not in install
