@@ -85,3 +85,9 @@
 {% block body_scripts %}
 <script src="{{ prefix }}/static/assistant.js"></script>
 {% endblock %}
+
+<style>
+.assistant-action-list{display:grid;gap:8px;margin-top:10px}
+.assistant-action-row{padding:10px 12px;border:1px solid var(--c-border);border-radius:10px;background:var(--c-surface-soft);display:grid;gap:4px}
+.assistant-action-row code{direction:ltr;word-break:break-all}
+</style>
