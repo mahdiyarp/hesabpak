@@ -13,7 +13,7 @@ from email.message import EmailMessage
 from pathlib import Path
 
 
-_EMAIL_RE = re.compile(r"^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 def _as_bool(value, default=False):
@@ -55,8 +55,8 @@ def send_backup_email(app, recipient: str, attachment_path: str, reason: str = "
     message["From"] = sender
     message["To"] = recipient
     message.set_content(
-        "نسخه پشتیبان حساب پاک به پیوست ارسال شد.\\n"
-        f"علت ایجاد: {reason or 'manual'}\\n"
+        "نسخه پشتیبان حساب پاک به پیوست ارسال شد.\n"
+        f"علت ایجاد: {reason or 'manual'}\n"
         f"نام فایل: {path.name}"
     )
     message.add_attachment(
@@ -81,4 +81,5 @@ def send_backup_email(app, recipient: str, attachment_path: str, reason: str = "
         except Exception:
             smtp.close()
 
-    app.logger.info("backup email sent recipient=%s file=%s", recipient, path.name)
+    if app is not None:
+        app.logger.info("backup email sent recipient=%s file=%s", recipient, path.name)
