@@ -415,10 +415,12 @@ def create():
     data_dir, backup_dir, _, _ = ensure_dirs(current_app)
     year_dir = backup_dir / year_key if year_key else backup_dir
     year_dir.mkdir(parents=True, exist_ok=True)
+    target_path = Path(path)
     try:
-        target_path = year_dir / os.path.basename(path)
-        if Path(path) != target_path:
-            shutil.move(path, target_path)
+        moved_path = year_dir / os.path.basename(path)
+        if Path(path) != moved_path:
+            shutil.move(path, moved_path)
+        target_path = moved_path
         log.filename = target_path.name
     except Exception as exc:
         current_app.logger.exception(f"Failed to move backup into fiscal folder: {exc}")
