@@ -84,7 +84,11 @@ def create_full_backup(app, user="system", reason="manual"):
 
     include_uploads = str(app.config.get("INCLUDE_UPLOADS_IN_BACKUP", "true")).lower() == "true"
     include_users = users_path.is_file()
-    include_fiscal_cases = fiscal_cases_dir.exists()
+    # These two runtime trees are part of the format-3 full backup contract.
+    # Mark them authoritative even when currently empty, so restore can remove
+    # stale files that did not exist at backup time.
+    include_fiscal_cases = True
+    include_runtime_json = True
 
     meta = {
         "format_version": 3,
@@ -97,7 +101,7 @@ def create_full_backup(app, user="system", reason="manual"):
         "include_users_file": include_users,
         "include_fiscal_cases": include_fiscal_cases,
         "fiscal_case_files": 0,
-        "include_runtime_json": bool(runtime_json),
+        "include_runtime_json": include_runtime_json,
         "runtime_json_files": 0,
         "app_version": app.config.get("APP_VERSION", "unknown"),
     }
