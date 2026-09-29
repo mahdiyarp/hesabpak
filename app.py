@@ -137,6 +137,7 @@ CREDENTIAL_ENCRYPTION_KEY = os.environ.get("CREDENTIAL_ENCRYPTION_KEY", "").stri
 DEMO_MODE = os.environ.get("DEMO_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
 DEMO_USERNAME = os.environ.get("DEMO_USERNAME", "demo").strip() or "demo"
 DEMO_PASSWORD = os.environ.get("DEMO_PASSWORD", "demo123") or "demo123"
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
 DEMO_RESET_LOCK = threading.Lock()
 
 if DEMO_MODE and Path(DATA_DIR).name.strip().lower() in {"data", "production", "prod"}:
@@ -2344,7 +2345,8 @@ def _reset_demo_workspace():
 def demo_landing():
     if not DEMO_MODE:
         abort(404)
-    share_url = request.url_root.rstrip("/") + URL_PREFIX + "/demo"
+    base_url = PUBLIC_BASE_URL or request.url_root.rstrip("/")
+    share_url = base_url + URL_PREFIX + "/demo"
     return render_template(
         "demo_landing.html",
         prefix=URL_PREFIX,
