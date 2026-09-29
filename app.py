@@ -2983,7 +2983,6 @@ def transactions_landing():
 
     now = _now_info()
     today = now["datetime"].date()
-    start_day = today - timedelta(days=6)
 
     sales_today = float(
         db.session.query(func.coalesce(func.sum(Invoice.total), 0.0))
@@ -3038,7 +3037,6 @@ def transactions_landing():
         "transactions.html",
         prefix=URL_PREFIX,
         today_label=to_jdate_str(today),
-        start_day=start_day,
         stats={
             "sales": sales_today,
             "purchase": purchase_today,
