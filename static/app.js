@@ -190,8 +190,8 @@ function badgeOf(t){
         panel.innerHTML = data.map(m => {
           const pieces = (m.meta || '').split('•').map(part => part.trim()).filter(Boolean);
           if(m.stock){ pieces.push(`موجودی: ${m.stock}`); }
-          if(m.price){ pieces.push(`قیمت: ${m.price}`); }
-          if(m.balance && (!m.type || m.type === 'person')){ pieces.push(`مانده: ${m.balance}`); }
+          if((window.formatGroupedNumber ? window.formatGroupedNumber(m.price) : m.price)){ pieces.push(`قیمت: ${(window.formatGroupedNumber ? window.formatGroupedNumber(m.price) : m.price)}`); }
+          if((window.formatGroupedNumber ? window.formatGroupedNumber(m.balance) : m.balance) && (!m.type || m.type === 'person')){ pieces.push(`مانده: ${(window.formatGroupedNumber ? window.formatGroupedNumber(m.balance) : m.balance)}`); }
           const meta = pieces.length ? `<div class="res-meta">${pieces.map(p=>`<span class="res-sub">${p}</span>`).join('')}</div>` : '';
           const badge = `<span class="res-badge">${badgeOf(m.type)}</span>`;
           const code = m.code ? `<span class="res-code">${m.code}</span>` : '';
