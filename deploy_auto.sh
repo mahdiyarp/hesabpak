@@ -60,17 +60,18 @@ mkdir -p data/backups/autosave
 # 8. ایجاد فایل .env اگر وجود ندارد
 if [ ! -f ".env" ]; then
     echo -e "${YELLOW}⚙️  ایجاد فایل تنظیمات .env${NC}"
-    cat > .env << 'EOF'
+    SECRET=$(openssl rand -hex 32)
+    ADMIN_PASS=$(openssl rand -hex 12)
+    cat > .env << EOF
 PORT=8000
-SECRET_KEY=$(openssl rand -hex 32)
+SECRET_KEY=$SECRET
 ADMIN_USERNAME=admin
-ADMIN_PASSWORD=admin123
+ADMIN_PASSWORD=$ADMIN_PASS
 DATA_DIR=data
 URL_PREFIX=
+SESSION_COOKIE_SECURE=false
+MAX_UPLOAD_MB=15
 EOF
-    # تولید کلید امنیتی تصادفی
-    SECRET=$(openssl rand -hex 32)
-    sed -i "s/\$(openssl rand -hex 32)/$SECRET/" .env
 fi
 
 # 9. راه‌اندازی دیتابیس
