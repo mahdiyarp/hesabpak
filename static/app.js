@@ -184,19 +184,54 @@ function badgeOf(t){
           show(panel);
           return;
         }
-        panel.innerHTML = data.map(m => {
-          const pieces = (m.meta || '').split('•').map(part => part.trim()).filter(Boolean);
-          if(m.stock){ pieces.push(`موجودی: ${m.stock}`); }
-          if((window.formatGroupedNumber ? window.formatGroupedNumber(m.price) : m.price)){ pieces.push(`قیمت: ${(window.formatGroupedNumber ? window.formatGroupedNumber(m.price) : m.price)}`); }
-          if((window.formatGroupedNumber ? window.formatGroupedNumber(m.balance) : m.balance) && (!m.type || m.type === 'person')){ pieces.push(`مانده: ${(window.formatGroupedNumber ? window.formatGroupedNumber(m.balance) : m.balance)}`); }
-          const meta = pieces.length ? `<div class="res-meta">${pieces.map(p=>`<span class="res-sub">${p}</span>`).join('')}</div>` : '';
-          const badge = `<span class="res-badge">${badgeOf(m.type)}</span>`;
-          const code = m.code ? `<span class="res-code">${m.code}</span>` : '';
-          return `<a class="res" href="#" data-id="${m.id}" data-type="${m.type}" data-code="${m.code || ''}">
-                    <div class="res-head">${badge}${code}<span class="res-title">${m.name || ''}</span></div>
-                    ${meta}
-                  </a>`;
-        }).join('');
+        panel.replaceChildren();
+        data.forEach(m => {
+          const item = document.createElement('a');
+          item.className = 'res';
+          item.href = '#';
+          item.dataset.id = m.id == null ? '' : String(m.id);
+          item.dataset.type = m.type || '';
+          item.dataset.code = m.code == null ? '' : String(m.code);
+
+          const head = document.createElement('div');
+          head.className = 'res-head';
+          const badge = document.createElement('span');
+          badge.className = 'res-badge';
+          badge.textContent = badgeOf(m.type);
+          head.appendChild(badge);
+          if(m.code){
+            const code = document.createElement('span');
+            code.className = 'res-code';
+            code.textContent = String(m.code);
+            head.appendChild(code);
+          }
+          const title = document.createElement('span');
+          title.className = 'res-title';
+          title.textContent = m.name == null ? '' : String(m.name);
+          head.appendChild(title);
+          item.appendChild(head);
+
+          const details = [];
+          if(m.meta) String(m.meta).split('•').map(p=>p.trim()).filter(Boolean).forEach(p=>details.push(p));
+          if(m.stock) details.push('موجودی: ' + String(m.stock));
+          const price = window.formatGroupedNumber ? window.formatGroupedNumber(m.price) : m.price;
+          if(price) details.push('قیمت: ' + String(price));
+          const balance = window.formatGroupedNumber ? window.formatGroupedNumber(m.balance) : m.balance;
+          if(balance && (!m.type || m.type === 'person')) details.push('مانده: ' + String(balance));
+
+          if(details.length){
+            const meta = document.createElement('div');
+            meta.className = 'res-meta';
+            details.forEach(p=>{
+              const sub = document.createElement('span');
+              sub.className = 'res-sub';
+              sub.textContent = p;
+              meta.appendChild(sub);
+            });
+            item.appendChild(meta);
+          }
+          panel.appendChild(item);
+        });
         show(panel);
       })
       .catch(err=>{
