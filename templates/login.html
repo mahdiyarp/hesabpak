@@ -31,7 +31,11 @@
 
         <button class="btn-primary" type="submit">ورود</button>
       {% if demo_mode %}
-      <a class="paki-demo-button" href="{{ prefix }}/demo/start">ورود آزمایشی با پکی</a>
+      <div class="paki-login-demo-note" role="note">
+        <strong>محیط آزمایشی حساب پاک</strong>
+        <span>داده‌های دمو موقتی هستند و برای ورود سریع، بدون حساب واقعی قابل استفاده‌اند.</span>
+      </div>
+      <a class="paki-demo-button" href="{{ prefix }}/demo">مشاهده و شروع دمو با پکی</a>
       {% endif %}
       </form>
 
