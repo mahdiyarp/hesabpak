@@ -343,3 +343,9 @@ def test_rates_updater_interval_is_bounded(monkeypatch):
 
     rates._stop_event = None
     rates._updater_thread = None
+
+
+def test_cash_edit_method_options_are_not_mutable():
+    source = Path(app_module.__file__).read_text(encoding="utf-8")
+    assert "روش سند هنگام ویرایش قابل تغییر نیست" in source
+    assert 'value="{escape(CASH_METHOD_LABELS.get(current_method, \'نامشخص\'))}" disabled' in source
