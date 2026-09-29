@@ -82,6 +82,7 @@ def create_full_backup(app, user="system", reason="manual"):
         "reason": reason,
         "db_file": str(db_path(app).name),
         "include_uploads": str(app.config.get("INCLUDE_UPLOADS_IN_BACKUP", "true")).lower(),
+        "uploads_count": 0,
         "app_version": app.config.get("APP_VERSION", "unknown"),
     }
 
@@ -118,6 +119,7 @@ def create_full_backup(app, user="system", reason="manual"):
                         p = Path(root)/f
                         rel = p.relative_to(data_dir)
                         z.write(p, arcname=str(rel))
+                        meta["uploads_count"] += 1
         # metadata
         z.writestr("metadata.json", json.dumps(meta, ensure_ascii=False, indent=2))
     return str(out)
@@ -224,10 +226,20 @@ def restore_backup(app, zip_filename):
     uploads_replaced = False
     uploads_moved_aside = False
     uploads_found = False
+    restore_uploads = False
 
     try:
         with zipfile.ZipFile(zpath, "r") as z:
             db_inside = None
+            metadata = {}
+            try:
+                with z.open("metadata.json", "r") as meta_src:
+                    metadata = json.load(meta_src)
+            except Exception:
+                metadata = {}
+            include_uploads = str(metadata.get("include_uploads", "")).strip().lower()
+            restore_uploads = include_uploads == "true"
+
             expected_name = f"db/{dbfile.name}"
             for info in z.infolist():
                 if info.is_dir():
@@ -252,7 +264,14 @@ def restore_backup(app, zip_filename):
             finally:
                 con.close()
 
-            uploads_found = _extract_backup_uploads(z, staged_uploads)
+            if restore_uploads or any(
+                info.filename.replace("\\", "/").startswith("uploads/")
+                and not info.is_dir()
+                for info in z.infolist()
+            ):
+                staged_uploads.mkdir(parents=True, exist_ok=True)
+                uploads_found = _extract_backup_uploads(z, staged_uploads)
+                restore_uploads = True
 
         if dbfile.exists():
             shutil.copy2(dbfile, old_db)
@@ -260,7 +279,7 @@ def restore_backup(app, zip_filename):
         os.replace(staged_live_db, dbfile)
         db_replaced = True
 
-        if uploads_found:
+        if restore_uploads:
             if old_uploads.exists():
                 if old_uploads.is_dir():
                     shutil.rmtree(old_uploads)
@@ -269,6 +288,8 @@ def restore_backup(app, zip_filename):
             if uploads_dir.exists():
                 shutil.move(str(uploads_dir), str(old_uploads))
                 uploads_moved_aside = True
+            if not staged_uploads.exists():
+                staged_uploads.mkdir(parents=True, exist_ok=True)
             shutil.move(str(staged_uploads), str(uploads_dir))
             uploads_replaced = True
     except Exception:
