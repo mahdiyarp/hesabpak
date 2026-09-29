@@ -884,11 +884,9 @@ def _build_openai_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any
         text = (msg.get("text") or "").strip()
         attachments = msg.get("attachments") or []
         content: List[Dict[str, Any]] = []
-        # The Responses API may expect 'output_text' for plain textual content
-        # (some client/server versions reject unknown content types like 'input_text').
-        # Use 'output_text' to maximize compatibility.
+        # Responses API input messages use input_text for user/assistant context.
         if text:
-            content.append({"type": "output_text", "text": text})
+            content.append({"type": "input_text", "text": text})
         for att in attachments:
             atype = (att.get("type") or "").strip().lower()
             if atype != "image":
@@ -1047,14 +1045,17 @@ def _call_openai_assistant(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
     # استفاده از max_tokens شخصی یا پیش‌فرض
     max_tokens = user_settings.max_tokens if user_settings.max_tokens else 800
 
-    # Try to request a JSON-schema formatted response when supported.
-    # Some installed versions of the OpenAI Python client don't accept the
-    # `response_format` keyword and will raise TypeError. In that case fall
-    # back to calling without it and parse the plain text output.
-    # Some client versions may not accept `response_format` or may raise
-    # network/client exceptions. Try the schema-enabled request first and
-    # fall back gracefully. Any unexpected exception should be handled and
-    # return a readable assistant fallback instead of bubbling up.
+    # Responses API uses text.format for Structured Outputs.
+    # Keep a compatibility fallback for older SDK variants exposing
+    # the legacy response_format keyword.
+    response_format = {
+        "format": {
+            "type": "json_schema",
+            "name": AI_RESPONSE_SCHEMA["name"],
+            "schema": AI_RESPONSE_SCHEMA["schema"],
+            "strict": True,
+        }
+    }
     try:
         try:
             response = client.responses.create(
@@ -1062,15 +1063,19 @@ def _call_openai_assistant(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
                 input=request_messages,
                 max_output_tokens=max_tokens,
                 temperature=temperature,
-                response_format={"type": "json_schema", "json_schema": AI_RESPONSE_SCHEMA},
+                text=response_format,
             )
         except TypeError:
-            app.logger.warning("OpenAI client.responses.create() doesn't support 'response_format'; falling back to plain response")
+            app.logger.warning("OpenAI client.responses.create() does not support text.format; trying legacy response_format")
             response = client.responses.create(
                 model=model,
                 input=request_messages,
                 max_output_tokens=max_tokens,
                 temperature=temperature,
+                response_format={
+                    "type": "json_schema",
+                    "json_schema": AI_RESPONSE_SCHEMA,
+                },
             )
     except Exception as e:
         # Log full exception for diagnostics and return a safe fallback reply
