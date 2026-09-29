@@ -33,13 +33,17 @@ mkdir -p data/backups/autosave
 python3 -c "from app import app, db; app.app_context().push(); db.create_all()"
 
 # تنظیمات
-[ ! -f .env ] && cat > .env << 'EOF'
+if [ ! -f .env ]; then
+    SECRET=$(openssl rand -hex 32)
+    ADMIN_PASS=$(openssl rand -hex 12)
+    cat > .env << EOF
 PORT=8000
-SECRET_KEY=$(openssl rand -hex 32)
+SECRET_KEY=$SECRET
 ADMIN_USERNAME=admin
-ADMIN_PASSWORD=admin123
+ADMIN_PASSWORD=$ADMIN_PASS
 DATA_DIR=data
 EOF
+fi
 
 # Supervisor
 sudo tee /etc/supervisor/conf.d/hesabpak.conf > /dev/null << EOF
@@ -80,5 +84,6 @@ sudo nginx -t && sudo systemctl restart nginx
 echo ""
 echo "✅ نصب موفق!"
 echo "🌐 آدرس: http://$(hostname -I | awk '{print $1}')"
-echo "👤 ورود: admin / admin123"
+echo "👤 نام کاربری مدیر: admin"
+echo "🔐 رمز مدیر در فایل $APP_DIR/.env تولید شده است."
 echo "📝 لاگ: sudo tail -f /var/log/hesabpak.log"
