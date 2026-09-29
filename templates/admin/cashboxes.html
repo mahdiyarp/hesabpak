@@ -28,7 +28,8 @@
       </div>
       <div data-bank-only>
         <label class="lbl" for="iban">شبا (اختیاری)</label>
-        <input class="inp" id="iban" name="iban" placeholder="IR...">
+        <input class="inp" id="iban" name="iban" placeholder="IR..." autocomplete="off" inputmode="latin">
+        <div id="iban-status" class="muted" style="font-size:12px;margin-top:4px;" aria-live="polite"></div>
       </div>
       <div>
         <label class="lbl" for="description">توضیحات</label>
@@ -122,5 +123,54 @@
     kind.addEventListener('change', sync);
   }
 })();
+  const iban = document.getElementById('iban');
+  const bankName = document.getElementById('bank_name');
+  const status = document.getElementById('iban-status');
+  let timer = null;
+
+  function normalizeIban(value){
+    return String(value || '').trim()
+      .replace(/[۰-۹]/g, d => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+      .replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+      .replace(/[-\s]/g, '')
+      .toUpperCase();
+  }
+
+  async function detectIban(){
+    if(!iban || !status) return;
+    const value = normalizeIban(iban.value);
+    iban.value = value;
+    if(!value){ status.textContent = ''; return; }
+    if(!/^IR\d{24}$/.test(value)){
+      status.textContent = 'شبا باید با IR و ۲۴ رقم وارد شود.';
+      return;
+    }
+    status.textContent = 'در حال بررسی شبا…';
+    try{
+      const res = await fetch((window.prefix || '') + '/api/bank_detect', {
+        method:'POST', credentials:'same-origin', headers:{'Content-Type':'application/json'},
+        body:JSON.stringify({value})
+      });
+      const data = await res.json();
+      const info = data && data.result ? data.result : null;
+      if(!res.ok || !info){ status.textContent = 'بررسی شبا ناموفق بود.'; return; }
+      if(info.valid){
+        const bank = info.bank && info.bank.bank ? info.bank.bank : '';
+        status.textContent = bank ? ('✅ شبا معتبر — ' + bank) : '✅ شبا معتبر است.';
+        if(bankName && bank) bankName.value = bank;
+      }else{
+        const bank = info.bank && info.bank.bank ? info.bank.bank : '';
+        status.textContent = bank ? ('⚠️ شبا نامعتبر — بانک احتمالی: ' + bank) : '⚠️ رقم کنترل شبا نامعتبر است.';
+      }
+    }catch(err){ status.textContent = 'خطا در بررسی شبا.'; }
+  }
+
+  if(iban){
+    iban.addEventListener('input', function(){
+      if(timer) clearTimeout(timer);
+      timer = setTimeout(detectIban, 250);
+    });
+    iban.addEventListener('blur', detectIban);
+  }
 </script>
 {% endblock %}
