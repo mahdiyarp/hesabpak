@@ -203,6 +203,16 @@ def _permissions_for_role(role: str, requested) -> list:
 # ----------------- Flask & DB -----------------
 app = Flask(__name__, static_url_path=(URL_PREFIX + "/static") if URL_PREFIX else "/static")
 app.config["SECRET_KEY"] = SECRET_KEY
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SESSION_COOKIE_SECURE", "").strip().lower() in {"1", "true", "yes", "on"}
+app.config["MAX_CONTENT_LENGTH"] = int(os.environ.get("MAX_UPLOAD_MB", "15")) * 1024 * 1024
+
+if os.environ.get("FLASK_ENV", "").strip().lower() == "production":
+    if SECRET_KEY == "change-me-please":
+        raise RuntimeError("SECRET_KEY must be configured in production.")
+    if ADMIN_PASSWORD == "admin123":
+        raise RuntimeError("ADMIN_PASSWORD must be configured in production.")
 
 DB_DIR = Path(DATA_DIR).resolve(); DB_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DB_DIR / "hesabpak.sqlite3"
