@@ -1860,12 +1860,38 @@ def _find_entity_by_code_or_id(kind: str, code_or_id: str):
             return by_id
     return q.filter(Entity.code == code_or_id).first()
 
+_SENSITIVE_LOG_QUERY_KEYS = {
+    "password",
+    "pass",
+    "token",
+    "secret",
+    "api_key",
+    "apikey",
+    "key",
+    "authorization",
+}
+
+
+def _safe_request_args_for_log() -> dict:
+    safe = {}
+    for key, value in request.args.items():
+        normalized = str(key).strip().lower()
+        if normalized in _SENSITIVE_LOG_QUERY_KEYS or any(
+            marker in normalized for marker in ("password", "token", "secret", "api_key", "apikey")
+        ):
+            safe[str(key)] = "***"
+        else:
+            safe[str(key)] = str(value)[:256]
+    return safe
+
+
 @app.before_request
 def _req_log():
+    safe_args = _safe_request_args_for_log()
     if current_user.is_authenticated:
-        app.logger.info(f"USER={current_user.username}  IP={request.remote_addr}  {request.method} {request.path}  ARGS={dict(request.args)}")
+        app.logger.info(f"USER={current_user.username}  IP={request.remote_addr}  {request.method} {request.path}  ARGS={safe_args}")
     else:
-        app.logger.info(f"ANON  IP={request.remote_addr}  {request.method} {request.path}  ARGS={dict(request.args)}")
+        app.logger.info(f"ANON  IP={request.remote_addr}  {request.method} {request.path}  ARGS={safe_args}")
     # record site view for analytics
     try:
         sv = SiteView(ip=request.headers.get('X-Forwarded-For', request.remote_addr or ''), path=request.path, method=request.method, user=(getattr(current_user, 'username', None) if current_user and getattr(current_user, 'is_authenticated', False) else None))
