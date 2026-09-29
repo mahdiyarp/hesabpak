@@ -223,3 +223,9 @@ def test_payment_route_is_owned_by_unified_cash_only():
     ]
     assert len(rules) == 1
     assert rules[0].endpoint == "unified_cash"
+
+
+def test_csv_export_cells_are_safe_for_spreadsheet_formulas():
+    assert app_module._csv_safe_cell("=HYPERLINK(\"http://evil.test\", \"click\")").startswith("'=")
+    assert app_module._csv_safe_cell("  +SUM(A1)").startswith("'")
+    assert app_module._csv_safe_cell("normal text") == "normal text"

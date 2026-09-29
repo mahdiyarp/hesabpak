@@ -834,6 +834,15 @@ def _assistant_api_ready() -> bool:
     user_settings = UserSettings.query.filter_by(username=username).first()
     return bool(user_settings and (user_settings.openai_api_key or "").strip())
 
+def _csv_safe_cell(value: Any) -> str:
+    """Prevent spreadsheet formula injection in exported text cells."""
+    text_value = "" if value is None else str(value)
+    stripped = text_value.lstrip()
+    if stripped.startswith(("=", "+", "-", "@")):
+        return "'" + text_value
+    return text_value
+
+
 def _mask_secret(value: str) -> str:
     value = (value or "").strip()
     if not value:
@@ -4040,7 +4049,7 @@ def admin_assistant_draft_view(idx: int):
             for k, v in draft.items():
                 if k.startswith("_"):
                     continue
-                w.writerow([k, v])
+                w.writerow([_csv_safe_cell(k), _csv_safe_cell(v)])
             csv_data = buf.getvalue()
             return (csv_data, 200, {
                 'Content-Type': 'text/csv; charset=utf-8',
@@ -4053,7 +4062,9 @@ def admin_assistant_draft_view(idx: int):
             for k, v in draft.items():
                 if k.startswith("_"):
                     continue
-                rows.append(f"<tr><td>{escape(str(k))}</td><td>{escape(str(v))}</td></tr>")
+                safe_key = _csv_safe_cell(k)
+                safe_value = _csv_safe_cell(v)
+                rows.append(f"<tr><td>{escape(safe_key)}</td><td>{escape(safe_value)}</td></tr>")
             html = """
             <html><head><meta charset='utf-8'></head><body>
             <table>%s</table>
