@@ -3241,6 +3241,8 @@ def settings_stub():
         assistant_model_choices=ASSISTANT_MODEL_CHOICES,
         assistant_api_mask=_mask_secret(_openai_api_key()),
         assistant_api_has=bool(_openai_api_key()),
+        user_api_mask=_mask_secret(user_settings.openai_api_key),
+        user_api_has=bool(user_settings.openai_api_key),
         user_settings=user_settings,
     )
 
@@ -4173,9 +4175,7 @@ def _search_targets_for_permissions(targets, permissions, admin=False):
     allowed = set()
     if "entities" in permissions:
         allowed.update({"item", "person"})
-    if "sales" in permissions:
-        allowed.add("invoice")
-    if "purchase" in permissions:
+    if "sales" in permissions or "purchase" in permissions:
         allowed.add("invoice")
     if "reports" in permissions:
         allowed.update({"invoice", "receive", "payment"})
@@ -4185,9 +4185,7 @@ def _search_targets_for_permissions(targets, permissions, admin=False):
         allowed.add("payment")
     return set(targets).intersection(allowed)
 
-
-def api_search():
-    q_raw = (request.args.get("q") or "").strip()@app.route(URL_PREFIX + "/api/search", methods=["GET"])
+@app.route(URL_PREFIX + "/api/search", methods=["GET"])
 @login_required
 def api_search():
     q_raw = (request.args.get("q") or "").strip()
@@ -4206,10 +4204,7 @@ def api_search():
 
     def try_float(val):
         try:
-            txt = str(val).replace(",", "").strip()
-            if not txt:
-                return None
-            return float(txt)
+            return _to_float(val, None)
         except Exception:
             return None
 
@@ -4263,23 +4258,9 @@ def api_search():
     if not targets.intersection(default_targets):
         targets = default_targets
 
-    # A logged-in user may search only the modules they are allowed to use.
-    # Admins retain the full search surface.
-    if not is_admin():
-        permission_targets = set()
-        if has_permission("entities"):
-            permission_targets.update({"item", "person"})
-        if has_permission("sales"):
-            permission_targets.add("invoice")
-        if has_permission("purchase"):
-            permission_targets.add("invoice")
-        if has_permission("reports"):
-            permission_targets.update({"invoice", "receive", "payment"})
-        if has_permission("receive"):
-            permission_targets.add("receive")
-        if has_permission("payment"):
-            permission_targets.add("payment")
-        targets = targets.intersection(permission_targets)
+    targets = _search_targets_for_permissions(targets, user_permissions(), admin=is_admin())
+    if not targets:
+        return jsonify([])
 
     ordered_targets = [t for t in ["item", "person", "invoice", "receive", "payment"] if t in targets]
 
