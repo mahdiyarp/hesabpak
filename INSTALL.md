@@ -18,9 +18,10 @@ bash <(wget -qO- https://raw.githubusercontent.com/mahdiyarp/hesabpak/main/insta
 
 - **آدرس سایت**: `http://IP_SERVER`
 - **نام کاربری**: `admin`
-- **رمز عبور**: `admin123`
+- **رمز عبور**: هنگام نصب به‌صورت تصادفی در `.env` تولید می‌شود.
 
-⚠️ **حتماً بعد از ورود اول، رمز عبور را تغییر دهید!**
+برای مشاهده رمز مدیر روی سرور:
+`sudo grep '^ADMIN_PASSWORD=' /var/www/hesabpak/.env`
 
 ---
 
