@@ -2406,8 +2406,8 @@ def reports():
     dto   = request.args.get("to")
     method = (request.args.get("method") or "").strip().lower()  # cash methods
     cashbox_id = (request.args.get("cashbox_id") or "").strip()
-    amount_min_raw = (request.args.get("amount_min") or "").replace(",", "").strip()
-    amount_max_raw = (request.args.get("amount_max") or "").replace(",", "").strip()
+    amount_min_raw = (request.args.get("amount_min") or "").strip()
+    amount_max_raw = (request.args.get("amount_max") or "").strip()
     export = (request.args.get("export") or "").strip().lower()
     try:
         page = int(request.args.get("page") or 1)
@@ -2428,11 +2428,11 @@ def reports():
         per_page = 100
     per_page = max(10, min(per_page, 500))
     try:
-        amount_min = float(amount_min_raw) if amount_min_raw else None
+        amount_min = _to_float(amount_min_raw, None) if amount_min_raw else None
     except Exception:
         amount_min = None
     try:
-        amount_max = float(amount_max_raw) if amount_max_raw else None
+        amount_max = _to_float(amount_max_raw, None) if amount_max_raw else None
     except Exception:
         amount_max = None
 
@@ -2714,7 +2714,7 @@ def unified_cash():
                     prefill_note = f"پرداخت بابت فاکتور خرید {inv.number}"
         if prefill_amount is None:
             try:
-                prefill_amount = float((request.args.get("amount") or "").replace(",", ""))
+                prefill_amount = _to_float(request.args.get("amount"), None)
             except Exception:
                 prefill_amount = None
         pid = (request.args.get("person_id") or "").strip()
@@ -3093,11 +3093,6 @@ def payment():
             flash("لطفاً طرف حساب معتبر انتخاب کنید.", "danger")
             return redirect(URL_PREFIX + "/payment")
 
-        def _to_float(x, dv=0.0):
-            try:
-                return float(str(x).replace(",", "").strip() or dv)
-            except Exception:
-                return dv
         amount = _to_float(request.form.get("amount"), 0.0)
         if amount <= 0:
             flash("مبلغ پرداخت باید بزرگ‌تر از صفر باشد.", "danger")
