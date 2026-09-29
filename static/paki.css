@@ -20,3 +20,6 @@
 @keyframes paki-welcome-breathe{0%,100%{transform:translateY(0)}50%{transform:translateY(-3px)}}
 @media (max-width:640px){.paki-welcome{gap:10px;padding:12px 14px;border-radius:16px}.paki-welcome-art{flex-basis:92px}.paki-welcome-art img{width:92px;height:auto}.paki-welcome-copy strong{font-size:16px}.paki-welcome-copy span{font-size:12px}.paki-welcome-copy a{font-size:11px}}
 @media (prefers-reduced-motion:reduce){.paki-welcome-art img{animation:none!important}}
+
+.paki-fab.is-floating[data-paki-mood="alert"]{animation:paki-shake .38s ease}
+.paki-login-brand img{animation:paki-welcome-breathe 3.8s ease-in-out infinite}
