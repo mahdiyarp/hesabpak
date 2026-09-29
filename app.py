@@ -3212,8 +3212,11 @@ def cash_edit(doc_id):
             doc.amount = new_amount
             doc.note = (request.form.get("note") or "").strip() or None
             m = (request.form.get("method") or "").strip().lower()
-            if m in ("pos","cash","bank","cheque"):
-                doc.method = m
+            current_method = (doc.method or "").strip().lower()
+            if m and m != current_method:
+                db.session.rollback()
+                flash("روش سند هنگام ویرایش قابل تغییر نیست؛ برای روش دیگر سند جدید ثبت کنید.", "warning")
+                return redirect(URL_PREFIX + f"/cash/{doc.id}/edit")
             db.session.commit()
             try:
                 record_ledger(
@@ -3242,12 +3245,8 @@ def cash_edit(doc_id):
         <label class="lbl">مبلغ</label>
         <input class="inp" name="amount" value="{int(doc.amount)}">
         <label class="lbl" style="margin-top:8px">روش</label>
-        <select class="inp" name="method">
-          <option value="pos" {'selected' if current_method == 'pos' else ''}>دستگاه پوز</option>
-          <option value="cash" {'selected' if current_method == 'cash' else ''}>نقدی</option>
-          <option value="bank" {'selected' if current_method == 'bank' else ''}>بانک</option>
-          <option value="cheque" {'selected' if current_method == 'cheque' else ''}>چک</option>
-        </select>
+        <input class="inp" value="{escape(CASH_METHOD_LABELS.get(current_method, 'نامشخص'))}" disabled>
+        <input type="hidden" name="method" value="{escape(current_method)}">
         <label class="lbl" style="margin-top:8px">یادداشت</label>
         <textarea class="inp" name="note">{escape(doc.note or "")}</textarea>
         <div style="margin-top:10px"><button class="btn">ذخیره</button></div>
