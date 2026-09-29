@@ -70,3 +70,10 @@ def test_transactions_landing_and_search_ui_exist():
     assert "جستجوی تراکنش‌ها" in search
     assert "حذف فیلترها" in search
     assert "نتیجه در این جستجو" in search
+
+def test_demo_share_link_can_use_configured_public_base_url():
+    app = (ROOT / "app.py").read_text(encoding="utf-8")
+    assert 'PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")' in app
+    assert 'base_url = PUBLIC_BASE_URL or request.url_root.rstrip("/")' in app
+    env = (ROOT / ".env.example").read_text(encoding="utf-8")
+    assert "PUBLIC_BASE_URL=" in env
