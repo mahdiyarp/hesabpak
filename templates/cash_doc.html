@@ -52,7 +52,7 @@
         <div style="flex: 1; min-width: 200px;">
           <label class="lbl" for="amount">مبلغ (تومان)</label>
           <input class="inp ta-num" name="amount" id="amount" inputmode="decimal" required
-                 value="{% if prefill_amount %}{{ prefill_amount }}{% endif %}">
+                 value="{% if prefill_amount %}{{ prefill_amount|sep }}{% endif %}">
         </div>
       </div>
 
