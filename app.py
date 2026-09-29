@@ -4,14 +4,14 @@ from pathlib import Path
 from datetime import datetime, timedelta, date
 from typing import Any, Dict, List, Optional
 
-from flask import Flask, render_template, redirect, request, flash, session, jsonify, abort, current_app
+from flask import Flask, render_template, redirect, request, flash, session, jsonify, abort, current_app, send_from_directory
 import subprocess, shlex, traceback
 import shutil
 from flask_login import LoginManager, login_user, logout_user, login_required, UserMixin, current_user
 from dotenv import load_dotenv
 from markupsafe import Markup, escape
 from werkzeug.security import check_password_hash, generate_password_hash
-from sqlalchemy import func, or_, UniqueConstraint, text   # <- مهم
+from sqlalchemy import func, or_, UniqueConstraint, text, text   # <- مهم
 
 try:
     from openai import OpenAI
@@ -2203,6 +2203,12 @@ def index():
         assistant_model_label=dict(ASSISTANT_MODEL_CHOICES).get(_assistant_model(), _assistant_model()),
         api_ready=_assistant_api_ready(),
     )
+
+@app.route(URL_PREFIX + "/sw.js", methods=["GET"])
+def service_worker():
+    """Serve the PWA worker from app root so it can control the whole app scope."""
+    return send_from_directory(PROJECT_ROOT, "sw.js", mimetype="application/javascript")
+
 
 @app.route(URL_PREFIX + "/healthz", methods=["GET"])
 def healthz():
