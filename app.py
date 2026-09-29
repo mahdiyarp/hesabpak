@@ -19,7 +19,7 @@ except Exception:
     OpenAI = None
 
 from extensions import db
-from utils.backup_utils import ensure_dirs, autosave_record
+from utils.backup_utils import ensure_dirs, autosave_record, create_full_backup
 from blueprints.backup import backup_bp
 from autobackup import init_autobackup, register_autobackup_for
 from models.backup_models import Setting, BackupLog, UserSettings
@@ -3760,20 +3760,17 @@ def admin_update_from_git():
             return jsonify(result), 403
         step(f"remote origin OK: {out}")
 
-        # create DB backup
-        db_file = (Path(app.config.get("DATA_DIR", "data")) / app.config.get("DB_FILE", "hesabpak.sqlite3"))
-        if db_file.exists():
-            ts = datetime.utcnow().strftime("%Y%m%dT%H%M%S")
-            bdir = Path(app.config.get("DATA_DIR", "data")) / "backups" / "fast_update"
-            bdir.mkdir(parents=True, exist_ok=True)
-            bpath = bdir / f"{db_file.name}.{ts}.bak"
-            try:
-                shutil.copy2(str(db_file), str(bpath))
-                step(f"DB backup created: {bpath}")
-            except Exception as e:
-                step(f"DB backup failed: {e}", ok=False)
-        else:
-            step("No DB file to backup; skipping")
+        # Create a consistent full backup before changing code.
+        try:
+            backup_path = create_full_backup(
+                app,
+                user=getattr(current_user, "username", "admin"),
+                reason="pre-git-update",
+            )
+            step(f"Full backup created: {backup_path}")
+        except Exception as e:
+            step(f"Full backup failed: {e}", ok=False)
+            return jsonify(result), 500
 
         # ensure clean working tree
         status = subprocess.check_output(shlex.split(f"git -C {shlex.quote(repo_dir)} status --porcelain"), text=True)
