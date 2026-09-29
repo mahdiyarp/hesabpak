@@ -642,6 +642,43 @@ def is_admin() -> bool:
     return current_user.is_authenticated and getattr(current_user, "role", "") == "admin"
 
 
+def _active_admin_usernames(catalog: Dict[str, Any]) -> set:
+    return {
+        username
+        for username, entry in (catalog or {}).items()
+        if isinstance(entry, dict)
+        and str(entry.get("role", "")).strip().lower() == "admin"
+        and bool(entry.get("is_active", True))
+    }
+
+
+def _would_remove_last_active_admin(
+    catalog: Dict[str, Any],
+    username: str,
+    *,
+    new_role: Optional[str] = None,
+    new_is_active: Optional[bool] = None,
+    deleting: bool = False,
+) -> bool:
+    """Return True when the requested change would leave no active admin."""
+    entry = (catalog or {}).get(username) or {}
+    current_is_admin = (
+        str(entry.get("role", "")).strip().lower() == "admin"
+        and bool(entry.get("is_active", True))
+    )
+    if not current_is_admin:
+        return False
+    if deleting:
+        becomes_active_admin = False
+    else:
+        role = str(new_role if new_role is not None else entry.get("role", "")).strip().lower()
+        active = bool(new_is_active if new_is_active is not None else entry.get("is_active", True))
+        becomes_active_admin = role == "admin" and active
+    if becomes_active_admin:
+        return False
+    return len(_active_admin_usernames(catalog)) <= 1
+
+
 def admin_required():
     if not is_admin():
         abort(403)
@@ -3832,6 +3869,8 @@ def admin_users():
                 flash("کاربر مدیر اصلی قابل حذف نیست.", "warning")
             elif username not in catalog:
                 flash("کاربر یافت نشد.", "danger")
+            elif _would_remove_last_active_admin(catalog, username, deleting=True):
+                flash("آخرین مدیر فعال قابل حذف نیست؛ ابتدا یک مدیر فعال دیگر ایجاد کنید.", "warning")
             else:
                 catalog.pop(username, None)
                 save_users_catalog(catalog)
@@ -3854,6 +3893,14 @@ def admin_users():
             if username == ADMIN_USERNAME:
                 role = "admin"
                 is_active = True
+            elif _would_remove_last_active_admin(
+                catalog,
+                username,
+                new_role=role,
+                new_is_active=is_active,
+            ):
+                flash("آخرین مدیر فعال را نمی‌توان غیرفعال یا تنزل نقش داد.", "warning")
+                return redirect(URL_PREFIX + "/admin/users")
             entry["role"] = role
             entry["permissions"] = _permissions_for_role(role, requested_perms)
             entry["is_active"] = is_active
