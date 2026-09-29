@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+- Finalized Paki/PWA, isolated demo safeguards, offline distribution, health monitoring and credential-at-rest protection.
+- CI remains blocked by a GitHub hosted-runner assignment failure; no test step has executed yet.
+
 ## 0.9.0 — 2026-09-30
 
 - Added the interactive Paki / hp application identity.
