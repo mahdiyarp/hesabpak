@@ -33,7 +33,9 @@ mkdir -p data/backups/autosave
 python3 -c "from app import app, db; app.app_context().push(); db.create_all()"
 
 # تنظیمات
+FIRST_INSTALL=0
 if [ ! -f .env ]; then
+    FIRST_INSTALL=1
     SECRET=$(openssl rand -hex 32)
     ADMIN_PASS=$(openssl rand -hex 12)
     cat > .env << EOF
@@ -43,6 +45,7 @@ ADMIN_USERNAME=admin
 ADMIN_PASSWORD=$ADMIN_PASS
 DATA_DIR=data
 EOF
+    rm -f data/users.json
 fi
 
 # Supervisor
