@@ -399,3 +399,13 @@ def test_developer_delete_respects_entity_reference_protection():
 
         assert any("حذف فیزیکی مجاز نیست" in message for message in messages)
         assert app_module.Entity.query.get(person.id) is not None
+
+def test_sensitive_query_values_are_redacted_from_request_logs():
+    with app_module.app.test_request_context(
+        "/test?token=secret-token&api_key=secret-key&name=Mahdi&authorization=bearer-secret"
+    ):
+        safe = app_module._safe_request_args_for_log()
+    assert safe["token"] == "***"
+    assert safe["api_key"] == "***"
+    assert safe["authorization"] == "***"
+    assert safe["name"] == "Mahdi"
