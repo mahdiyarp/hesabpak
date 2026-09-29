@@ -1,11 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-ماژول ساده برای نگهداری نرخ‌ها (دستی یا برنامه‌پذیر).
+مدیریت نرخ‌های ارز و طلا.
 
-این نسخهٔ MVP به صورت محلی نرخ‌ها را در `data/rates.json` ذخیره می‌کند و
-یک API ساده برای خواندن/نوشتن فراهم می‌کند. در آینده می‌توان fetch خودکار
-از منابع خارجی اضافه کرد.
+نرخ‌ها به‌صورت snapshot محلی در `data/rates.json` ذخیره می‌شوند و در صورت
+فعال‌بودن updater می‌توانند به‌طور دوره‌ای از منابع بیرونی تازه‌سازی شوند.
 """
+
 from __future__ import annotations
 import json
 from pathlib import Path
@@ -83,9 +83,13 @@ def _parse_number(text: str) -> Optional[float]:
         return None
     # replace Persian digits with Latin
     persian_digits = '۰۱۲۳۴۵۶۷۸۹'
+    arabic_digits = '٠١٢٣٤٥٦٧٨٩'
     latin_digits = '0123456789'
-    trans = {ord(a): b for a, b in zip(persian_digits, latin_digits)}
+    trans = {}
+    trans.update({ord(a): b for a, b in zip(persian_digits, latin_digits)})
+    trans.update({ord(a): b for a, b in zip(arabic_digits, latin_digits)})
     t = text.translate(trans)
+    t = t.replace('٬', '').replace('،', '').replace('٫', '.')
     # remove non-digit, non-dot, non-comma
     t = re.sub(r"[^0-9.,-]", "", t)
     t = t.replace(',', '')
