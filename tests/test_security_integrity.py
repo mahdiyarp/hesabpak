@@ -108,3 +108,32 @@ from utils.rates import _parse_number
 def test_rate_parser_accepts_persian_and_arabic_digits():
     assert _parse_number("۱٬۲۳۴٬۵۶۷") == 1234567
     assert _parse_number("١،٢٣٤٫٥") == 1234.5
+
+
+def test_reports_fallback_escapes_query_and_date_values(monkeypatch):
+    def noop_permission(*args, **kwargs):
+        return None
+
+    def fake_render(template_name, **kwargs):
+        if template_name == "reports.html":
+            raise RuntimeError("force fallback")
+        return kwargs["content"]
+
+    monkeypatch.setattr(app_module, "ensure_permission", noop_permission)
+    monkeypatch.setattr(app_module, "render_template", fake_render)
+
+    malicious_q = "<img src=x onerror=alert(1)>"
+    malicious_from = "'><script>alert(1)</script>"
+    malicious_to = "\" onfocus=\"alert(2)"
+
+    with app_module.app.test_request_context(
+        "/reports",
+        query_string={"q": malicious_q, "from": malicious_from, "to": malicious_to},
+    ):
+        rendered = str(app_module.reports())
+
+    assert malicious_q not in rendered
+    assert malicious_from not in rendered
+    assert malicious_to not in rendered
+    assert "&lt;img" in rendered
+    assert "&lt;script&gt;" in rendered
