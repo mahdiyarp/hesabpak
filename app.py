@@ -123,11 +123,29 @@ def record_ledger(
 load_dotenv()
 PROJECT_ROOT = Path(__file__).resolve().parent
 PORT = int(os.environ.get("PORT", "8000"))
-SECRET_KEY = os.environ.get("SECRET_KEY", "change-me-please")
+FLASK_ENV = os.environ.get("FLASK_ENV", "development").strip().lower()
+SECRET_KEY = os.environ.get("SECRET_KEY", "").strip()
 URL_PREFIX = os.environ.get("URL_PREFIX", "") or ""   # مثلا: /hesabpak
-ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
+ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin").strip() or "admin"
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "").strip()
 DATA_DIR = os.environ.get("DATA_DIR", "data")
+
+# Development may start with ephemeral credentials for local testing. Production
+# must always receive explicit credentials from the environment/configuration.
+if FLASK_ENV == "production":
+    if not SECRET_KEY:
+        raise RuntimeError("SECRET_KEY باید در محیط production تنظیم شود.")
+    if not ADMIN_PASSWORD:
+        # Existing installations may already have users.json, so do not break
+        # startup when the admin credential has already been provisioned.
+        _existing_users_file = Path(DATA_DIR).resolve() / "users.json"
+        if not _existing_users_file.exists():
+            raise RuntimeError("ADMIN_PASSWORD باید قبل از bootstrap مدیر در production تنظیم شود.")
+elif not SECRET_KEY:
+    SECRET_KEY = secrets.token_hex(32)
+
+if not ADMIN_PASSWORD:
+    ADMIN_PASSWORD = "admin123"
 
 ALLOWED_CMDS = {"ADD_ITEM","ADD_PERSON","RENAME","DELETE","SEED_ITEMS","SEED_ACCOUNTS"}
 
