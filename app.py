@@ -167,10 +167,17 @@ DASHBOARD_WIDGET_CHOICES = [
 ]
 
 ASSISTANT_MODEL_CHOICES = [
-    ("gpt-4o-mini", "GPT-4o mini"),
+    ("gpt-5-mini", "GPT-5 mini"),
     ("gpt-4.1-mini", "GPT-4.1 mini"),
-    ("o4-mini", "o4 mini (چندحالته)"),
+    ("gpt-4o-mini", "GPT-4o mini"),
 ]
+
+# Reasoning models do not use the sampling temperature control.
+ASSISTANT_REASONING_MODELS = {"gpt-5-mini"}
+ASSISTANT_MODEL_ALIASES = {
+    # Deprecated model kept only as a migration alias for old saved settings.
+    "o4-mini": "gpt-5-mini",
+}
 
 CASH_METHOD_LABELS = {
     "cash": "نقدی",
@@ -796,6 +803,7 @@ def _allow_negative_sales() -> bool:
 
 def _assistant_model() -> str:
     key = (Setting.get("openai_model", ASSISTANT_MODEL_CHOICES[0][0]) or ASSISTANT_MODEL_CHOICES[0][0]).strip()
+    key = ASSISTANT_MODEL_ALIASES.get(key, key)
     valid = {k for k, _ in ASSISTANT_MODEL_CHOICES}
     if key not in valid:
         key = ASSISTANT_MODEL_CHOICES[0][0]
@@ -1127,8 +1135,12 @@ def _call_openai_assistant(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
     if OpenAI is None:
         raise RuntimeError("کتابخانه openai نصب نشده است.")
 
-    # استفاده از مدل شخصی یا پیش‌فرض
-    model = user_settings.openai_model if user_settings.openai_model else _assistant_model()
+    # استفاده از مدل شخصی یا پیش‌فرض؛ مقادیر deprecated به alias فعلی نگاشت می‌شوند.
+    model = (user_settings.openai_model or "").strip()
+    model = ASSISTANT_MODEL_ALIASES.get(model, model)
+    valid_models = {key for key, _ in ASSISTANT_MODEL_CHOICES}
+    if model not in valid_models:
+        model = _assistant_model()
     
     # استفاده از دستورالعمل سیستمی شخصی یا پیش‌فرض
     if user_settings.system_prompt:
@@ -1152,11 +1164,17 @@ def _call_openai_assistant(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
         {"role": "system", "content": [{"type": "input_text", "text": system_prompt}]}
     ] + _build_openai_messages(messages)
 
-    # استفاده از temperature شخصی
+    # استفاده از temperature شخصی برای مدل‌های sampling-based؛ reasoning models مقدار temperature نمی‌گیرند.
     temperature = user_settings.temperature if user_settings.temperature is not None else 0.7
-    
+    if not isinstance(temperature, (int, float)) or not 0 <= float(temperature) <= 2:
+        temperature = 0.7
+
     # استفاده از max_tokens شخصی یا پیش‌فرض
     max_tokens = user_settings.max_tokens if user_settings.max_tokens else 800
+    try:
+        max_tokens = max(100, min(int(max_tokens), 16000))
+    except (TypeError, ValueError):
+        max_tokens = 800
 
     # Responses API uses text.format for Structured Outputs.
     # Keep a compatibility fallback for older SDK variants exposing
@@ -1169,27 +1187,32 @@ def _call_openai_assistant(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
             "strict": True,
         }
     }
+    request_kwargs = {
+        "model": model,
+        "input": request_messages,
+        "max_output_tokens": max_tokens,
+        "text": response_format,
+    }
+    if model not in ASSISTANT_REASONING_MODELS:
+        request_kwargs["temperature"] = temperature
+
     try:
         try:
-            response = client.responses.create(
-                model=model,
-                input=request_messages,
-                max_output_tokens=max_tokens,
-                temperature=temperature,
-                text=response_format,
-            )
+            response = client.responses.create(**request_kwargs)
         except TypeError:
             app.logger.warning("OpenAI client.responses.create() does not support text.format; trying legacy response_format")
-            response = client.responses.create(
-                model=model,
-                input=request_messages,
-                max_output_tokens=max_tokens,
-                temperature=temperature,
-                response_format={
+            legacy_kwargs = {
+                "model": model,
+                "input": request_messages,
+                "max_output_tokens": max_tokens,
+                "response_format": {
                     "type": "json_schema",
                     "json_schema": AI_RESPONSE_SCHEMA,
                 },
-            )
+            }
+            if model not in ASSISTANT_REASONING_MODELS:
+                legacy_kwargs["temperature"] = temperature
+            response = client.responses.create(**legacy_kwargs)
     except Exception as e:
         # Log full exception for diagnostics and return a safe fallback reply
         app.logger.exception("OpenAI assistant request failed: %s", e)
