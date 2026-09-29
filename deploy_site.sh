@@ -22,7 +22,12 @@ apt-get install -y python3 python3-venv python3-pip git nginx openssl
 if [ -d "$APP_DIR/.git" ]; then
   echo "Updating existing repo"
   cd "$APP_DIR"
-  git pull origin main || true
+  if [ -n "$(git status --porcelain)" ]; then
+    echo "Refusing to deploy over local uncommitted changes."
+    exit 1
+  fi
+  git fetch origin main --prune
+  git merge --ff-only origin/main
 else
   echo "Cloning repository"
   git clone "$REPO_URL" "$APP_DIR"
