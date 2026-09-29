@@ -9,11 +9,15 @@ echo "🚀 نصب حساب‌پاک..."
 sudo apt-get update -qq
 sudo apt-get install -y python3 python3-pip python3-venv git nginx supervisor sqlite3 -qq
 
-# ایجاد دایرکتوری
+# ایجاد دایرکتوری و انتخاب کاربر غیر root برای سرویس
 APP_DIR="/var/www/hesabpak"
-sudo mkdir -p $APP_DIR
-sudo chown -R $USER:$USER $APP_DIR
-cd $APP_DIR
+RUN_USER="${SUDO_USER:-$USER}"
+if [ "$RUN_USER" = "root" ]; then
+    RUN_USER="www-data"
+fi
+sudo mkdir -p "$APP_DIR"
+sudo chown -R "$RUN_USER:$RUN_USER" "$APP_DIR"
+cd "$APP_DIR"
 
 # دانلود کد
 if [ ! -d ".git" ]; then
@@ -27,6 +31,7 @@ if [ ! -f .env ]; then
     SECRET=$(openssl rand -hex 32)
     ADMIN_PASS=$(openssl rand -hex 12)
     cat > .env << EOF
+FLASK_ENV=production
 PORT=8000
 SECRET_KEY=$SECRET
 ADMIN_USERNAME=admin
@@ -35,6 +40,7 @@ DATA_DIR=data
 SESSION_COOKIE_SECURE=false
 MAX_UPLOAD_MB=15
 EOF
+    sudo chown "$RUN_USER:$RUN_USER" .env
     chmod 600 .env
 fi
 
@@ -54,8 +60,9 @@ python3 -c "from app import app, db; app.app_context().push(); db.create_all()"
 sudo tee /etc/supervisor/conf.d/hesabpak.conf > /dev/null << EOF
 [program:hesabpak]
 directory=$APP_DIR
-command=$APP_DIR/venv/bin/python app.py
-user=$USER
+command=$APP_DIR/venv/bin/gunicorn --bind 127.0.0.1:8000 "app:app"
+user=$RUN_USER
+environment=FLASK_ENV="production"
 autostart=true
 autorestart=true
 stdout_logfile=/var/log/hesabpak.log
@@ -75,6 +82,8 @@ server {
         proxy_pass http://127.0.0.1:8000;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
     }
     location /static {
         alias /var/www/hesabpak/static;
@@ -92,3 +101,4 @@ echo "🌐 آدرس: http://$(hostname -I | awk '{print $1}')"
 echo "👤 نام کاربری مدیر: admin"
 echo "🔐 رمز مدیر در $APP_DIR/.env تولید شده است."
 echo "📝 لاگ: sudo tail -f /var/log/hesabpak.log"
+echo "⚠️ این نصب HTTP-only است؛ قبل از دسترسی عمومی HTTPS را فعال کنید."
