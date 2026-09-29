@@ -91,3 +91,40 @@ def test_request_origin_guard():
         headers={"Sec-Fetch-Site": "cross-site"},
     ):
         assert not app_module._request_origin_is_trusted()
+
+
+from utils.bank_utils import (
+    detect_bank,
+    detect_bank_from_iban,
+    detect_bank_from_bin,
+    validate_card,
+    validate_iban,
+)
+
+
+def test_iranian_card_validation_and_bin_detection():
+    valid_card = "6037991234567893"
+    assert validate_card(valid_card) is True
+    assert validate_card("6037991234567894") is False
+    info = detect_bank(valid_card)
+    assert info["type"] == "card"
+    assert info["valid"] is True
+    assert info["bin"] == "603799"
+    assert info["bank"]["bank"] == "بانک ملی ایران"
+
+
+def test_iranian_sheba_validation_and_bank_detection():
+    valid_iban = "IR270171234567890123456789"
+    assert validate_iban(valid_iban) is True
+    assert validate_iban(valid_iban[:-1] + "0") is False
+    info = detect_bank(valid_iban)
+    assert info["type"] == "shaba"
+    assert info["valid"] is True
+    assert info["bank"]["code"] == "017"
+    assert info["bank"]["bank"] == "بانک ملی ایران"
+    assert detect_bank_from_iban(valid_iban)["code"] == "017"
+
+
+def test_bank_detection_accepts_persian_and_arabic_digits():
+    assert detect_bank_from_bin("۶۰۳۷۹۹")["bank"] == "بانک ملی ایران"
+    assert detect_bank("۶۰۳۷۹۹۱۲۳۴۵۶۷۸۹۳")["valid"] is True
