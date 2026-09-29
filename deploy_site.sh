@@ -16,7 +16,7 @@ echo "Deploying hesabpak to $APP_DIR"
 
 # install prerequisites
 apt-get update
-apt-get install -y python3 python3-venv python3-pip git nginx
+apt-get install -y python3 python3-venv python3-pip git nginx openssl
 
 # clone or pull
 if [ -d "$APP_DIR/.git" ]; then
@@ -29,6 +29,30 @@ else
 fi
 
 cd "$APP_DIR"
+
+# Run the application as an unprivileged service account.
+chown -R "$USER:$GROUP" "$APP_DIR"
+mkdir -p "$APP_DIR/data/backups" "$APP_DIR/data/uploads" "$APP_DIR/data/fiscal_cases" "$APP_DIR/tmp"
+chown -R "$USER:$GROUP" "$APP_DIR/data" "$APP_DIR/tmp"
+
+# Generate production configuration only on first install.
+if [ ! -f "$APP_DIR/.env" ]; then
+  umask 077
+  SECRET_KEY_VALUE="$(openssl rand -hex 32)"
+  ADMIN_PASSWORD_VALUE="$(openssl rand -hex 12)"
+  cat > "$APP_DIR/.env" <<EOF
+FLASK_ENV=production
+PORT=$PORT
+SECRET_KEY=$SECRET_KEY_VALUE
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=$ADMIN_PASSWORD_VALUE
+DATA_DIR=data
+SESSION_COOKIE_SECURE=false
+MAX_UPLOAD_MB=15
+EOF
+  chown "$USER:$GROUP" "$APP_DIR/.env"
+  chmod 600 "$APP_DIR/.env"
+fi
 
 # create venv and install requirements
 if [ ! -d "$VENV_DIR" ]; then
@@ -53,7 +77,14 @@ WorkingDirectory=$APP_DIR
 Environment=FLASK_APP=app.py
 Environment=PORT=$PORT
 Environment=URL_PREFIX=
-ExecStart=$VENV_DIR/bin/gunicorn -b 0.0.0.0:$PORT "app:app"
+EnvironmentFile=-$APP_DIR/.env
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=full
+ReadWritePaths=$APP_DIR/data $APP_DIR/tmp
+ExecStart=$VENV_DIR/bin/gunicorn -b 127.0.0.1:$PORT "app:app"
 Restart=always
 
 [Install]
@@ -89,3 +120,5 @@ nginx -t
 systemctl restart nginx
 
 echo "Deployment complete. Visit http://hesabpak.com (ensure DNS points to this host)"
+echo "WARNING: this script currently serves HTTP only. Enable HTTPS before exposing the service publicly."
+echo "Generated admin password is stored in $APP_DIR/.env."
