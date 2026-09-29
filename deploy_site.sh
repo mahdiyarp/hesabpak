@@ -26,6 +26,17 @@ if [ -d "$APP_DIR/.git" ]; then
     echo "Refusing to deploy over local uncommitted changes."
     exit 1
   fi
+
+  # Create a full application backup before changing the deployed code.
+  if [ -f "$APP_DIR/.env" ] && [ -x "$VENV_DIR/bin/python" ]; then
+    echo "Creating pre-update full backup..."
+    source "$VENV_DIR/bin/activate"
+    DATA_DIR="${DATA_DIR:-$APP_DIR/data}" "$VENV_DIR/bin/python" -c 'from app import app; from utils.backup_utils import create_full_backup; print(create_full_backup(app, user="deploy", reason="pre-update"))'
+    deactivate
+  else
+    echo "Existing deployment has no usable environment yet; skipping pre-update app backup."
+  fi
+
   git fetch origin main --prune
   git merge --ff-only origin/main
 else
