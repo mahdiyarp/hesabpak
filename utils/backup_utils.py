@@ -68,25 +68,41 @@ def resolve_backup_path(app, zip_filename):
 
 def create_full_backup(app, user="system", reason="manual"):
     """
-    می‌سازد: ZIP شامل DB + uploads/ (اختیاری) + metadata.json
-    خروجی: مسیر فایل بکاپ
+    ZIP کامل: DB + uploads/ (اختیاری) + کاربران + پرونده‌های سال مالی +
+    سایر JSONهای runtime + metadata.
     """
     data_dir, backup_dir, autosave_dir, uploads_dir = ensure_dirs(app)
     stamp = now_stamp()
-    fn = f"backup_{stamp}_{uuid.uuid4().hex[:8]}.zip"
-    out = backup_dir / fn
+    out = backup_dir / f"backup_{stamp}_{uuid.uuid4().hex[:8]}.zip"
+
+    users_path = data_dir / "users.json"
+    fiscal_cases_dir = data_dir / "fiscal_cases"
+    runtime_json = sorted(
+        p for p in data_dir.glob("*.json")
+        if p.is_file() and p.name not in {"users.json", "users.json.example"}
+    )
+
+    include_uploads = str(app.config.get("INCLUDE_UPLOADS_IN_BACKUP", "true")).lower() == "true"
+    include_users = users_path.is_file()
+    include_fiscal_cases = fiscal_cases_dir.exists()
 
     meta = {
+        "format_version": 3,
         "created_at": stamp,
         "user": user,
         "reason": reason,
-        "db_file": str(db_path(app).name),
-        "include_uploads": str(app.config.get("INCLUDE_UPLOADS_IN_BACKUP", "true")).lower(),
+        "db_file": db_path(app).name,
+        "include_uploads": include_uploads,
+        "uploads_count": 0,
+        "include_users_file": include_users,
+        "include_fiscal_cases": include_fiscal_cases,
+        "fiscal_case_files": 0,
+        "include_runtime_json": bool(runtime_json),
+        "runtime_json_files": 0,
         "app_version": app.config.get("APP_VERSION", "unknown"),
     }
 
     with zipfile.ZipFile(out, "w", compression=zipfile.ZIP_DEFLATED) as z:
-        # DB: use SQLite's online backup API so active databases are copied consistently.
         dbfile = db_path(app)
         if dbfile.exists():
             fd, tmp_name = tempfile.mkstemp(prefix="hesabpak_backup_", suffix=".sqlite3")
@@ -94,13 +110,13 @@ def create_full_backup(app, user="system", reason="manual"):
             temp_db = Path(tmp_name)
             try:
                 if dbfile.suffix.lower() in {".db", ".sqlite", ".sqlite3"}:
-                    src = sqlite3.connect(str(dbfile))
-                    dst = sqlite3.connect(str(temp_db))
+                    src_db = sqlite3.connect(str(dbfile))
+                    dst_db = sqlite3.connect(str(temp_db))
                     try:
-                        src.backup(dst)
+                        src_db.backup(dst_db)
                     finally:
-                        dst.close()
-                        src.close()
+                        dst_db.close()
+                        src_db.close()
                 else:
                     shutil.copy2(dbfile, temp_db)
                 z.write(temp_db, arcname=f"db/{dbfile.name}")
@@ -110,17 +126,21 @@ def create_full_backup(app, user="system", reason="manual"):
                 except TypeError:
                     if temp_db.exists():
                         temp_db.unlink()
-        # uploads (اختیاری)
-        if str(app.config.get("INCLUDE_UPLOADS_IN_BACKUP", "true")).lower() == "true":
-            if uploads_dir.exists():
-                for root, dirs, files in os.walk(uploads_dir):
-                    for f in files:
-                        p = Path(root)/f
-                        rel = p.relative_to(data_dir)
-                        z.write(p, arcname=str(rel))
-        # User catalog and fiscal-year case files are runtime state outside SQLite.
+
+        if include_uploads and uploads_dir.exists():
+            for root, dirs, files in os.walk(uploads_dir):
+                for f in files:
+                    p = Path(root) / f
+                    z.write(p, arcname=str(p.relative_to(data_dir)))
+                    meta["uploads_count"] += 1
+
         if include_users:
             z.write(users_path, arcname="runtime/users.json")
+
+        for p in runtime_json:
+            z.write(p, arcname=str(Path("runtime") / "json" / p.name))
+            meta["runtime_json_files"] += 1
+
         if include_fiscal_cases:
             for root, dirs, files in os.walk(fiscal_cases_dir):
                 for f in files:
@@ -129,10 +149,8 @@ def create_full_backup(app, user="system", reason="manual"):
                     z.write(p, arcname=str(Path("runtime") / "fiscal_cases" / rel))
                     meta["fiscal_case_files"] += 1
 
-        # metadata
         z.writestr("metadata.json", json.dumps(meta, ensure_ascii=False, indent=2))
     return str(out)
-
 
 def list_backups(app, year_key: Optional[str] = None):
     """Return backup metadata for the requested fiscal year.
@@ -208,17 +226,13 @@ def _extract_archive_tree(z: zipfile.ZipFile, archive_prefix: str, staging_root:
 
 
 def _extract_backup_uploads(z: zipfile.ZipFile, staging_root: Path) -> bool:
-    """Extract upload members with archive path traversal protection."""
     return _extract_archive_tree(z, "uploads", staging_root)
 
 
 def restore_backup(app, zip_filename):
     """
-    Restore SQLite plus upload files from a full backup.
-
-    The current DB and uploads are preserved as .before-restore siblings so
-    the operation can be rolled back if any later replacement step fails.
-    The service should still be restarted after restore.
+    Restore the full runtime state stored by a backup.
+    Every archive tree is staged and validated before live replacement.
     """
     data_dir, backup_dir, _, uploads_dir = ensure_dirs(app)
     zpath = resolve_backup_path(app, zip_filename)
@@ -226,21 +240,52 @@ def restore_backup(app, zip_filename):
         raise FileNotFoundError("بکاپ پیدا نشد")
 
     dbfile = db_path(app)
+    users_path = data_dir / "users.json"
+    fiscal_cases_dir = data_dir / "fiscal_cases"
+
     temp_root = Path(tempfile.mkdtemp(prefix="hesabpak_restore_"))
     extracted_db = temp_root / dbfile.name
     staged_live_db = temp_root / (dbfile.name + ".restored")
     staged_uploads = temp_root / "uploads"
+    runtime_stage = temp_root / "runtime"
+    staged_runtime_json = runtime_stage / "json"
+    staged_fiscal_cases = runtime_stage / "fiscal_cases"
+    runtime_json_backup = temp_root / "runtime-json-before-restore"
+
     old_db = Path(str(dbfile) + ".before-restore")
     old_uploads = Path(str(uploads_dir) + ".before-restore")
+    old_users = Path(str(users_path) + ".before-restore")
+    old_fiscal_cases = Path(str(fiscal_cases_dir) + ".before-restore")
+
+    live_db_had_previous = dbfile.is_file()
+    uploads_had_previous = uploads_dir.exists()
+    users_had_previous = users_path.is_file()
+    fiscal_cases_had_previous = fiscal_cases_dir.exists()
+
     db_replaced = False
     uploads_replaced = False
     uploads_moved_aside = False
-    uploads_found = False
+    users_replaced = False
+    fiscal_cases_replaced = False
+    fiscal_cases_moved_aside = False
+    runtime_json_replaced = False
+    runtime_json_moved_aside = False
+    restore_uploads = False
+    restore_users = False
+    restore_fiscal_cases = False
+    restore_runtime_json = False
 
     try:
         with zipfile.ZipFile(zpath, "r") as z:
-            db_inside = None
+            metadata = {}
+            try:
+                with z.open("metadata.json", "r") as meta_src:
+                    metadata = json.load(meta_src)
+            except Exception:
+                metadata = {}
+
             expected_name = f"db/{dbfile.name}"
+            db_inside = None
             for info in z.infolist():
                 if info.is_dir():
                     continue
@@ -264,35 +309,132 @@ def restore_backup(app, zip_filename):
             finally:
                 con.close()
 
-            uploads_found = _extract_backup_uploads(z, staged_uploads)
+            include_uploads = str(metadata.get("include_uploads", "")).strip().lower() == "true"
+            restore_uploads = include_uploads or any(
+                info.filename.replace("\\", "/").startswith("uploads/") and not info.is_dir()
+                for info in z.infolist()
+            )
+            if restore_uploads:
+                staged_uploads.mkdir(parents=True, exist_ok=True)
+                _extract_backup_uploads(z, staged_uploads)
 
-        if dbfile.exists():
+            include_users = str(metadata.get("include_users_file", "")).strip().lower() == "true"
+            include_fiscal_cases = str(metadata.get("include_fiscal_cases", "")).strip().lower() == "true"
+            runtime_members_present = any(
+                info.filename.replace("\\", "/").startswith("runtime/") and not info.is_dir()
+                for info in z.infolist()
+            )
+            if runtime_members_present or include_users or include_fiscal_cases:
+                _extract_archive_tree(z, "runtime", runtime_stage)
+
+            staged_users = runtime_stage / "users.json"
+            if include_users:
+                if not staged_users.is_file():
+                    raise RuntimeError("فایل users.json داخل بکاپ وجود ندارد.")
+                restore_users = True
+            elif staged_users.is_file():
+                restore_users = True
+
+            if include_fiscal_cases:
+                staged_fiscal_cases.mkdir(parents=True, exist_ok=True)
+                restore_fiscal_cases = True
+            elif staged_fiscal_cases.exists():
+                restore_fiscal_cases = True
+
+            include_runtime_json = str(metadata.get("include_runtime_json", "")).strip().lower() == "true"
+            if include_runtime_json:
+                staged_runtime_json.mkdir(parents=True, exist_ok=True)
+                restore_runtime_json = True
+            elif staged_runtime_json.exists():
+                restore_runtime_json = True
+
+        if live_db_had_previous:
             shutil.copy2(dbfile, old_db)
         shutil.copy2(extracted_db, staged_live_db)
         os.replace(staged_live_db, dbfile)
         db_replaced = True
 
-        if uploads_found:
+        if restore_uploads:
             if old_uploads.exists():
                 if old_uploads.is_dir():
                     shutil.rmtree(old_uploads)
                 else:
                     old_uploads.unlink()
-            if uploads_dir.exists():
+            if uploads_had_previous and uploads_dir.exists():
                 shutil.move(str(uploads_dir), str(old_uploads))
                 uploads_moved_aside = True
+            staged_uploads.mkdir(parents=True, exist_ok=True)
             shutil.move(str(staged_uploads), str(uploads_dir))
             uploads_replaced = True
+
+        if restore_runtime_json:
+            runtime_json_backup.mkdir(parents=True, exist_ok=True)
+            current_json = {
+                p.name: p for p in data_dir.glob("*.json")
+                if p.is_file() and p.name not in {"users.json", "users.json.example"}
+            }
+            for name, p in current_json.items():
+                shutil.copy2(p, runtime_json_backup / name)
+            runtime_json_moved_aside = bool(current_json)
+            runtime_json_replaced = True
+
+            staged_json = {
+                p.name: p for p in staged_runtime_json.glob("*.json")
+                if p.is_file()
+            }
+            for name in set(current_json) - set(staged_json):
+                (data_dir / name).unlink(missing_ok=True)
+            for name, p in staged_json.items():
+                os.replace(p, data_dir / name)
+
+        if restore_users:
+            if old_users.exists():
+                old_users.unlink()
+            if users_had_previous:
+                shutil.copy2(users_path, old_users)
+            os.replace(staged_users, users_path)
+            users_replaced = True
+
+        if restore_fiscal_cases:
+            if old_fiscal_cases.exists():
+                if old_fiscal_cases.is_dir():
+                    shutil.rmtree(old_fiscal_cases)
+                else:
+                    old_fiscal_cases.unlink()
+            if fiscal_cases_had_previous and fiscal_cases_dir.exists():
+                shutil.move(str(fiscal_cases_dir), str(old_fiscal_cases))
+                fiscal_cases_moved_aside = True
+            staged_fiscal_cases.mkdir(parents=True, exist_ok=True)
+            shutil.move(str(staged_fiscal_cases), str(fiscal_cases_dir))
+            fiscal_cases_replaced = True
+
     except Exception:
         try:
-            if db_replaced and old_db.exists():
-                shutil.copy2(old_db, dbfile)
+            if db_replaced:
+                if old_db.exists():
+                    shutil.copy2(old_db, dbfile)
+                elif not live_db_had_previous and dbfile.exists():
+                    dbfile.unlink()
+
             if uploads_replaced and uploads_dir.exists():
                 shutil.rmtree(uploads_dir)
             if uploads_moved_aside and old_uploads.exists():
                 shutil.move(str(old_uploads), str(uploads_dir))
-            if users_replaced and old_users.exists():
-                shutil.copy2(old_users, users_path)
+
+            if runtime_json_replaced:
+                for p in data_dir.glob("*.json"):
+                    if p.is_file() and p.name not in {"users.json", "users.json.example"}:
+                        p.unlink()
+                if runtime_json_moved_aside:
+                    for p in runtime_json_backup.glob("*.json"):
+                        shutil.copy2(p, data_dir / p.name)
+
+            if users_replaced:
+                if users_path.exists():
+                    users_path.unlink()
+                if old_users.exists():
+                    shutil.copy2(old_users, users_path)
+
             if fiscal_cases_replaced and fiscal_cases_dir.exists():
                 shutil.rmtree(fiscal_cases_dir)
             if fiscal_cases_moved_aside and old_fiscal_cases.exists():
