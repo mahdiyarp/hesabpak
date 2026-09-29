@@ -4763,4 +4763,5 @@ if __name__ == "__main__":
     if URL_PREFIX:
         print("Running with URL prefix:", URL_PREFIX)
     print(f"Activity log: {LOG_FILE}")
-    app.run(host="0.0.0.0", port=PORT, debug=True)
+    debug_enabled = os.environ.get("FLASK_DEBUG", "").strip().lower() in {"1", "true", "yes", "on"}
+    app.run(host="0.0.0.0", port=PORT, debug=debug_enabled)
