@@ -134,3 +134,19 @@ def test_prepare_cash_plan_rejects_unknown_type_and_invalid_dates():
             "amount": 100,
             "cheque_due": "not-a-date",
         })
+
+
+def test_assistant_model_migrates_deprecated_alias():
+    with app_module.app.app_context():
+        original = app_module.Setting.get("openai_model")
+        try:
+            app_module.Setting.set("openai_model", "o4-mini")
+            assert app_module._assistant_model() == "gpt-5-mini"
+        finally:
+            app_module.Setting.set("openai_model", original or "gpt-5-mini")
+            app_module.db.session.rollback()
+
+
+def test_reasoning_model_is_marked_for_temperature_omission():
+    assert "gpt-5-mini" in app_module.ASSISTANT_REASONING_MODELS
+    assert "o4-mini" not in {key for key, _ in app_module.ASSISTANT_MODEL_CHOICES}
