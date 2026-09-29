@@ -358,7 +358,6 @@ def test_restore_rollback_removes_new_users_file_when_original_was_absent(tmp_pa
             raise OSError("forced users replacement failure")
         return original_replace(src, dst)
 
-    import os
     monkeypatch.setattr(os, "replace", fail_on_users)
 
     with pytest.raises(OSError):
