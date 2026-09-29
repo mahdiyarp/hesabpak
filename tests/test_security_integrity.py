@@ -214,3 +214,12 @@ def test_logout_route_requires_post():
     logout_rules = [r for r in rules if r.endpoint == "logout"]
     assert logout_rules
     assert all("POST" in r.methods and "GET" not in r.methods for r in logout_rules)
+
+
+def test_payment_route_is_owned_by_unified_cash_only():
+    rules = [
+        r for r in app_module.app.url_map.iter_rules()
+        if r.rule == "/payment"
+    ]
+    assert len(rules) == 1
+    assert rules[0].endpoint == "unified_cash"
