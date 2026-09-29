@@ -11,3 +11,8 @@ data/backups/
 data/autosave/
 data/uploads/
 data/fiscal_cases/
+
+# Build/demo artifacts
+data-demo/
+dist/
+*.sha256
