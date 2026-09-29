@@ -23,3 +23,13 @@ def test_production_deploy_generates_non_default_credentials():
     assert 'openssl rand -hex 12' in deploy
     assert 'ADMIN_USERNAME=admin' in deploy
     assert 'ADMIN_PASSWORD=$ADMIN_PASSWORD_VALUE' in deploy
+
+def test_legacy_install_script_uses_production_service_defaults():
+    install = (ROOT / "install.sh").read_text(encoding="utf-8")
+
+    assert 'RUN_USER="${SUDO_USER:-$USER}"' in install
+    assert "FLASK_ENV=production" in install
+    assert 'command=$APP_DIR/venv/bin/gunicorn --bind 127.0.0.1:8000 "app:app"' in install
+    assert "user=$RUN_USER" in install
+    assert "X-Forwarded-Proto $scheme" in install
+    assert "HTTPS را فعال کنید" in install
