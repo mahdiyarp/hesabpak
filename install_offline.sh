@@ -113,9 +113,9 @@ server {
 EOF
 
 ln -sf /etc/nginx/sites-available/hesabpak /etc/nginx/sites-enabled/hesabpak
+nginx -t
 systemctl daemon-reload
 systemctl enable --now "$SERVICE_NAME"
-nginx -t
 systemctl restart nginx
 
 echo
