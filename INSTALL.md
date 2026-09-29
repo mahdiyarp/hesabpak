@@ -1,83 +1,24 @@
-# 🚀 نصب یک‌دستوری حساب‌پاک
+# نصب حساب‌پاک
 
-## کد نصب (فقط کپی و پیست کنید):
-
-```bash
-bash <(curl -fsSL https://raw.githubusercontent.com/mahdiyarp/hesabpak/main/install.sh)
-```
-
-### یا اگر `curl` ندارید:
+برای نصب جدید، از مسیر hardened استفاده کنید:
 
 ```bash
-bash <(wget -qO- https://raw.githubusercontent.com/mahdiyarp/hesabpak/main/install.sh)
+curl -fsSL https://raw.githubusercontent.com/mahdiyarp/hesabpak/main/deploy_site.sh | sudo bash
 ```
 
----
-
-## ✅ بعد از نصب:
-
-- **آدرس سایت**: `http://IP_SERVER`
-- **نام کاربری**: `admin`
-- **رمز عبور**: هنگام نصب به‌صورت تصادفی در `.env` تولید می‌شود.
-
-برای مشاهده رمز مدیر روی سرور:
-`sudo grep '^ADMIN_PASSWORD=' /var/www/hesabpak/.env`
-
----
-
-## 🔧 دستورات مفید:
+یا از ورودی سازگاری قدیمی استفاده کنید:
 
 ```bash
-# مشاهده لاگ
-sudo tail -f /var/log/hesabpak.log
-
-# ری‌استارت
-sudo supervisorctl restart hesabpak
-
-# وضعیت
-sudo supervisorctl status hesabpak
-
-# توقف
-sudo supervisorctl stop hesabpak
-
-# راه‌اندازی مجدد
-sudo supervisorctl start hesabpak
+curl -fsSL https://raw.githubusercontent.com/mahdiyarp/hesabpak/main/install.sh | sudo bash
 ```
 
----
+`install.sh` و `deploy_auto.sh` فقط wrapper هستند و منطق مستقل ندارند؛ بنابراین نصب قدیمی با مسیر production اصلی یکسان باقی می‌ماند.
 
-## 🔄 بروزرسانی:
+پس از نصب:
 
 ```bash
-cd /var/www/hesabpak
-git pull
-source venv/bin/activate
-pip install -r requirements.txt
-sudo supervisorctl restart hesabpak
+sudo systemctl status hesabpak --no-pager
+sudo journalctl -u hesabpak -n 100 --no-pager
 ```
 
----
-
-## 🛡️ امنیت:
-
-### فعال‌سازی HTTPS (رایگان):
-```bash
-sudo apt install certbot python3-certbot-nginx
-sudo certbot --nginx -d yourdomain.com
-```
-
-### تغییر رمز ادمین:
-1. وارد سایت شوید
-2. وارد بخش «مدیریت کاربران» شوید
-3. برای کاربر `admin` رمز جدید تعیین و ذخیره کنید
-
----
-
-## 📞 پشتیبانی:
-
-- **GitHub**: https://github.com/mahdiyarp/hesabpak
-- **مشکلات**: https://github.com/mahdiyarp/hesabpak/issues
-
----
-
-**نصب موفقیت‌آمیز! 🎉**
+نصب پایه HTTP است؛ قبل از دسترسی عمومی HTTPS را فعال کنید و سپس `SESSION_COOKIE_SECURE=true` را در `.env` قرار دهید.
