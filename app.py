@@ -1815,13 +1815,11 @@ def _apply_invoice_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
 
     inv.total = total
 
-    try:
-        if kind == "sales":
-            partner_entity.balance = float(partner_entity.balance or 0.0) + float(total)
-        else:
-            partner_entity.balance = float(partner_entity.balance or 0.0) - float(total)
-    except Exception:
-        partner_entity.balance = float(total) if kind == "sales" else -float(total)
+    # Update the denormalized person balance atomically in the same transaction.
+    _adjust_person_balance_delta(
+        partner_entity,
+        float(total) if kind == "sales" else -float(total),
+    )
 
     db.session.commit()
 
@@ -2467,17 +2465,11 @@ def unified_invoice():
             else:
                 ph.last_price = up
 
-        # Update person balance: sales increases balance (customer owes), purchase decreases (we owe vendor)
-        if form_kind == "sales":
-            try:
-                person.balance = float(person.balance or 0.0) + float(total)
-            except Exception:
-                person.balance = float(total)
-        else:  # purchase
-            try:
-                person.balance = float(person.balance or 0.0) - float(total)
-            except Exception:
-                person.balance = -float(total)
+        # Update person balance atomically inside the same transaction.
+        _adjust_person_balance_delta(
+            person,
+            float(total) if form_kind == "sales" else -float(total),
+        )
 
         db.session.commit()
 
@@ -2502,15 +2494,36 @@ def unified_invoice():
         invoice_kind=kind,
     )
 
+def _adjust_person_balance_delta(person, delta: float) -> None:
+    """Atomically update a person's denormalized balance inside the current transaction."""
+    delta = float(delta or 0.0)
+    if abs(delta) < 1e-12:
+        return
+    person_id = getattr(person, "id", None)
+    if person_id is None:
+        person.balance = float(person.balance or 0.0) + delta
+        return
+
+    result = db.session.execute(
+        text(
+            "UPDATE entities "
+            "SET balance = COALESCE(balance, 0) + :delta "
+            "WHERE id = :id AND type = 'person'"
+        ),
+        {"delta": delta, "id": int(person_id)},
+    )
+    if result.rowcount != 1:
+        raise ValueError("طرف حساب برای به‌روزرسانی مانده پیدا نشد.")
+    db.session.refresh(person, attribute_names=["balance"])
+
+
 def _adjust_cash_person_balance(doc_type: str, person, old_amount: float, new_amount: float) -> None:
     """Adjust a denormalized person balance by the change in a cash document."""
     delta = float(new_amount or 0.0) - float(old_amount or 0.0)
-    if abs(delta) < 1e-12:
-        return
     if (doc_type or "").strip().lower() == "receive":
-        person.balance = float(person.balance or 0.0) - delta
+        _adjust_person_balance_delta(person, -delta)
     else:
-        person.balance = float(person.balance or 0.0) + delta
+        _adjust_person_balance_delta(person, delta)
 
 
 # ----------------- Entities CRUD -----------------
