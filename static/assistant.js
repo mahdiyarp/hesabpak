@@ -22,6 +22,9 @@
   const cancelBtn = document.getElementById('assistant-cancel');
   const missingEl = document.getElementById('assistant-missing');
   const errorEl = document.getElementById('assistant-error');
+  const actionPreviewEl = document.getElementById('assistant-action-preview');
+  const actionListEl = document.getElementById('assistant-action-list');
+  const previewTitleEl = previewCard ? previewCard.querySelector('[data-preview-title]') : null;
 
   let history = [];
   let pendingTicket = null;
@@ -60,99 +63,93 @@
 
   function clearPreview(){
     if(!previewCard) return;
-    previewCard.hidden = true;
-    pendingTicket = null;
-    if(previewTableBody){ previewTableBody.replaceChildren(); }
+    previewCard.hidden=true;
+    pendingTicket=null;
+    if(previewTableBody) previewTableBody.replaceChildren();
+    if(actionListEl) actionListEl.replaceChildren();
+    if(actionPreviewEl) actionPreviewEl.hidden=true;
+    if(previewTitleEl) previewTitleEl.textContent='پیش‌نمایش فاکتور';
+    previewCard.querySelectorAll('[data-preview-section]').forEach(el=>{ el.hidden=false; });
     ['kind','partner','date','number','total'].forEach(field=>{
-      const el = previewCard.querySelector(`[data-field="${field}"]`);
-      if(el){ el.textContent = '—'; }
+      const el=previewCard.querySelector(`[data-field="${field}"]`);
+      if(el) el.textContent='—';
     });
-    if(missingEl){ missingEl.hidden = true; missingEl.replaceChildren(); }
-    if(errorEl){ errorEl.hidden = true; errorEl.textContent = ''; }
+    if(missingEl){ missingEl.hidden=true; missingEl.replaceChildren(); }
+    if(errorEl){ errorEl.hidden=true; errorEl.textContent=''; }
+    if(confirmBtn){ confirmBtn.textContent='تأیید و ثبت در سیستم'; }
   }
 
   function formatNumber(val){
-    try{
-      return Number(val || 0).toLocaleString('fa-IR', {maximumFractionDigits:2});
-    }catch(e){
-      return val;
-    }
+    try{ return Number(val||0).toLocaleString('fa-IR',{maximumFractionDigits:2}); }
+    catch(e){ return val; }
   }
 
   function renderPreview(data, applyError){
-    if(!previewCard || !data){ return; }
-    previewCard.hidden = false;
-    if(previewTableBody){ previewTableBody.replaceChildren(); }
-    const kindEl = previewCard.querySelector('[data-field="kind"]');
-    const partnerEl = previewCard.querySelector('[data-field="partner"]');
-    const dateEl = previewCard.querySelector('[data-field="date"]');
-    const numberEl = previewCard.querySelector('[data-field="number"]');
-    const totalEl = previewCard.querySelector('[data-field="total"]');
-
-    if(kindEl){
-      kindEl.textContent = data.kind === 'purchase' ? 'خرید' : 'فروش';
-    }
+    if(!previewCard || !data) return;
+    previewCard.hidden=false;
+    if(actionPreviewEl) actionPreviewEl.hidden=true;
+    if(previewTitleEl) previewTitleEl.textContent='پیش‌نمایش فاکتور';
+    previewCard.querySelectorAll('[data-preview-section]').forEach(el=>{ el.hidden=false; });
+    if(previewTableBody) previewTableBody.replaceChildren();
+    const kindEl=previewCard.querySelector('[data-field="kind"]');
+    const partnerEl=previewCard.querySelector('[data-field="partner"]');
+    const dateEl=previewCard.querySelector('[data-field="date"]');
+    const numberEl=previewCard.querySelector('[data-field="number"]');
+    const totalEl=previewCard.querySelector('[data-field="total"]');
+    if(kindEl) kindEl.textContent=data.kind==='purchase'?'خرید':'فروش';
     if(partnerEl){
-      let label = data.partner && data.partner.name ? data.partner.name : '—';
-      if(data.partner && data.partner.exists === false){ label += ' (جدید)'; }
-      partnerEl.textContent = label;
+      let label=data.partner&&data.partner.name?String(data.partner.name):'—';
+      if(data.partner&&data.partner.exists===false) label+=' (جدید)';
+      partnerEl.textContent=label;
     }
-    if(dateEl){ dateEl.textContent = data.date ? data.date : '—'; }
-    if(numberEl){ numberEl.textContent = data.number || '—'; }
-    if(totalEl){ totalEl.textContent = formatNumber(data.total || 0); }
-
-    if(previewTableBody && Array.isArray(data.items)){
-      data.items.forEach(item => {
-        const tr = document.createElement('tr');
-        const status = item.exists ? 'ثبت شده' : 'جدید';
-        const cells = [
-          item.name || '—',
-          formatNumber(item.qty || 0),
-          formatNumber(item.unit_price || 0),
-          formatNumber(item.line_total || 0),
-          status
-        ];
-        cells.forEach((value, index)=>{
-          const td = document.createElement('td');
-          td.textContent = value;
-          if(index === 4) td.className = item.exists ? 'ok' : 'new';
+    if(dateEl) dateEl.textContent=data.date?String(data.date):'—';
+    if(numberEl) numberEl.textContent=data.number?String(data.number):'—';
+    if(totalEl) totalEl.textContent=formatNumber(data.total||0);
+    if(previewTableBody&&Array.isArray(data.items)){
+      data.items.forEach(item=>{
+        const tr=document.createElement('tr');
+        [item.name||'—',formatNumber(item.qty||0),formatNumber(item.unit_price||0),formatNumber(item.line_total||0),item.exists?'ثبت شده':'جدید']
+        .forEach((value,index)=>{
+          const td=document.createElement('td');
+          td.textContent=String(value);
+          if(index===4) td.className=item.exists?'ok':'new';
           tr.appendChild(td);
         });
         previewTableBody.appendChild(tr);
       });
     }
-
     if(missingEl){
-      const warnings = [];
-      if(data.missing_partner){
-        warnings.push(`مشتری/تأمین‌کننده جدید: ${data.missing_partner.name || 'بدون نام'}`);
-      }
-      if(Array.isArray(data.missing_items) && data.missing_items.length){
-        warnings.push(`${data.missing_items.length} قلم جدید ایجاد می‌شود.`);
-      }
+      const warnings=[];
+      if(data.missing_partner) warnings.push('مشتری/تأمین‌کننده جدید: '+(data.missing_partner.name||'بدون نام'));
+      if(Array.isArray(data.missing_items)&&data.missing_items.length) warnings.push(String(data.missing_items.length)+' قلم جدید ایجاد می‌شود.');
+      missingEl.replaceChildren();
       if(warnings.length){
-        missingEl.hidden = false;
-        missingEl.replaceChildren();
-        warnings.forEach(w=>{
-          const row = document.createElement('div');
-          row.textContent = '⚠️ ' + w;
-          missingEl.appendChild(row);
-        });
-      }else{
-        missingEl.hidden = true;
-        missingEl.replaceChildren();
-      }
+        missingEl.hidden=false;
+        warnings.forEach(w=>{ const row=document.createElement('div'); row.textContent='⚠️ '+w; missingEl.appendChild(row); });
+      }else missingEl.hidden=true;
     }
+    if(errorEl){ errorEl.hidden=!applyError; errorEl.textContent=applyError?String(applyError):''; }
+    if(confirmBtn) confirmBtn.textContent='تأیید و ثبت در سیستم';
+  }
 
-    if(errorEl){
-      if(applyError){
-        errorEl.hidden = false;
-        errorEl.textContent = applyError;
-      }else{
-        errorEl.hidden = true;
-        errorEl.textContent = '';
-      }
-    }
+  function renderActionPreview(actions){
+    if(!previewCard||!actionPreviewEl||!actionListEl) return;
+    previewCard.hidden=false;
+    if(previewTitleEl) previewTitleEl.textContent='پیش‌نمایش تغییرات پروژه';
+    previewCard.querySelectorAll('[data-preview-section="invoice"]').forEach(el=>{ el.hidden=true; });
+    if(missingEl){ missingEl.hidden=true; missingEl.replaceChildren(); }
+    if(errorEl){ errorEl.hidden=true; errorEl.textContent=''; }
+    actionListEl.replaceChildren();
+    (Array.isArray(actions)?actions:[]).forEach(action=>{
+      const row=document.createElement('div'); row.className='assistant-action-card';
+      const op=document.createElement('strong'); op.textContent=String(action.operation||action.type||'operation');
+      const path=document.createElement('code'); path.textContent=String(action.path||'—');
+      const desc=document.createElement('div'); desc.className='muted'; desc.textContent=String(action.description||'بدون توضیح');
+      row.append(op,path,desc);
+      actionListEl.appendChild(row);
+    });
+    actionPreviewEl.hidden=false;
+    if(confirmBtn){ confirmBtn.textContent='تأیید و اعمال تغییرات'; confirmBtn.disabled=!pendingTicket; }
   }
 
   function readFile(file){
@@ -226,9 +223,13 @@
       }
 
       if(data.invoice_preview && !data.applied){
-        pendingTicket = data.ticket || null;
-        renderPreview(data.invoice_preview, data.apply_error);
-        if(confirmBtn){ confirmBtn.disabled = !pendingTicket; }
+        pendingTicket=data.ticket||null;
+        renderPreview(data.invoice_preview,data.apply_error);
+        if(confirmBtn){ confirmBtn.disabled=!pendingTicket; }
+      }else if(data.actions_preview && !data.actions_applied){
+        pendingTicket=data.ticket||null;
+        renderActionPreview(data.actions_preview);
+        if(confirmBtn){ confirmBtn.disabled=!pendingTicket; }
       }
 
       if(data.applied){
@@ -296,8 +297,22 @@
         if(!response.ok || data.status !== 'ok'){
           throw new Error(data.message || 'امکان ثبت فاکتور نبود.');
         }
-        appendMessage('assistant', `فاکتور «${data.invoice_number}» با موفقیت ثبت شد.`);
-        history.push({ role: 'assistant', text: `فاکتور «${data.invoice_number}» با موفقیت ثبت شد.`, attachments: [] });
+        if(data.actions_summary){
+          const msg='تغییرات پروژه با موفقیت اعمال شد.';
+          appendMessage('assistant',msg);
+          history.push({role:'assistant',text:msg,attachments:[]});
+          if(Array.isArray(data.actions_summary.messages)){
+            data.actions_summary.messages.forEach(item=>{
+              const txt=String(item);
+              appendMessage('assistant',txt);
+              history.push({role:'assistant',text:txt,attachments:[]});
+            });
+          }
+        }else{
+          const msg=`فاکتور «${data.invoice_number}» با موفقیت ثبت شد.`;
+          appendMessage('assistant',msg);
+          history.push({role:'assistant',text:msg,attachments:[]});
+        }
         clearPreview();
       }catch(err){
         if(errorEl){
