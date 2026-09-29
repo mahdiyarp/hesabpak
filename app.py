@@ -616,11 +616,17 @@ def generate_invoice_number():
 
 def _to_float(x, default=0.0):
     try:
-        if x is None: return default
-        x = str(x).strip().replace(',', '')
-        if x == '': return default
-        return float(x)
-    except:
+        if x is None:
+            return default
+        text = str(x).strip().translate(str.maketrans(
+            "۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩٬،٫",
+            "01234567890123456789,,,.",
+        ))
+        text = text.replace(",", "").replace("٬", "").replace("،", "").replace(" ", "")
+        if text == "":
+            return default
+        return float(text)
+    except (TypeError, ValueError):
         return default
 
 def _now_info():
