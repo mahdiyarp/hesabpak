@@ -207,3 +207,13 @@ def test_security_headers_include_compatible_csp():
     assert "https://cdn.jsdelivr.net" in csp
     assert "object-src 'none'" in csp
     assert "frame-ancestors 'self'" in csp
+
+
+def test_logout_is_post_only(monkeypatch):
+    client = app_module.app.test_client()
+
+    response = client.get("/logout")
+    assert response.status_code in (302, 401, 403, 405)
+
+    with app_module.app.test_request_context("/logout", method="GET"):
+        assert app_module.logout.__name__ == "logout"
