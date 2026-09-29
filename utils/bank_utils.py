@@ -127,8 +127,8 @@ def validate_iban(iban: str) -> bool:
     rearranged = value[4:] + value[:4]
     numeric = "".join(str(ord(ch) - 55) if ch.isalpha() else ch for ch in rearranged)
     remainder = 0
-    for chunk_start in range(0, len(numeric), 7):
-        remainder = (remainder * 10_000_000 + int(numeric[chunk_start:chunk_start + 7])) % 97
+    for ch in numeric:
+        remainder = (remainder * 10 + int(ch)) % 97
     return remainder == 1
 
 
