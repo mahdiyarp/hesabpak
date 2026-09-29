@@ -112,7 +112,7 @@
           <td class="center">
             <div class="ops">
               <a href="{{ view }}">مشاهده</a>
-              {% if is_admin %}<a href="{{ edit }}">ویرایش</a>{% endif %}
+              {% if is_admin and r.kind != 'invoice' %}<a href="{{ edit }}">ویرایش</a>{% endif %}
             </div>
           </td>
         </tr>
