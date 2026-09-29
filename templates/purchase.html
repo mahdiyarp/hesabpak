@@ -335,7 +335,7 @@ const SEARCH_DELAY = 150;
       searchBox.addEventListener('input', () => {
         const v = (searchBox.value || '').trim();
         clearTimeout(timer);
-        if(!v){ hide(results); results.innerHTML=''; return; }
+        if(!v){ hide(results); results.replaceChildren(); return; }
         timer = setTimeout(()=>searchItem(v), SEARCH_DELAY);
       });
     }
