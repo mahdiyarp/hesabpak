@@ -414,3 +414,21 @@ def test_global_search_actions_do_not_use_dynamic_html_sink():
     source = (Path(app_module.__file__).resolve().parent / "static" / "app.js").read_text(encoding="utf-8")
     assert "quickLinks.map" not in source
     assert "actions.innerHTML = quickLinks" not in source
+
+def test_unified_form_routes_authorize_posted_invoice_and_cash_kinds(monkeypatch):
+    observed = []
+    monkeypatch.setattr(app_module, "ensure_permission", lambda perm: observed.append(perm))
+    monkeypatch.setattr(app_module, "parse_gregorian_date", lambda *args, **kwargs: None)
+
+    with app_module.app.test_request_context(
+        "/sales", method="POST", data={"invoice_kind": "purchase", "inv_date_greg": "bad"}
+    ):
+        app_module.unified_invoice.__wrapped__()
+    assert observed[-1] == "purchase"
+
+    observed.clear()
+    with app_module.app.test_request_context(
+        "/receive", method="POST", data={"cash_kind": "payment", "doc_date_greg": "bad"}
+    ):
+        app_module.unified_cash.__wrapped__()
+    assert observed[-1] == "payment"
