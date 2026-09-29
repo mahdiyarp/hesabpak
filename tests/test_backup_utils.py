@@ -154,3 +154,35 @@ def test_autosave_does_not_overwrite_same_second(tmp_path):
     assert second.is_file()
     assert first != second
     assert len(list(first.parent.glob("*.json.gz"))) == 2
+
+
+def test_restore_empty_upload_backup_clears_existing_uploads(tmp_path):
+    app = make_app(tmp_path)
+    data = Path(app.config["DATA_DIR"])
+    data.mkdir(parents=True, exist_ok=True)
+    uploads = data / "uploads" / "assistant"
+    uploads.mkdir(parents=True, exist_ok=True)
+    (uploads / "stale.txt").write_text("stale", encoding="utf-8")
+
+    backup_dir = data / "backups" / "1405"
+    backup_dir.mkdir(parents=True, exist_ok=True)
+    db = data / app.config["DB_FILE"]
+
+    source = tmp_path / "source.sqlite3"
+    con = sqlite3.connect(source)
+    con.execute("create table t (value text)")
+    con.execute("insert into t(value) values ('restored')")
+    con.commit()
+    con.close()
+
+    archive = backup_dir / "backup_2026-09-29_12-00-03_deadbeef.zip"
+    with zipfile.ZipFile(archive, "w", zipfile.ZIP_DEFLATED) as zf:
+        zf.write(source, f"db/{db.name}")
+        zf.writestr(
+            "metadata.json",
+            '{"include_uploads": "true", "uploads_count": 0}'
+        )
+
+    restore_backup(app, "1405/" + archive.name)
+
+    assert not uploads.exists()
