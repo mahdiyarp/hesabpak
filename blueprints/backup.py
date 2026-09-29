@@ -390,7 +390,7 @@ def index():
         case_info=case_info,
         current_year_key=year_key if year_label != "نامشخص" else None,
         current_year_value=current_value,
-        backup_email_default=os.environ.get("BACKUP_EMAIL_TO", "").strip(),
+        backup_email_default=(getattr(current_user, "email", "") or os.environ.get("BACKUP_EMAIL_TO", "")).strip(),
     )
 
 
@@ -401,7 +401,7 @@ def create():
     reason = (request.form.get("reason") or "manual").strip()
     action = request.form.get("action", "store")
     send_email = request.form.get("send_email") == "1"
-    recipient = (request.form.get("email") or os.environ.get("BACKUP_EMAIL_TO", "")).strip()
+    recipient = (request.form.get("email") or getattr(current_user, "email", "") or os.environ.get("BACKUP_EMAIL_TO", "")).strip()
     path = create_full_backup(current_app, user=getattr(current_user, "username", "admin"), reason=reason)
     size = os.path.getsize(path)
     log = BackupLog(user=getattr(current_user, "username", "admin"), reason=reason, filename=os.path.basename(path), size=size)
