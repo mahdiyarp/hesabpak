@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import os, json, logging, secrets, base64
+import os, json, logging, secrets, base64, tempfile
 from pathlib import Path
 from datetime import datetime, timedelta, date
 from typing import Any, Dict, List, Optional
@@ -571,6 +571,7 @@ def load_users_catalog() -> dict:
 
 
 def save_users_catalog(catalog: dict) -> None:
+    """Atomically persist the user catalog and keep the credentials file private."""
     payload = {
         "users": [
             {
@@ -588,8 +589,32 @@ def save_users_catalog(catalog: dict) -> None:
             for username, data in sorted(catalog.items(), key=lambda kv: kv[0].lower())
         ]
     }
-    with open(USERS_FILE, "w", encoding="utf-8") as f:
-        json.dump(payload, f, ensure_ascii=False, indent=2)
+    target = Path(USERS_FILE)
+    target.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=".users-", suffix=".json.tmp", dir=str(target.parent)
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        try:
+            os.chmod(tmp_path, 0o600)
+        except OSError:
+            pass
+        os.replace(tmp_path, target)
+        try:
+            os.chmod(target, 0o600)
+        except OSError:
+            pass
+    finally:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except TypeError:
+            if tmp_path.exists():
+                tmp_path.unlink()
 
 # ----------------- Auth -----------------
 login_manager = LoginManager(app)
@@ -4441,15 +4466,21 @@ def api_audit_log():
     context = (data.get("context") or "general").strip()[:64]
     action = (data.get("action") or "unknown").strip()[:64]
     payload = data.get("payload")
-    ip = request.headers.get("X-Forwarded-For", request.remote_addr or "")
+    ip = request.remote_addr or ""
     username = getattr(current_user, "username", None)
+
+    serialized_payload = None
+    if payload is not None:
+        serialized_payload = json.dumps(payload, ensure_ascii=False, default=str)
+        if len(serialized_payload.encode("utf-8")) > 32768:
+            return jsonify({"ok": False, "message": "payload ثبت گزارش بیش از حد بزرگ است."}), 413
 
     event = AuditEvent(
         user=username,
         ip_address=ip,
         context=context or "general",
         action=action or "unknown",
-        payload=json.dumps(payload, ensure_ascii=False, default=str) if payload is not None else None,
+        payload=serialized_payload,
     )
 
     db.session.add(event)

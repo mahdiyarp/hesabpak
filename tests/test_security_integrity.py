@@ -1,4 +1,5 @@
 import os
+import json
 import tempfile
 from pathlib import Path
 
@@ -258,3 +259,40 @@ def test_inactive_admin_is_not_counted_as_active_admin():
         "second": {"role": "staff", "is_active": True},
     }
     assert app_module._active_admin_usernames(catalog) == set()
+
+
+def test_save_users_catalog_writes_atomically(monkeypatch, tmp_path):
+    target = tmp_path / "users.json"
+    monkeypatch.setattr(app_module, "USERS_FILE", str(target))
+    app_module.save_users_catalog({
+        "admin": {
+            "password": app_module.generate_password_hash("secret"),
+            "role": "admin",
+            "permissions": app_module.ADMIN_PERMISSIONS,
+            "is_active": True,
+            "email": "admin@example.test",
+        }
+    })
+    assert target.is_file()
+    data = json.loads(target.read_text(encoding="utf-8"))
+    assert data["users"][0]["username"] == "admin"
+    assert app_module._password_is_hashed(data["users"][0]["password"])
+
+
+def test_audit_log_payload_is_size_limited(monkeypatch):
+    monkeypatch.setattr(app_module, "ensure_permission", lambda *args, **kwargs: None)
+    from types import SimpleNamespace
+    monkeypatch.setattr(
+        app_module,
+        "current_user",
+        SimpleNamespace(username="tester"),
+    )
+    huge = "x" * 40000
+    with app_module.app.test_request_context(
+        "/api/audit/log",
+        method="POST",
+        json={"context": "test", "action": "write", "payload": huge},
+    ):
+        response = app_module.api_audit_log()
+
+    assert response.status_code == 413
