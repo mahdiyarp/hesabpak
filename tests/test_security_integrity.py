@@ -432,3 +432,14 @@ def test_unified_form_routes_authorize_posted_invoice_and_cash_kinds(monkeypatch
     ):
         app_module.unified_cash.__wrapped__()
     assert observed[-1] == "payment"
+def test_production_requires_explicit_secret_key_and_admin_password(tmp_path):
+    import re
+    source = (Path(app_module.__file__).resolve()).read_text(encoding="utf-8")
+    assert 'FLASK_ENV == "production"' in source
+    assert 'SECRET_KEY باید در محیط production تنظیم شود.' in source
+    assert 'ADMIN_PASSWORD باید قبل از bootstrap مدیر در production تنظیم شود.' in source
+
+def test_development_config_has_nonempty_secret_without_environment_secret():
+    import secrets as secrets_module
+    assert app_module.SECRET_KEY
+    assert app_module.ADMIN_PASSWORD
