@@ -107,7 +107,11 @@
         results.hidden = false; results.style.display = 'block';
         positionFixedResults(input, results);
       }catch(err){
-        results.innerHTML = '<div class="muted">خطا در دریافت نتایج</div>';
+        results.replaceChildren();
+        const error = document.createElement('div');
+        error.className = 'muted';
+        error.textContent = 'خطا در دریافت نتایج';
+        results.appendChild(error);
         results.hidden = false; results.style.display = 'block';
         positionFixedResults(input, results);
         console.error('search-ajax error', err);
