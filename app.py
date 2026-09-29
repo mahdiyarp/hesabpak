@@ -804,6 +804,7 @@ def inject_ctx():
         "dashboard_widget_choices": DASHBOARD_WIDGET_CHOICES,
         "allow_negative_sales": _allow_negative_sales(),
         "demo_mode": DEMO_MODE,
+        "demo_landing_url": (URL_PREFIX + "/demo") if DEMO_MODE else "",
     }
 
 # === فیلتر جینجا برای جداکننده هزارگان ===
@@ -2339,20 +2340,42 @@ def _reset_demo_workspace():
             raise
 
 
-@app.route(URL_PREFIX + "/demo/start", methods=["GET"])
+@app.route(URL_PREFIX + "/demo", methods=["GET"])
+def demo_landing():
+    if not DEMO_MODE:
+        abort(404)
+    share_url = request.url_root.rstrip("/") + URL_PREFIX + "/demo"
+    return render_template(
+        "demo_landing.html",
+        prefix=URL_PREFIX,
+        share_url=share_url,
+    )
+
+
+@app.route(URL_PREFIX + "/demo/start", methods=["GET", "POST"])
 def demo_start():
     if not DEMO_MODE:
         abort(404)
+    # Old shared links can safely land on the demo page without mutating state.
+    if request.method == "GET":
+        return redirect(URL_PREFIX + "/demo")
     if current_user.is_authenticated:
         logout_user()
         session.clear()
     _reset_demo_workspace()
     catalog = load_users_catalog()
     entry = catalog.get(DEMO_USERNAME) or {}
-    login_user(User(DEMO_USERNAME, role=entry.get("role", "staff"), permissions=entry.get("permissions", DEFAULT_PERMISSIONS), is_active=True))
+    login_user(
+        User(
+            DEMO_USERNAME,
+            role=entry.get("role", "staff"),
+            permissions=entry.get("permissions", DEFAULT_PERMISSIONS),
+            is_active=True,
+        )
+    )
     session["login_at_utc"] = datetime.utcnow().isoformat()
     session["demo_session"] = True
-    flash("وارد محیط آزمایشی شدید؛ این داده‌ها موقتی هستند و با خروج از دمو پاک می‌شوند.", "success")
+    flash("وارد محیط آزمایشی شدید؛ داده‌ها موقتی هستند و با خروج از دمو پاک می‌شوند.", "success")
     return redirect(URL_PREFIX + "/")
 
 
