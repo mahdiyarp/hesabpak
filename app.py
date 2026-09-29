@@ -137,6 +137,9 @@ DEMO_MODE = os.environ.get("DEMO_MODE", "").strip().lower() in {"1", "true", "ye
 DEMO_USERNAME = os.environ.get("DEMO_USERNAME", "demo").strip() or "demo"
 DEMO_PASSWORD = os.environ.get("DEMO_PASSWORD", "demo123") or "demo123"
 
+if DEMO_MODE and Path(DATA_DIR).name.strip().lower() in {"data", "production", "prod"}:
+    raise RuntimeError("DEMO_MODE باید روی DATA_DIR جدا از داده واقعی اجرا شود (مثلاً data-demo).")
+
 # Development may start with ephemeral credentials for local testing. Production
 # must always receive explicit credentials from the environment/configuration.
 if FLASK_ENV == "production":
