@@ -2,7 +2,7 @@
   "users": [
     {
       "username": "1",
-      "password": "1",
+      "password": "pbkdf2_sha256$600000$r9RgesXgnal27YCosLxnNA$x92GeP0giD5KGbtFhWG-BM--oQSQHc8mHxvZCJxRQwg",
       "role": "admin",
       "permissions": [
         "admin",
@@ -20,7 +20,7 @@
     },
     {
       "username": "2",
-      "password": "2",
+      "password": "pbkdf2_sha256$600000$NSHLhdDo1YJWeR-qFsvDJw$KmTQeDxlMU_sEMnpgNWwlalD1U6tjVcoFq23DBCBRZY",
       "role": "staff",
       "permissions": [
         "assistant",
@@ -36,7 +36,7 @@
     },
     {
       "username": "admin",
-      "password": "admin123",
+      "password": "pbkdf2_sha256$600000$el494pL_tk712z_rqYjOYg$sx_A87lgprOaMj8WXFH6DIV58AjzsBapGwJ2gLz_j0s",
       "role": "admin",
       "permissions": [
         "admin",
