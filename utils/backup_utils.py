@@ -52,7 +52,7 @@ def resolve_backup_path(app, zip_filename):
     rel = Path(raw)
     if not raw or rel.is_absolute() or ".." in rel.parts or rel.name != raw.split("/")[-1]:
         raise ValueError("مسیر فایل بکاپ نامعتبر است.")
-    if rel.suffix.lower() != ".zip" or not rel.name.startswith("backup_"):
+    if rel.suffix.lower() != ".zip" or not rel.name.startswith("backup_") or len(rel.name) > 180:
         raise ValueError("نام فایل بکاپ نامعتبر است.")
     target = (backup_dir / rel).resolve()
     root = backup_dir.resolve()
