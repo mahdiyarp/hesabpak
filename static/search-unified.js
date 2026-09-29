@@ -50,9 +50,9 @@
       }
       if(type === 'item'){
         if(r.stock) detailParts.push(`<div class="res-sub">موجودی: ${r.stock}</div>`);
-        if(r.price) detailParts.push(`<div class="res-sub">قیمت: ${r.price}</div>`);
+        if((window.formatGroupedNumber ? window.formatGroupedNumber(r.price) : r.price)) detailParts.push(`<div class="res-sub">قیمت: ${(window.formatGroupedNumber ? window.formatGroupedNumber(r.price) : r.price)}</div>`);
       }else if(type === 'person'){
-        if(r.balance) detailParts.push(`<div class="res-sub">مانده: ${r.balance}</div>`);
+        if((window.formatGroupedNumber ? window.formatGroupedNumber(r.balance) : r.balance)) detailParts.push(`<div class="res-sub">مانده: ${(window.formatGroupedNumber ? window.formatGroupedNumber(r.balance) : r.balance)}</div>`);
       }
       const metaHtml = detailParts.length ? `<div class="res-meta">${detailParts.join('')}</div>` : '';
       // Use the actual result type for the badge when available.
