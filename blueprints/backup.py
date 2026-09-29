@@ -3,6 +3,7 @@ import os
 import json
 import shutil
 import sqlite3
+import tempfile
 from datetime import datetime
 from pathlib import Path
 from typing import Optional
