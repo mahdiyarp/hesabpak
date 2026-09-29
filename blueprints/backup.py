@@ -645,7 +645,16 @@ def switch_year():
     try:
         db.session.remove()
         db.engine.dispose()
-        shutil.copy2(target_db, live_db)
+        staged_db = live_db.with_name(live_db.name + ".switching")
+        try:
+            shutil.copy2(target_db, staged_db)
+            os.replace(staged_db, live_db)
+        finally:
+            try:
+                staged_db.unlink(missing_ok=True)
+            except TypeError:
+                if staged_db.exists():
+                    staged_db.unlink()
         db.engine.dispose()
 
         Setting.set("fiscal_year_start", year)
