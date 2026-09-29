@@ -4090,11 +4090,10 @@ def admin_assistant_tokens():
         if action == "update_global":
             key = (request.form.get("global_api_key") or "").strip()
             if key:
-                Setting.set("openai_api_key", key)
+                Setting.set("openai_api_key", encrypt_secret(current_app, key))
                 db.session.commit()
                 flash("کلید سراسری API ذخیره شد.", "success")
             else:
-                # clear
                 Setting.set("openai_api_key", "")
                 db.session.commit()
                 flash("کلید سراسری API حذف شد.", "success")
@@ -4107,7 +4106,7 @@ def admin_assistant_tokens():
                 flash("کاربر نامعتبر است.", "danger")
                 return redirect(URL_PREFIX + "/admin/assistant-tokens")
             us = UserSettings.get_for_user(username)
-            us.openai_api_key = user_key or None
+            us.openai_api_key = encrypt_secret(current_app, user_key) if user_key else None
             db.session.commit()
             flash(f"کلید کاربر «{username}» به‌روزرسانی شد.", "success")
             return redirect(URL_PREFIX + "/admin/assistant-tokens")
@@ -4124,15 +4123,16 @@ def admin_assistant_tokens():
             return redirect(URL_PREFIX + "/admin/assistant-tokens")
 
     # GET: show current keys (masked)
-    global_key = Setting.get("openai_api_key", "") or ""
+    global_key = _openai_api_key()
     users = []
     for username, meta in sorted(catalog.items(), key=lambda kv: kv[0].lower()):
         us = UserSettings.get_for_user(username)
+        user_key = _user_openai_api_key(us)
         users.append({
             "username": username,
             "role": meta.get("role"),
-            "api_key_masked": _mask_secret(us.openai_api_key or ""),
-            "has_key": bool(us.openai_api_key),
+            "api_key_masked": _mask_secret(user_key),
+            "has_key": bool(user_key),
         })
 
     return render_template("admin/assistant_tokens.html", prefix=URL_PREFIX, global_key_masked=_mask_secret(global_key), users=users)
