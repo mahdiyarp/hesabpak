@@ -20,6 +20,8 @@ bash <(wget -qO- https://raw.githubusercontent.com/mahdiyarp/hesabpak/main/insta
 - **نام کاربری**: `admin`
 - **رمز عبور**: هنگام نصب به‌صورت تصادفی در `.env` تولید می‌شود.
 
+> هنگام مهاجرت/ری‌استور DB، مقدار `CREDENTIAL_ENCRYPTION_KEY` در `.env` را نیز حفظ کنید.
+
 برای مشاهده رمز مدیر روی سرور:
 `sudo grep '^ADMIN_PASSWORD=' /var/www/hesabpak/.env`
 
