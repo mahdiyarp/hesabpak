@@ -220,3 +220,32 @@ def test_assistant_chat_uses_personal_key_gate(monkeypatch):
 
     assert response.status_code == 200
     assert response.get_json()["reply"] == "ok"
+
+
+def test_prepare_invoice_plan_rejects_empty_partner_and_items():
+    import pytest
+
+    with pytest.raises(ValueError):
+        app_module._prepare_invoice_plan({
+            "kind": "sales",
+            "partner": {},
+            "items": [{"name": "کالا", "qty": 1, "unit_price": 100}],
+        })
+
+    with pytest.raises(ValueError):
+        app_module._prepare_invoice_plan({
+            "kind": "sales",
+            "partner": {"name": "مشتری"},
+            "items": [],
+        })
+
+
+def test_prepare_cash_plan_rejects_empty_person():
+    import pytest
+
+    with pytest.raises(ValueError):
+        app_module._prepare_cash_plan({
+            "doc_type": "receive",
+            "person": {},
+            "amount": 100,
+        })
