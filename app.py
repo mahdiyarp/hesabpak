@@ -2244,6 +2244,25 @@ def login():
         app.logger.warning(f"LOGIN_FAIL  USER={username}  IP={request.remote_addr}")
     return render_template("login.html", prefix=URL_PREFIX)
 
+def _reset_activity_log_file() -> None:
+    """Truncate the demo log without leaving the old file descriptor active."""
+    global _handler
+    log_target = str(Path(LOG_FILE).resolve())
+    for handler in list(app.logger.handlers):
+        if isinstance(handler, logging.FileHandler):
+            try:
+                if str(Path(handler.baseFilename).resolve()) == log_target:
+                    app.logger.removeHandler(handler)
+                    handler.close()
+            except (OSError, ValueError):
+                pass
+    Path(LOG_FILE).parent.mkdir(parents=True, exist_ok=True)
+    Path(LOG_FILE).write_text("", encoding="utf-8")
+    _handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
+    _handler.setFormatter(LocalTimeFormatter("%(asctime)s  %(levelname)s  %(message)s"))
+    app.logger.addHandler(_handler)
+
+
 def _seed_demo_data():
     if not DEMO_MODE:
         return
@@ -2276,10 +2295,7 @@ def _reset_demo_workspace():
         (DB_DIR / "backups").mkdir(parents=True, exist_ok=True)
         (DB_DIR / "fiscal_cases").mkdir(parents=True, exist_ok=True)
         ASSISTANT_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
-        try:
-            Path(LOG_FILE).write_text("", encoding="utf-8")
-        except OSError:
-            pass
+        _reset_activity_log_file()
         save_users_catalog({
             DEMO_USERNAME: {
                 "password": DEMO_PASSWORD,
