@@ -405,71 +405,9 @@ init_autobackup(app)
 app.register_blueprint(backup_bp, url_prefix=f"{URL_PREFIX}/backup")
 
 # ----------------- Users bootstrap -----------------
-if not os.path.exists(USERS_FILE):
-    with open(USERS_FILE, "w", encoding="utf-8") as f:
-        json.dump(
-            {
-                "users": [
-                    {
-                        "username": ADMIN_USERNAME,
-                        "password": ADMIN_PASSWORD,
-                        "role": "admin",
-                        "permissions": ADMIN_PERMISSIONS,
-                        "is_active": True,
-                        "email": os.environ.get("ADMIN_EMAIL", "").strip(),
-                    }
-                ]
-            },
-            f,
-            ensure_ascii=False,
-            indent=2,
-        )
-
-
-PASSWORD_HASH_PREFIX = "pbkdf2_sha256$"
-PASSWORD_HASH_ITERATIONS = int(os.environ.get("PASSWORD_HASH_ITERATIONS", "600000"))
-
-
-def _is_password_hash(value: str) -> bool:
-    return str(value or "").startswith(PASSWORD_HASH_PREFIX)
-
-
-def _hash_password(password: str) -> str:
-    password = str(password or "")
-    if not password:
-        return ""
-    salt = secrets.token_bytes(16)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PASSWORD_HASH_ITERATIONS)
-    return (
-        f"{PASSWORD_HASH_PREFIX}{PASSWORD_HASH_ITERATIONS}$"
-        f"{base64.urlsafe_b64encode(salt).decode().rstrip('=')}$"
-        f"{base64.urlsafe_b64encode(digest).decode().rstrip('=')}"
-    )
-
-
-def _verify_password(stored: str, candidate: str):
-    """Return (matches, needs_upgrade) for hashed and legacy plaintext passwords."""
-    stored = str(stored or "")
-    candidate = str(candidate or "")
-    if not stored:
-        return False, False
-    if not _is_password_hash(stored):
-        return hmac.compare_digest(stored, candidate), True
-
-    try:
-        scheme, iterations_text, salt_text, digest_text = stored.split("$", 3)
-        if scheme != "pbkdf2_sha256":
-            return False, False
-        iterations = int(iterations_text)
-        if iterations < 100_000 or iterations > 5_000_000:
-            return False, False
-        salt = base64.urlsafe_b64decode(salt_text + "=" * (-len(salt_text) % 4))
-        expected = base64.urlsafe_b64decode(digest_text + "=" * (-len(digest_text) % 4))
-        actual = hashlib.pbkdf2_hmac("sha256", candidate.encode("utf-8"), salt, iterations)
-        return hmac.compare_digest(actual, expected), False
-    except (TypeError, ValueError, binascii.Error):
-        return False, False
-
+# Do not write plaintext credentials during module import. When the runtime
+# users file is missing, load_users_catalog() builds the admin entry in
+# memory from the environment; the first successful login persists a hash.
 
 def _normalize_user_entry(username: str, data: dict) -> dict:
     password = (data.get("password") or "").strip()
