@@ -819,6 +819,21 @@ def _openai_api_key() -> str:
         key = (os.environ.get("OPENAI_API_KEY") or "").strip()
     return key
 
+
+def _assistant_api_ready() -> bool:
+    """Return whether the current user has an effective AI credential."""
+    if OpenAI is None:
+        return False
+    if _openai_api_key():
+        return True
+    if not current_user.is_authenticated:
+        return False
+    username = getattr(current_user, "username", "")
+    if not username:
+        return False
+    user_settings = UserSettings.query.filter_by(username=username).first()
+    return bool(user_settings and (user_settings.openai_api_key or "").strip())
+
 def _mask_secret(value: str) -> str:
     value = (value or "").strip()
     if not value:
@@ -2050,7 +2065,7 @@ def index():
         },
         dashboard_widgets=_dashboard_widgets(),
         assistant_model_label=dict(ASSISTANT_MODEL_CHOICES).get(_assistant_model(), _assistant_model()),
-        api_ready=bool(_openai_api_key()) and OpenAI is not None,
+        api_ready=_assistant_api_ready(),
     )
 
 @app.route(URL_PREFIX + "/login", methods=["GET", "POST"])
@@ -3610,7 +3625,7 @@ def settings_stub():
 @login_required
 def assistant_home():
     ensure_permission("assistant")
-    api_ready = bool(_openai_api_key()) and OpenAI is not None
+    api_ready = _assistant_api_ready()
     return render_template(
         "assistant.html",
         prefix=URL_PREFIX,
