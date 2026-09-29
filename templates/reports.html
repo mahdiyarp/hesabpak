@@ -2,7 +2,22 @@
 {% block content %}
 
 <div class="module-wrap">
-  <h2>گزارشات</h2>
+  <div class="tx-search-head">
+    <div>
+      <h1 style="margin:0 0 6px;font-size:24px">جستجوی تراکنش‌ها</h1>
+      <p class="muted" style="margin:0;line-height:1.8">جستجوی سریع یا فیلتر دقیق اسناد فروش، خرید، دریافت، پرداخت و چک‌ها.</p>
+    </div>
+    <a class="btn" href="{{ prefix }}/transactions">مرکز تراکنش‌ها ↩</a>
+  </div>
+
+  <div class="tx-filter-tabs" aria-label="نوع تراکنش">
+    {% for value,label in [('all','همه'),('sales','فروش'),('purchase','خرید'),('receive','دریافت'),('payment','پرداخت'),('cheque','چک')] %}
+      <a class="{{ 'active' if (typ or 'all') == value else '' }}" href="?type={{ value }}">{{ label }}</a>
+    {% endfor %}
+    {% if q or dfrom or dto or amount_min or amount_max or method or cashbox_id %}
+      <a class="reset" href="{{ prefix }}/reports">حذف فیلترها ×</a>
+    {% endif %}
+  </div>
 
   <form method="get" action="" class="filters" data-persist="true" data-persist-key="reports">
   <input class="inp" name="q" value="{{ q or '' }}" placeholder="شماره، نام/کد طرف حساب، شماره چک" style="max-width:260px">
@@ -51,6 +66,8 @@
 
   <button class="btn-primary" style="width:auto;padding:0 16px">جستجو</button>
 </form>
+
+<div class="tx-result-meta"><strong>{{ total|fa_digits }}</strong> نتیجه در این جستجو {% if q %} برای «{{ q }}»{% endif %}</div>
 
 <div class="stats-grid" style="margin-top:8px">
   <div class="stat-card"><span class="stat-title">جمع فروش</span><span class="stat-value">{{ (totals.sales or 0)|sep }} <span class="unit">تومان</span></span></div>
@@ -140,4 +157,8 @@
 
 </div>
 
+<style>
+.tx-search-head{display:flex;justify-content:space-between;align-items:center;gap:14px;margin-bottom:12px}.tx-filter-tabs{display:flex;gap:7px;flex-wrap:wrap;margin:0 0 12px}.tx-filter-tabs a{padding:8px 12px;border-radius:999px;border:1px solid #dce4eb;background:#fff;color:#405164;text-decoration:none;font-size:12px}.tx-filter-tabs a.active{background:#172b46;color:#fff;border-color:#172b46}.tx-filter-tabs a.reset{border-color:#e3b7b7;color:#9b4b4b;background:#fff7f7}.tx-result-meta{font-size:12px;color:#718196;margin:6px 0 8px}
+@media(max-width:640px){.tx-search-head{align-items:flex-start;flex-direction:column}.tx-search-head .btn{width:100%;text-align:center}}
+</style>
 {% endblock %}
