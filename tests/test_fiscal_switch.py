@@ -37,4 +37,6 @@ def test_global_state_preserves_runtime_settings_when_switching():
         assert Setting.get("fiscal_year_current") == "2026-03-21"
         assert Setting.get("fiscal_year_start") == "2026-03-21"
         assert UserSettings.get_for_user("admin").openai_model == "test-model"
-        assert not FISCAL_ONLY_SETTING_KEYS.intersection({"theme"})
+        assert "theme" not in FISCAL_ONLY_SETTING_KEYS
+        assert "fiscal_year_current" in FISCAL_ONLY_SETTING_KEYS
+        assert "fiscal_year_start" in FISCAL_ONLY_SETTING_KEYS
