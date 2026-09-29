@@ -3637,10 +3637,10 @@ def assistant_home():
 @login_required
 def assistant_chat():
     ensure_permission("assistant")
-    if not _openai_api_key():
-        return jsonify({"status": "error", "message": "ابتدا کلید API را در تنظیمات ثبت کنید."}), 400
     if OpenAI is None:
         return jsonify({"status": "error", "message": "کتابخانه openai در محیط نصب نشده است."}), 500
+    if not _assistant_api_ready():
+        return jsonify({"status": "error", "message": "ابتدا کلید API سراسری یا شخصی را در تنظیمات ثبت کنید."}), 400
 
     payload = request.get_json(silent=True) or {}
     messages = payload.get("messages")
