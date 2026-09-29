@@ -62,12 +62,12 @@
     if(!previewCard) return;
     previewCard.hidden = true;
     pendingTicket = null;
-    if(previewTableBody){ previewTableBody.innerHTML = ''; }
+    if(previewTableBody){ previewTableBody.replaceChildren(); }
     ['kind','partner','date','number','total'].forEach(field=>{
       const el = previewCard.querySelector(`[data-field="${field}"]`);
       if(el){ el.textContent = '—'; }
     });
-    if(missingEl){ missingEl.hidden = true; missingEl.innerHTML = ''; }
+    if(missingEl){ missingEl.hidden = true; missingEl.replaceChildren(); }
     if(errorEl){ errorEl.hidden = true; errorEl.textContent = ''; }
   }
 
@@ -82,7 +82,7 @@
   function renderPreview(data, applyError){
     if(!previewCard || !data){ return; }
     previewCard.hidden = false;
-    if(previewTableBody){ previewTableBody.innerHTML = ''; }
+    if(previewTableBody){ previewTableBody.replaceChildren(); }
     const kindEl = previewCard.querySelector('[data-field="kind"]');
     const partnerEl = previewCard.querySelector('[data-field="partner"]');
     const dateEl = previewCard.querySelector('[data-field="date"]');
@@ -105,13 +105,19 @@
       data.items.forEach(item => {
         const tr = document.createElement('tr');
         const status = item.exists ? 'ثبت شده' : 'جدید';
-        tr.innerHTML = `
-          <td>${item.name || '—'}</td>
-          <td>${formatNumber(item.qty || 0)}</td>
-          <td>${formatNumber(item.unit_price || 0)}</td>
-          <td>${formatNumber(item.line_total || 0)}</td>
-          <td class="${item.exists ? 'ok' : 'new'}">${status}</td>
-        `;
+        const cells = [
+          item.name || '—',
+          formatNumber(item.qty || 0),
+          formatNumber(item.unit_price || 0),
+          formatNumber(item.line_total || 0),
+          status
+        ];
+        cells.forEach((value, index)=>{
+          const td = document.createElement('td');
+          td.textContent = value;
+          if(index === 4) td.className = item.exists ? 'ok' : 'new';
+          tr.appendChild(td);
+        });
         previewTableBody.appendChild(tr);
       });
     }
@@ -126,10 +132,15 @@
       }
       if(warnings.length){
         missingEl.hidden = false;
-        missingEl.innerHTML = warnings.map(w => `<div>⚠️ ${w}</div>`).join('');
+        missingEl.replaceChildren();
+        warnings.forEach(w=>{
+          const row = document.createElement('div');
+          row.textContent = '⚠️ ' + w;
+          missingEl.appendChild(row);
+        });
       }else{
         missingEl.hidden = true;
-        missingEl.innerHTML = '';
+        missingEl.replaceChildren();
       }
     }
 

@@ -3,6 +3,7 @@
 <div class="module-wrap">
   <h2>⚙️ تنظیمات سامانه</h2>
 
+  {% if is_admin %}
   <form method="post" class="card" style="padding:16px; margin-bottom:16px;">
     <input type="hidden" name="form_id" value="pos">
     <h3 style="margin-top:0;">انتخاب دستگاه کارتخوان</h3>
@@ -124,6 +125,8 @@
       <button type="submit" class="btn-primary">ذخیره تنظیمات دستیار</button>
     </div>
   </form>
+
+  {% endif %}
 
   <form method="post" class="card" style="padding:16px; margin-bottom:16px; display:grid; gap:16px; border:2px solid #28a745;">
     <input type="hidden" name="form_id" value="user_ai">

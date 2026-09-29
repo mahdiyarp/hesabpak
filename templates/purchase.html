@@ -187,11 +187,25 @@ const SEARCH_DELAY = 150;
     fetch(`${window.prefix}/api/search?q=${encodeURIComponent(q)}&kind=person&limit=10`, {credentials:'same-origin'})
       .then(r => r.ok ? r.json() : [])
       .then(data => {
-        if(!Array.isArray(data) || data.length === 0){ hide(personBox); personBox.innerHTML=''; return; }
-        personBox.innerHTML = data.map(m => `<a class="res" href="#" data-id="${m.id}" data-code="${m.code}" data-name="${m.name}">${m.code} — ${m.name}</a>`).join('');
+        if(!Array.isArray(data) || data.length === 0){
+        hide(personBox);
+        personBox.replaceChildren();
+        return;
+      }
+        personBox.replaceChildren();
+        data.forEach(m=>{
+          const a=document.createElement('a');
+          a.className='res';
+          a.href='#';
+          a.dataset.id=m.id == null ? '' : String(m.id);
+          a.dataset.code=m.code == null ? '' : String(m.code);
+          a.dataset.name=m.name == null ? '' : String(m.name);
+          a.textContent=(m.code || '') + ' — ' + (m.name || '');
+          personBox.appendChild(a);
+        });
         show(personBox);
       })
-      .catch(()=>{ hide(personBox); personBox.innerHTML=''; });
+      .catch(()=>{ hide(personBox); personBox.replaceChildren(); });
   }
 
   if(personSearch){
@@ -209,7 +223,7 @@ const SEARCH_DELAY = 150;
         personHint.classList.remove('selected');
       }
       clearTimeout(tSupplier);
-      if(!v){ hide(personBox); personBox.innerHTML=''; return; }
+      if(!v){ hide(personBox); personBox.replaceChildren(); return; }
       tSupplier = setTimeout(()=>searchSupplier(v), SEARCH_DELAY);
     });
   }
@@ -295,8 +309,18 @@ const SEARCH_DELAY = 150;
     let timer = null;
 
     function renderItems(rows){
-      if(!Array.isArray(rows) || rows.length === 0){ hide(results); results.innerHTML=''; return; }
-      results.innerHTML = rows.map(m => `<a class="res" href="#" data-id="${m.id}" data-code="${m.code}" data-name="${m.name}">${m.code} — ${m.name}</a>`).join('');
+      if(!Array.isArray(rows) || rows.length === 0){ hide(results); results.replaceChildren(); return; }
+      results.replaceChildren();
+      rows.forEach(m=>{
+        const a=document.createElement('a');
+        a.className='res';
+        a.href='#';
+        a.dataset.id=m.id == null ? '' : String(m.id);
+        a.dataset.code=m.code == null ? '' : String(m.code);
+        a.dataset.name=m.name == null ? '' : String(m.name);
+        a.textContent=(m.code || '') + ' — ' + (m.name || '');
+        results.appendChild(a);
+      });
       show(results);
     }
 
@@ -304,14 +328,14 @@ const SEARCH_DELAY = 150;
       fetch(`${window.prefix}/api/search?q=${encodeURIComponent(v)}&kind=item&limit=15`, {credentials:'same-origin'})
         .then(r => r.ok ? r.json() : [])
         .then(renderItems)
-        .catch(()=>{ hide(results); results.innerHTML=''; });
+        .catch(()=>{ hide(results); results.replaceChildren(); });
     }
 
     if(searchBox){
       searchBox.addEventListener('input', () => {
         const v = (searchBox.value || '').trim();
         clearTimeout(timer);
-        if(!v){ hide(results); results.innerHTML=''; return; }
+        if(!v){ hide(results); results.replaceChildren(); return; }
         timer = setTimeout(()=>searchItem(v), SEARCH_DELAY);
       });
     }

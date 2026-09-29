@@ -24,33 +24,45 @@
   }
 
   function renderResults(container, items){
-    // If this container belongs to unified search, do not overwrite its results.
     try{
       if(container && container.closest && container.closest('[data-search-handler="unified"]')){
         return;
       }
     }catch(e){}
-    container.innerHTML = '';
-    if(!items || !items.length){ container.innerHTML = '<div class="no-results muted" style="padding:8px">موردی یافت نشد</div>'; return; }
+    container.replaceChildren();
+    if(!items || !items.length){
+      const empty = document.createElement('div');
+      empty.className = 'no-results muted';
+      empty.style.padding = '8px';
+      empty.textContent = 'موردی یافت نشد';
+      container.appendChild(empty);
+      return;
+    }
     const ul = document.createElement('div');
     ul.className = 'search-list';
     items.forEach(it=>{
       const row = document.createElement('div');
       row.className = 'search-row';
       row.tabIndex = 0;
-      row.dataset.id = it.id;
+      row.dataset.id = it.id == null ? '' : String(it.id);
       row.dataset.kind = it.kind || '';
       row.dataset.title = it.title || it.name || '';
-      row.innerHTML = `<div class="sr-main">${it.title || it.name || ''}</div><div class="sr-sub muted">${it.extra || ''}</div>`;
+      const main = document.createElement('div');
+      main.className = 'sr-main';
+      main.textContent = it.title || it.name || '';
+      row.appendChild(main);
+      const sub = document.createElement('div');
+      sub.className = 'sr-sub muted';
+      sub.textContent = it.extra || '';
+      row.appendChild(sub);
       row.addEventListener('click',()=>{
         container.dispatchEvent(new CustomEvent('search-picked',{detail:it, bubbles:true}));
       });
-      row.addEventListener('keydown', (e)=>{ if(e.key==='Enter') row.click(); });
+      row.addEventListener('keydown',e=>{ if(e.key==='Enter') row.click(); });
       ul.appendChild(row);
     });
     container.appendChild(ul);
   }
-
   function positionFixedResults(input, results){
     // position near input to avoid clipping by parent overflow
     const rect = input.getBoundingClientRect();
@@ -95,7 +107,11 @@
         results.hidden = false; results.style.display = 'block';
         positionFixedResults(input, results);
       }catch(err){
-        results.innerHTML = '<div class="muted">خطا در دریافت نتایج</div>';
+        results.replaceChildren();
+        const error = document.createElement('div');
+        error.className = 'muted';
+        error.textContent = 'خطا در دریافت نتایج';
+        results.appendChild(error);
         results.hidden = false; results.style.display = 'block';
         positionFixedResults(input, results);
         console.error('search-ajax error', err);
