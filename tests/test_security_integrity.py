@@ -369,3 +369,33 @@ def test_rate_snapshot_normalizes_currency_codes_and_units(monkeypatch, tmp_path
     rates.save_rates({"updated_at": "x", "currencies": {"usd": {"rate": "123", "unit": "تومان"}}})
     snapshot = rates.load_rates()
     assert snapshot["currencies"]["USD"]["rate"] == 123.0
+
+def test_developer_delete_respects_entity_reference_protection():
+    with app_module.app.app_context():
+        app_module.db.drop_all()
+        app_module.db.create_all()
+
+        person = app_module.Entity(
+            type="person",
+            code="101",
+            name="مشتری",
+            level=1,
+        )
+        app_module.db.session.add(person)
+        app_module.db.session.commit()
+
+        cash = app_module.CashDoc(
+            doc_type="receive",
+            number="R-TEST-1",
+            date=app_module.datetime.utcnow().date(),
+            person_id=person.id,
+            amount=1000,
+            method="cash",
+        )
+        app_module.db.session.add(cash)
+        app_module.db.session.commit()
+
+        messages = app_module._run_script_lines(["DELETE person 101"])
+
+        assert any("حذف فیزیکی مجاز نیست" in message for message in messages)
+        assert app_module.Entity.query.get(person.id) is not None
