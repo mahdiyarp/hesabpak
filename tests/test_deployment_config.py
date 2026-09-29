@@ -24,15 +24,13 @@ def test_production_deploy_generates_non_default_credentials():
     assert 'ADMIN_USERNAME=admin' in deploy
     assert 'ADMIN_PASSWORD=$ADMIN_PASSWORD_VALUE' in deploy
 
-def test_legacy_install_script_uses_production_service_defaults():
+def test_legacy_install_script_delegates_to_hardened_deploy():
     install = (ROOT / "install.sh").read_text(encoding="utf-8")
 
-    assert 'RUN_USER="${SUDO_USER:-$USER}"' in install
-    assert "FLASK_ENV=production" in install
-    assert 'command=$APP_DIR/venv/bin/gunicorn --bind 127.0.0.1:8000 "app:app"' in install
-    assert "user=$RUN_USER" in install
-    assert "X-Forwarded-Proto $scheme" in install
-    assert "HTTPS را فعال کنید" in install
+    assert "deploy_site.sh" in install
+    assert "git clone" not in install
+    assert "python3 -m venv" not in install
+    assert "RUN_USER" not in install
 def test_deploy_site_does_not_swallow_git_update_failures():
     deploy = (ROOT / "deploy_site.sh").read_text(encoding="utf-8")
     assert 'git pull origin main || true' not in deploy
