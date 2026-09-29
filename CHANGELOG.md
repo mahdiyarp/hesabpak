@@ -7,6 +7,8 @@
 - Added a dedicated transaction landing at /transactions and upgraded /reports into the advanced transaction search page.
 - Transaction search now supports exact amount matching from the quick search field and applies amount bounds at database-query level.
 - Finalized Paki/PWA, isolated demo safeguards, offline distribution, health monitoring and credential-at-rest protection.
+- Demo share links preserve HTTPS when the app is behind the bundled reverse-proxy deployment.
+- Hardened the report fallback so already-formatted Jalali dates are not re-parsed.
 - CI remains blocked by a GitHub hosted-runner assignment failure; no test step has executed yet.
 
 ## 0.9.0 — 2026-09-30
