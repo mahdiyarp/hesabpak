@@ -3361,7 +3361,14 @@ def assistant_chat():
     actions_preview = None
     actions_payload = result.get("actions") if isinstance(result.get("actions"), list) else []
     if actions_payload:
-        if not is_admin():
+        if ticket:
+            actions_summary = {
+                "applied": 0,
+                "failed": len(actions_payload),
+                "messages": [],
+                "errors": ["برای جلوگیری از اجرای همزمان، تغییرات فایل پروژه را جداگانه تأیید کنید."],
+            }
+        elif not is_admin():
             actions_summary = {
                 "applied": 0,
                 "failed": len(actions_payload),
@@ -3390,14 +3397,13 @@ def assistant_chat():
             elif safe_actions:
                 actions_preview = safe_actions
                 needs_confirmation = True
-                if not ticket:
-                    ticket = _register_ai_task(
-                        current_user.username,
-                        {
-                            "actions": safe_actions,
-                            "reply": reply_text,
-                        },
-                    )
+                ticket = _register_ai_task(
+                    current_user.username,
+                    {
+                        "actions": safe_actions,
+                        "reply": reply_text,
+                    },
+                )
 
     response = {
         "status": "ok",
