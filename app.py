@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import os, json, logging, secrets, base64, tempfile
+import os, json, logging, secrets, base64, tempfile, signal
 from pathlib import Path
 from datetime import datetime, timedelta, date
 from typing import Any, Dict, List, Optional
@@ -3804,14 +3804,22 @@ def admin_update_from_git():
         else:
             step("No venv found; skipping pip install")
 
-        # restart (Passenger)
+        # Reload Gunicorn under the hardened deployment; keep Passenger fallback for legacy hosts.
         try:
-            tmpdir = PROJECT_ROOT / "tmp"
-            tmpdir.mkdir(parents=True, exist_ok=True)
-            (tmpdir / "restart.txt").write_text(datetime.utcnow().isoformat())
-            step("Passenger restart triggered (tmp/restart.txt)")
+            pidfile = Path("/run/hesabpak/hesabpak.pid")
+            if pidfile.is_file():
+                master_pid = int(pidfile.read_text(encoding="utf-8").strip())
+                if master_pid <= 1:
+                    raise ValueError("invalid Gunicorn master PID")
+                os.kill(master_pid, signal.SIGHUP)
+                step("Gunicorn master reloaded (SIGHUP)")
+            else:
+                tmpdir = PROJECT_ROOT / "tmp"
+                tmpdir.mkdir(parents=True, exist_ok=True)
+                (tmpdir / "restart.txt").write_text(datetime.utcnow().isoformat())
+                step("Passenger restart triggered (tmp/restart.txt)")
         except Exception as e:
-            step(f"failed to trigger restart: {e}", ok=False)
+            step(f"failed to trigger application reload: {e}", ok=False)
 
         result["ok"] = True
         return jsonify(result)
