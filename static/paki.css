@@ -23,3 +23,9 @@
 
 .paki-fab.is-floating[data-paki-mood="alert"]{animation:paki-shake .38s ease}
 .paki-login-brand img{animation:paki-welcome-breathe 3.8s ease-in-out infinite}
+
+.paki-bubble{position:fixed;right:92px;bottom:28px;z-index:1199;display:grid;gap:4px;max-width:280px;padding:12px 15px;border:1px solid rgba(137,180,255,.28);border-radius:16px 16px 6px 16px;background:rgba(13,23,40,.94);color:#eef7ff;box-shadow:0 14px 34px rgba(0,0,0,.24),0 0 24px rgba(93,166,255,.08);backdrop-filter:blur(10px);opacity:1;transform:translateY(0);transition:opacity .25s ease,transform .25s ease}
+.paki-bubble::after{content:"";position:absolute;right:-7px;bottom:14px;width:13px;height:13px;background:rgba(13,23,40,.94);border-top:1px solid rgba(137,180,255,.24);border-right:1px solid rgba(137,180,255,.24);transform:rotate(45deg)}
+.paki-bubble strong{font-size:13px}.paki-bubble span{font-size:11px;opacity:.76}.paki-bubble.is-hidden{opacity:0;transform:translateY(6px);pointer-events:none}
+@media (max-width:640px){.paki-bubble{right:78px;bottom:18px;max-width:220px;padding:9px 11px}.paki-bubble strong{font-size:12px}.paki-bubble span{font-size:10px}}
+@media (prefers-reduced-motion:reduce){.paki-bubble{transition:none}}
