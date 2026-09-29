@@ -447,3 +447,10 @@ def test_production_admin_password_fallback_is_disabled():
     source = Path(app_module.__file__).resolve().read_text(encoding="utf-8")
     assert 'if not ADMIN_PASSWORD and FLASK_ENV != "production":' in source
     assert 'ADMIN_PASSWORD = "admin123"' in source
+def test_legacy_purchase_and_sales_routes_infer_document_kind():
+    with app_module.app.test_request_context("/purchase", method="GET"):
+        assert app_module._invoice_kind_from_request() == "purchase"
+    with app_module.app.test_request_context("/sales", method="GET"):
+        assert app_module._invoice_kind_from_request() == "sales"
+    with app_module.app.test_request_context("/invoice", method="GET", query_string={"kind": "purchase"}):
+        assert app_module._invoice_kind_from_request() == "purchase"
