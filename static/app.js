@@ -72,9 +72,6 @@ window.normalizeNumberString = normalizeNumberString;
 window.formatGroupedNumber = formatGroupedNumber;
 window.isAmountField = isAmountField;
 window.setupAmountFormatting = setupAmountFormatting;
-window.normalizeNumberString = normalizeNumberString;
-window.formatGroupedNumber = formatGroupedNumber;
-window.setupAmountFormatting = setupAmountFormatting;
 function badgeOf(t){
   if(t==='person') return 'شخص';
   if(t==='item') return 'کالا';
