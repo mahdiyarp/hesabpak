@@ -220,3 +220,70 @@ def test_assistant_chat_uses_personal_key_gate(monkeypatch):
 
     assert response.status_code == 200
     assert response.get_json()["reply"] == "ok"
+
+
+def test_prepare_invoice_plan_rejects_empty_partner_and_items():
+    import pytest
+
+    with pytest.raises(ValueError):
+        app_module._prepare_invoice_plan({
+            "kind": "sales",
+            "partner": {},
+            "items": [{"name": "کالا", "qty": 1, "unit_price": 100}],
+        })
+
+    with pytest.raises(ValueError):
+        app_module._prepare_invoice_plan({
+            "kind": "sales",
+            "partner": {"name": "مشتری"},
+            "items": [],
+        })
+
+
+def test_prepare_cash_plan_rejects_empty_person():
+    import pytest
+
+    with pytest.raises(ValueError):
+        app_module._prepare_cash_plan({
+            "doc_type": "receive",
+            "person": {},
+            "amount": 100,
+        })
+
+
+def test_assistant_chat_returns_400_for_invalid_invoice_plan(monkeypatch):
+    from types import SimpleNamespace
+
+    monkeypatch.setattr(app_module, "ensure_permission", lambda *args, **kwargs: None)
+    monkeypatch.setattr(app_module, "OpenAI", object())
+    monkeypatch.setattr(app_module, "_assistant_api_ready", lambda: True)
+    monkeypatch.setattr(
+        app_module,
+        "current_user",
+        SimpleNamespace(is_authenticated=True, username="test-user"),
+    )
+    monkeypatch.setattr(
+        app_module,
+        "_call_openai_assistant",
+        lambda messages: {
+            "reply": "bad invoice",
+            "needs_confirmation": False,
+            "invoice": {
+                "kind": "unknown",
+                "partner": {"name": "مشتری"},
+                "items": [{"name": "کالا", "qty": 1, "unit_price": 100}],
+            },
+            "cash": None,
+            "actions": [],
+        },
+    )
+
+    with app_module.app.test_request_context(
+        "/assistant/api/chat",
+        method="POST",
+        json={"messages": [{"role": "user", "text": "ثبت فاکتور"}]},
+    ):
+        response = app_module.assistant_chat.__wrapped__()
+
+    assert response.status_code == 400
+    assert "نوع فاکتور" in response.get_json()["message"]
