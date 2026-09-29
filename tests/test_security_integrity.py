@@ -41,3 +41,27 @@ def test_record_ledger_creates_one_valid_entry():
         stored = app_module.LedgerEntry.query.get(entry.id)
         assert stored is not None
         assert stored.hash == entry.hash
+def test_search_permissions_scope_targets():
+    assert app_module._search_targets_for_permissions(
+        {"item", "person", "invoice", "receive", "payment"},
+        {"dashboard", "entities"},
+        admin=False,
+    ) == {"item", "person"}
+
+    assert app_module._search_targets_for_permissions(
+        {"invoice", "receive", "payment"},
+        {"dashboard", "sales", "reports"},
+        admin=False,
+    ) == {"invoice", "receive", "payment"}
+
+    assert app_module._search_targets_for_permissions(
+        {"item", "person", "invoice", "receive", "payment"},
+        {"dashboard"},
+        admin=False,
+    ) == set()
+
+    assert app_module._search_targets_for_permissions(
+        {"item", "person", "invoice", "receive", "payment"},
+        set(),
+        admin=True,
+    ) == {"item", "person", "invoice", "receive", "payment"}
