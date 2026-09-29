@@ -34,6 +34,13 @@ class FakeSMTP:
 
 
 def test_send_backup_email(monkeypatch, tmp_path):
+    class Logger:
+        def info(self, *args, **kwargs):
+            pass
+
+    class App:
+        logger = Logger()
+
     attachment = Path(tmp_path) / "backup_2026-09-29_12-00-00_deadbeef.zip"
     attachment.write_bytes(b"zip-content")
 
@@ -46,7 +53,7 @@ def test_send_backup_email(monkeypatch, tmp_path):
     monkeypatch.setattr(email_utils.smtplib, "SMTP", FakeSMTP)
 
     email_utils.send_backup_email(
-        None,
+        App(),
         "owner@example.test",
         str(attachment),
         reason="manual",
