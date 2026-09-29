@@ -66,7 +66,7 @@ DATA_DIR=data
 SESSION_COOKIE_SECURE=false
 MAX_UPLOAD_MB=15
 DEMO_MODE=false
-CREDENTIAL_ENCRYPTION_KEY=$(openssl rand -base64 32 | tr -d '\n')
+CREDENTIAL_ENCRYPTION_KEY=$(openssl rand -hex 32)
 EOF
   chown "$USER:$GROUP" "$APP_DIR/.env"
   chmod 600 "$APP_DIR/.env"
@@ -74,7 +74,7 @@ fi
 
 if ! grep -q '^CREDENTIAL_ENCRYPTION_KEY=' "$APP_DIR/.env"; then
   umask 077
-  printf '\nCREDENTIAL_ENCRYPTION_KEY=%s\n' "$(openssl rand -base64 32 | tr -d '\n')" >> "$APP_DIR/.env"
+  printf '\nCREDENTIAL_ENCRYPTION_KEY=%s\n' "$(openssl rand -hex 32)" >> "$APP_DIR/.env"
   chown "$USER:$GROUP" "$APP_DIR/.env"
   chmod 600 "$APP_DIR/.env"
 fi
