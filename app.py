@@ -1443,6 +1443,19 @@ def _resolve_entity(kind: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     }
     return info
 
+def _assistant_plan_permission(plan: Dict[str, Any]) -> Optional[str]:
+    """Return the module permission required to apply an assistant accounting plan."""
+    if not isinstance(plan, dict):
+        return None
+    if plan.get("items"):
+        kind = str(plan.get("kind") or "").strip().lower()
+        return kind if kind in ("sales", "purchase") else None
+    if plan.get("amount") is not None and plan.get("person"):
+        doc_type = str(plan.get("doc_type") or "").strip().lower()
+        return doc_type if doc_type in ("receive", "payment") else None
+    return None
+
+
 def _prepare_invoice_plan(invoice_data: Dict[str, Any]) -> Dict[str, Any]:
     kind = (invoice_data.get("kind") or "").strip().lower()
     if kind not in ("sales", "purchase"):
@@ -3482,7 +3495,10 @@ def assistant_chat():
         invoice_preview = plan
         missing_partner = plan.get("missing_partner")
         missing_items = plan.get("missing_items")
-        if missing_partner or missing_items:
+        required_permission = _assistant_plan_permission(plan)
+        if missing_partner or missing_items or (
+            required_permission and not has_permission(required_permission)
+        ):
             needs_confirmation = True
 
         if not needs_confirmation:
@@ -3516,7 +3532,12 @@ def assistant_chat():
             db.session.rollback()
             return jsonify({"status": "error", "message": str(exc)}), 400
         # if assistant couldn't determine direction or missing critical info, require confirmation
-        if cplan.get("missing_person") or (not cplan.get("bank_account") and (cplan.get("method") or '').lower()=='bank'):
+        required_permission = _assistant_plan_permission(cplan)
+        if cplan.get("missing_person") or (
+            not cplan.get("bank_account") and (cplan.get("method") or '').lower() == 'bank'
+        ) or (
+            required_permission and not has_permission(required_permission)
+        ):
             needs_confirmation = True
 
         if not needs_confirmation:
@@ -3629,8 +3650,14 @@ def assistant_apply():
     if not plan:
         return jsonify({"status": "error", "message": "اطلاعات عملیات موجود نیست."}), 400
 
-    # Decide whether this is an invoice plan or cash plan
+    # Decide whether this is an invoice plan or cash plan.
     try:
+        required_permission = _assistant_plan_permission(plan)
+        if not required_permission:
+            return jsonify({"status": "error", "message": "نوع عملیات یا مجوز ماژول مشخص نیست."}), 400
+        if not has_permission(required_permission):
+            return jsonify({"status": "error", "message": "برای اعمال این عملیات مجوز ماژول مربوطه را ندارید."}), 403
+
         if isinstance(plan, dict) and plan.get("items"):
             outcome = _apply_invoice_plan(plan)
             invoice = outcome["invoice"]
