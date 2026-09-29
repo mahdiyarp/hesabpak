@@ -876,13 +876,19 @@ def _build_openai_messages(messages: List[Dict[str, Any]]) -> List[Dict[str, Any
     return prepared
 
 
+PROTECTED_PROJECT_PATHS = {".env", ".env.local", ".env.production", "data"}
+PROTECTED_PROJECT_DIRS = {".git", ".hg", ".svn"}
+
+
 def _resolve_project_path(rel_path: str) -> Path:
-    rel_path = (rel_path or "").strip()
+    rel_path = (rel_path or "").strip().replace("\\", "/")
     if not rel_path:
         raise ValueError("مسیر فایل مشخص نشده است.")
     rel = Path(rel_path)
-    if rel.is_absolute():
-        raise ValueError("مسیر باید نسبی باشد.")
+    if rel.is_absolute() or ".." in rel.parts:
+        raise ValueError("مسیر باید نسبی و داخل پروژه باشد.")
+    if rel.parts and (rel.parts[0] in PROTECTED_PROJECT_DIRS or rel.parts[0] in PROTECTED_PROJECT_PATHS):
+        raise ValueError("این مسیر برای ویرایش توسط دستیار محافظت شده است.")
     target = (PROJECT_ROOT / rel).resolve()
     if PROJECT_ROOT not in target.parents and target != PROJECT_ROOT:
         raise ValueError("امکان دسترسی به مسیر خارج از پروژه وجود ندارد.")
@@ -890,6 +896,13 @@ def _resolve_project_path(rel_path: str) -> Path:
 
 
 def _apply_assistant_actions(actions: List[Dict[str, Any]]) -> Dict[str, Any]:
+    if not is_admin():
+        return {
+            "applied": 0,
+            "failed": len(actions or []),
+            "messages": [],
+            "errors": ["اعمال تغییرات فایل پروژه فقط برای مدیر سیستم مجاز است."],
+        }
     summary = {"applied": 0, "failed": 0, "messages": [], "errors": []}
     for action in actions:
         if not isinstance(action, dict):
@@ -3345,13 +3358,46 @@ def assistant_chat():
             )
 
     actions_summary = None
+    actions_preview = None
     actions_payload = result.get("actions") if isinstance(result.get("actions"), list) else []
     if actions_payload:
-        actions_summary = _apply_assistant_actions(actions_payload)
-        if actions_summary.get("errors"):
-            app.logger.warning(
-                "AI_ACTION_ERRORS count=%s", len(actions_summary.get("errors") or [])
-            )
+        if not is_admin():
+            actions_summary = {
+                "applied": 0,
+                "failed": len(actions_payload),
+                "messages": [],
+                "errors": ["اعمال تغییرات فایل پروژه فقط برای مدیر سیستم مجاز است."],
+            }
+        else:
+            safe_actions = []
+            preview_errors = []
+            for action in actions_payload:
+                if not isinstance(action, dict):
+                    preview_errors.append("ساختار یکی از عملیات‌ها نامعتبر است.")
+                    continue
+                try:
+                    _resolve_project_path((action.get("path") or "").strip())
+                    safe_actions.append(action)
+                except Exception as exc:
+                    preview_errors.append(str(exc))
+            if preview_errors:
+                actions_summary = {
+                    "applied": 0,
+                    "failed": len(preview_errors),
+                    "messages": [],
+                    "errors": preview_errors,
+                }
+            elif safe_actions:
+                actions_preview = safe_actions
+                needs_confirmation = True
+                if not ticket:
+                    ticket = _register_ai_task(
+                        current_user.username,
+                        {
+                            "actions": safe_actions,
+                            "reply": reply_text,
+                        },
+                    )
 
     response = {
         "status": "ok",
@@ -3365,6 +3411,7 @@ def assistant_chat():
         "follow_up": result.get("follow_up"),
         "apply_error": apply_error,
         "actions_summary": actions_summary,
+        "actions_preview": actions_preview,
         "actions_applied": bool(actions_summary and actions_summary.get("applied")),
     }
     return jsonify(response)
@@ -3381,6 +3428,19 @@ def assistant_apply():
     if not task:
         return jsonify({"status": "error", "message": "توکن منقضی یا نامعتبر است."}), 400
     plan = task.get("plan")
+    actions = task.get("actions")
+    if actions:
+        if not is_admin():
+            return jsonify({"status": "error", "message": "اعمال تغییرات فایل پروژه فقط برای مدیر سیستم مجاز است."}), 403
+        try:
+            summary = _apply_assistant_actions(actions)
+            if summary.get("errors"):
+                return jsonify({"status": "error", "message": "برخی تغییرات اعمال نشد.", "actions_summary": summary}), 400
+            return jsonify({"status": "ok", "actions_summary": summary})
+        except Exception as exc:
+            current_app.logger.exception("assistant project actions failed")
+            return jsonify({"status": "error", "message": str(exc)}), 400
+
     if not plan:
         return jsonify({"status": "error", "message": "اطلاعات عملیات موجود نیست."}), 400
 
