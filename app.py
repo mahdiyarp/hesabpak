@@ -2867,7 +2867,24 @@ def unified_cash():
             current_app.logger.exception("cash document posting failed")
             flash(f"خطا در ثبت سند: {exc}", "danger")
             return redirect(URL_PREFIX + f"/cash_doc?kind={form_kind}")
-        
+
+        try:
+            record_ledger(
+                "cashdoc",
+                doc.id,
+                "create",
+                {
+                    "doc_type": form_kind,
+                    "number": number,
+                    "amount": float(amount),
+                    "person_id": person.id,
+                    "cashbox_id": cashbox.id if cashbox else None,
+                    "method": method,
+                },
+            )
+        except Exception:
+            current_app.logger.exception("failed to write unified cashdoc ledger entry")
+
         action_label = "دریافت" if form_kind == "receive" else "پرداخت"
         flash(
             f"✅ {action_label} «{number}» برای «{person.name}» — {amount_to_toman_words(amount)}",
@@ -3022,6 +3039,23 @@ def receive_old():
             current_app.logger.exception("legacy receive posting failed")
             flash(f"خطا در ثبت دریافت: {exc}", "danger")
             return redirect(URL_PREFIX + "/receive")
+
+        try:
+            record_ledger(
+                "cashdoc",
+                doc.id,
+                "create",
+                {
+                    "doc_type": "receive",
+                    "number": number,
+                    "amount": float(amount),
+                    "person_id": person.id,
+                    "cashbox_id": cashbox.id if cashbox else None,
+                    "method": method,
+                },
+            )
+        except Exception:
+            current_app.logger.exception("failed to write legacy receive ledger entry")
         flash(
             f"✅ دریافت «{number}» برای «{person.name}» — {amount_to_toman_words(amount)}",
             "success",
@@ -3163,6 +3197,8 @@ def payment():
             return redirect(URL_PREFIX + "/payment")
 
         method = (request.form.get("method") or "").strip().lower() or None
+        if method not in ("pos", "cash", "bank", "cheque"):
+            method = "cash"
         note   = (request.form.get("note") or "").strip() or None
 
         cashbox = None
@@ -3227,6 +3263,23 @@ def payment():
             current_app.logger.exception("legacy payment posting failed")
             flash(f"خطا در ثبت پرداخت: {exc}", "danger")
             return redirect(URL_PREFIX + "/payment")
+
+        try:
+            record_ledger(
+                "cashdoc",
+                doc.id,
+                "create",
+                {
+                    "doc_type": "payment",
+                    "number": number,
+                    "amount": float(amount),
+                    "person_id": person.id,
+                    "cashbox_id": cashbox.id if cashbox else None,
+                    "method": method,
+                },
+            )
+        except Exception:
+            current_app.logger.exception("failed to write legacy payment ledger entry")
         flash(
             f"✅ پرداخت «{number}» برای «{person.name}» — {amount_to_toman_words(amount)}",
             "success",
