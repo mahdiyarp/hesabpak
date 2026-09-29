@@ -287,3 +287,27 @@ def test_assistant_chat_returns_400_for_invalid_invoice_plan(monkeypatch):
 
     assert response.status_code == 400
     assert "نوع فاکتور" in response.get_json()["message"]
+
+def test_ai_plan_permission_maps_invoice_and_cash_modules():
+    assert app_module._assistant_plan_permission({
+        "kind": "sales",
+        "items": [{"name": "کالا", "qty": 1}],
+    }) == "sales"
+    assert app_module._assistant_plan_permission({
+        "kind": "purchase",
+        "items": [{"name": "کالا", "qty": 1}],
+    }) == "purchase"
+    assert app_module._assistant_plan_permission({
+        "doc_type": "receive",
+        "person": {"name": "مشتری"},
+        "amount": 100,
+    }) == "receive"
+    assert app_module._assistant_plan_permission({
+        "doc_type": "payment",
+        "person": {"name": "مشتری"},
+        "amount": 100,
+    }) == "payment"
+
+def test_ai_plan_permission_rejects_unknown_type():
+    assert app_module._assistant_plan_permission({"kind": "unknown", "items": []}) is None
+    assert app_module._assistant_plan_permission({"doc_type": "unknown", "person": {}, "amount": 1}) is None
