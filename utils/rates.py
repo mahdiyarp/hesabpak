@@ -53,10 +53,56 @@ def load_rates() -> Dict[str, Any]:
     }
 
 
-def save_rates(payload: Dict[str, Any]) -> None:
-    """Persist the rates snapshot atomically and validate its top-level shape."""
+def _validate_rate_snapshot(payload: Dict[str, Any]) -> Dict[str, Any]:
+    """Validate and normalize the public rates snapshot shape."""
     if not isinstance(payload, dict):
         raise ValueError("ساختار snapshot نرخ‌ها باید یک شیء JSON باشد.")
+
+    normalized = {
+        "updated_at": payload.get("updated_at"),
+        "currencies": {},
+        "gold": {},
+    }
+    currencies = payload.get("currencies", {})
+    if currencies is not None and not isinstance(currencies, dict):
+        raise ValueError("بخش ارزهای snapshot نامعتبر است.")
+    for code, entry in (currencies or {}).items():
+        code = str(code).strip().upper()
+        if not code or not isinstance(entry, dict):
+            continue
+        rate = entry.get("rate")
+        if rate is not None:
+            try:
+                rate = float(rate)
+            except (TypeError, ValueError):
+                raise ValueError(f"نرخ ارز «{code}» نامعتبر است.")
+            if rate < 0:
+                raise ValueError(f"نرخ ارز «{code}» نمی‌تواند منفی باشد.")
+        unit = str(entry.get("unit") or "تومان").strip()[:32]
+        normalized["currencies"][code] = {"rate": rate, "unit": unit}
+
+    gold = payload.get("gold", {})
+    if gold is not None and not isinstance(gold, dict):
+        raise ValueError("بخش طلا و سکه snapshot نامعتبر است.")
+    for key, value in (gold or {}).items():
+        key = str(key).strip()
+        if not key:
+            continue
+        if value is not None:
+            try:
+                value = float(value)
+            except (TypeError, ValueError):
+                raise ValueError(f"مقدار طلا «{key}» نامعتبر است.")
+            if value < 0:
+                raise ValueError(f"مقدار طلا «{key}» نمی‌تواند منفی باشد.")
+        normalized["gold"][key] = value
+
+    return normalized
+
+
+def save_rates(payload: Dict[str, Any]) -> None:
+    """Persist the rates snapshot atomically after structural validation."""
+    payload = _validate_rate_snapshot(payload)
     _ensure_path()
     fd, tmp_name = tempfile.mkstemp(
         prefix=".rates-", suffix=".json.tmp", dir=str(DATA_FILE.parent)
