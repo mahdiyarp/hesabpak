@@ -2975,6 +2975,79 @@ def entities_delete(eid):
     flash("حذف شد.", "success")
     return redirect(URL_PREFIX + f"/entities?kind={t}")
 
+# ----------------- Transactions landing -----------------
+@app.route(URL_PREFIX + "/transactions")
+@login_required
+def transactions_landing():
+    ensure_permission("reports")
+
+    now = _now_info()
+    today = now["datetime"].date()
+    start_day = today - timedelta(days=6)
+
+    sales_today = float(
+        db.session.query(func.coalesce(func.sum(Invoice.total), 0.0))
+        .filter(Invoice.kind == "sales", Invoice.date == today)
+        .scalar() or 0.0
+    )
+    purchase_today = float(
+        db.session.query(func.coalesce(func.sum(Invoice.total), 0.0))
+        .filter(Invoice.kind == "purchase", Invoice.date == today)
+        .scalar() or 0.0
+    )
+    receive_today = float(
+        db.session.query(func.coalesce(func.sum(CashDoc.amount), 0.0))
+        .filter(CashDoc.doc_type == "receive", CashDoc.date == today)
+        .scalar() or 0.0
+    )
+    payment_today = float(
+        db.session.query(func.coalesce(func.sum(CashDoc.amount), 0.0))
+        .filter(CashDoc.doc_type == "payment", CashDoc.date == today)
+        .scalar() or 0.0
+    )
+
+    recent = []
+    for inv in Invoice.query.order_by(Invoice.id.desc()).limit(10).all():
+        recent.append({
+            "kind": "sales" if (inv.kind or "").lower() == "sales" else "purchase",
+            "label": "فروش" if (inv.kind or "").lower() == "sales" else "خرید",
+            "id": inv.id,
+            "number": inv.number or "—",
+            "date": to_jdate_str(inv.date),
+            "date_key": inv.date,
+            "person": inv.person.name if inv.person else "—",
+            "amount": float(inv.total or 0.0),
+            "url": URL_PREFIX + f"/invoice/{inv.id}",
+        })
+    for doc in CashDoc.query.order_by(CashDoc.id.desc()).limit(10).all():
+        recent.append({
+            "kind": "receive" if doc.doc_type == "receive" else "payment",
+            "label": "دریافت" if doc.doc_type == "receive" else "پرداخت",
+            "id": doc.id,
+            "number": doc.number or "—",
+            "date": to_jdate_str(doc.date),
+            "date_key": doc.date,
+            "person": doc.person.name if doc.person else "—",
+            "amount": float(doc.amount or 0.0),
+            "url": URL_PREFIX + f"/cash/{doc.id}",
+        })
+    recent.sort(key=lambda row: (row.get("date_key") or date.min, row.get("id", 0)), reverse=True)
+    recent = recent[:12]
+
+    return render_template(
+        "transactions.html",
+        prefix=URL_PREFIX,
+        today_label=to_jdate_str(today),
+        start_day=start_day,
+        stats={
+            "sales": sales_today,
+            "purchase": purchase_today,
+            "receive": receive_today,
+            "payment": payment_today,
+        },
+        recent=recent,
+    )
+
 # ----------------- Reports -----------------
 @app.route(URL_PREFIX + "/reports")
 @login_required
