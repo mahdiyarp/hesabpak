@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import os, json, logging, secrets, base64
+import os, json, logging, secrets, base64, hmac, binascii
 from pathlib import Path
 from datetime import datetime, timedelta, date
 from typing import Any, Dict, List, Optional
@@ -102,11 +102,31 @@ def record_ledger(object_type: str, object_id: Optional[str], action: str, paylo
 load_dotenv()
 PROJECT_ROOT = Path(__file__).resolve().parent
 PORT = int(os.environ.get("PORT", "8000"))
-SECRET_KEY = os.environ.get("SECRET_KEY", "change-me-please")
 URL_PREFIX = os.environ.get("URL_PREFIX", "") or ""   # مثلا: /hesabpak
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "admin123")
 DATA_DIR = os.environ.get("DATA_DIR", "data")
+
+# Keep Flask sessions stable across restarts even when SECRET_KEY is not supplied.
+# Explicit environment configuration still wins.
+SECRET_KEY = os.environ.get("SECRET_KEY", "").strip()
+if not SECRET_KEY:
+    _secret_path = Path(DATA_DIR).expanduser().resolve() / ".secret_key"
+    try:
+        _secret_path.parent.mkdir(parents=True, exist_ok=True)
+        if _secret_path.is_file():
+            SECRET_KEY = _secret_path.read_text(encoding="utf-8").strip()
+        if not SECRET_KEY:
+            SECRET_KEY = secrets.token_hex(32)
+            _secret_path.write_text(SECRET_KEY, encoding="utf-8")
+            try:
+                _secret_path.chmod(0o600)
+            except OSError:
+                pass
+        if not SECRET_KEY:
+            raise RuntimeError("SECRET_KEY could not be initialized")
+    except Exception as exc:
+        raise RuntimeError("SECRET_KEY تنظیم نشده و ذخیره کلید خودکار ممکن نشد.") from exc
 
 ALLOWED_CMDS = {"ADD_ITEM","ADD_PERSON","RENAME","DELETE","SEED_ITEMS","SEED_ACCOUNTS"}
 
@@ -406,6 +426,51 @@ if not os.path.exists(USERS_FILE):
         )
 
 
+PASSWORD_HASH_PREFIX = "pbkdf2_sha256$"
+PASSWORD_HASH_ITERATIONS = int(os.environ.get("PASSWORD_HASH_ITERATIONS", "600000"))
+
+
+def _is_password_hash(value: str) -> bool:
+    return str(value or "").startswith(PASSWORD_HASH_PREFIX)
+
+
+def _hash_password(password: str) -> str:
+    password = str(password or "")
+    if not password:
+        return ""
+    salt = secrets.token_bytes(16)
+    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, PASSWORD_HASH_ITERATIONS)
+    return (
+        f"{PASSWORD_HASH_PREFIX}{PASSWORD_HASH_ITERATIONS}$"
+        f"{base64.urlsafe_b64encode(salt).decode().rstrip('=')}$"
+        f"{base64.urlsafe_b64encode(digest).decode().rstrip('=')}"
+    )
+
+
+def _verify_password(stored: str, candidate: str):
+    """Return (matches, needs_upgrade) for hashed and legacy plaintext passwords."""
+    stored = str(stored or "")
+    candidate = str(candidate or "")
+    if not stored:
+        return False, False
+    if not _is_password_hash(stored):
+        return hmac.compare_digest(stored, candidate), True
+
+    try:
+        scheme, iterations_text, salt_text, digest_text = stored.split("$", 3)
+        if scheme != "pbkdf2_sha256":
+            return False, False
+        iterations = int(iterations_text)
+        if iterations < 100_000 or iterations > 5_000_000:
+            return False, False
+        salt = base64.urlsafe_b64decode(salt_text + "=" * (-len(salt_text) % 4))
+        expected = base64.urlsafe_b64decode(digest_text + "=" * (-len(digest_text) % 4))
+        actual = hashlib.pbkdf2_hmac("sha256", candidate.encode("utf-8"), salt, iterations)
+        return hmac.compare_digest(actual, expected), False
+    except (TypeError, ValueError, binascii.Error):
+        return False, False
+
+
 def _normalize_user_entry(username: str, data: dict) -> dict:
     password = (data.get("password") or "").strip()
     email = (data.get("email") or "").strip()
@@ -458,7 +523,7 @@ def save_users_catalog(catalog: dict) -> None:
         "users": [
             {
                 "username": username,
-                "password": data.get("password", ""),
+                "password": data.get("password", "") if _is_password_hash(data.get("password", "")) else _hash_password(data.get("password", "")),
                 "role": data.get("role", "staff"),
                 "permissions": _permissions_for_role(data.get("role", "staff"), data.get("permissions", [])),
                 "is_active": bool(data.get("is_active", True)),
@@ -1832,16 +1897,21 @@ def login():
         password = request.form.get("password", "")
         catalog = load_users_catalog()
         entry = catalog.get(username)
-        if entry and entry.get("password") == password:
+        password_ok, needs_upgrade = _verify_password(entry.get("password", "") if entry else "", password)
+        if entry and password_ok:
             if not entry.get("is_active", True):
                 flash("دسترسی این کاربر غیرفعال شده است.", "danger")
                 return redirect(URL_PREFIX + "/login")
+            if needs_upgrade:
+                entry["password"] = _hash_password(password)
+                save_users_catalog(catalog)
             login_user(
                 User(
                     username,
                     role=entry.get("role", "staff"),
                     permissions=entry.get("permissions", []),
                     is_active=entry.get("is_active", True),
+                    email=entry.get("email", ""),
                 )
             )
             session["login_at_utc"] = datetime.utcnow().isoformat()
