@@ -216,11 +216,13 @@ def restore_backup(app, zip_filename):
     dbfile = db_path(app)
     temp_root = Path(tempfile.mkdtemp(prefix="hesabpak_restore_"))
     extracted_db = temp_root / dbfile.name
+    staged_live_db = temp_root / (dbfile.name + ".restored")
     staged_uploads = temp_root / "uploads"
     old_db = Path(str(dbfile) + ".before-restore")
     old_uploads = Path(str(uploads_dir) + ".before-restore")
     db_replaced = False
     uploads_replaced = False
+    uploads_moved_aside = False
     uploads_found = False
 
     try:
@@ -254,7 +256,8 @@ def restore_backup(app, zip_filename):
 
         if dbfile.exists():
             shutil.copy2(dbfile, old_db)
-        shutil.copy2(extracted_db, dbfile)
+        shutil.copy2(extracted_db, staged_live_db)
+        os.replace(staged_live_db, dbfile)
         db_replaced = True
 
         if uploads_found:
@@ -265,17 +268,17 @@ def restore_backup(app, zip_filename):
                     old_uploads.unlink()
             if uploads_dir.exists():
                 shutil.move(str(uploads_dir), str(old_uploads))
+                uploads_moved_aside = True
             shutil.move(str(staged_uploads), str(uploads_dir))
             uploads_replaced = True
     except Exception:
         try:
             if db_replaced and old_db.exists():
                 shutil.copy2(old_db, dbfile)
-            if uploads_replaced:
-                if uploads_dir.exists():
-                    shutil.rmtree(uploads_dir)
-                if old_uploads.exists():
-                    shutil.move(str(old_uploads), str(uploads_dir))
+            if uploads_replaced and uploads_dir.exists():
+                shutil.rmtree(uploads_dir)
+            if uploads_moved_aside and old_uploads.exists():
+                shutil.move(str(old_uploads), str(uploads_dir))
         except Exception:
             try:
                 app.logger.exception("backup restore rollback failed")
