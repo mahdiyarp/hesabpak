@@ -16,6 +16,7 @@
             <th>نام کاربری</th>
             <th>نقش</th>
             <th>مجوزها</th>
+            <th>ایمیل</th>
             <th>فعال؟</th>
             <th>رمز جدید</th>
             <th>اقدامات</th>
@@ -52,6 +53,9 @@
                   <input type="hidden" name="permissions" value="admin">
                   {% endif %}
                 </div>
+              </td>
+              <td data-title="ایمیل">
+                <input class="inp" type="email" name="email" value="{{ user.email or '' }}" placeholder="email@example.com" autocomplete="email">
               </td>
               <td data-title="وضعیت">
                 <label class="switch">
@@ -97,6 +101,10 @@
         <label>
           <span>تکرار رمز عبور</span>
           <input class="inp" type="password" name="password_confirm" required>
+        </label>
+        <label>
+          <span>ایمیل</span>
+          <input class="inp" type="email" name="email" placeholder="email@example.com" autocomplete="email">
         </label>
         <label>
           <span>نقش</span>
