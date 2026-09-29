@@ -3239,6 +3239,8 @@ def settings_stub():
         assistant_model_choices=ASSISTANT_MODEL_CHOICES,
         assistant_api_mask=_mask_secret(_openai_api_key()),
         assistant_api_has=bool(_openai_api_key()),
+        user_api_mask=_mask_secret(user_settings.openai_api_key),
+        user_api_has=bool(user_settings.openai_api_key),
         user_settings=user_settings,
     )
 
