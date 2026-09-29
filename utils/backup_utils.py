@@ -45,9 +45,6 @@ def db_path(app):
     data_dir = Path(app.config.get("DATA_DIR", "data"))
     return data_dir / app.config.get("DB_FILE", "app.db")
 
-BACKUP_FILENAME_RE = re.compile(r"^backup_[0-9]{4}-[0-9]{2}-[0-9]{2}_[0-9]{2}-[0-9]{2}-[0-9]{2}_[0-9a-f]{8}\\.zip$")
-
-
 def resolve_backup_path(app, zip_filename):
     """Resolve a backup path without allowing traversal outside the backup root."""
     _, backup_dir, _, _ = ensure_dirs(app)
