@@ -2,12 +2,23 @@
 (function(){
   const PREFIX = (typeof window.prefix === 'string' ? window.prefix : (window.APP_PREFIX || '')) || '';
 
+  const CACHE_KEY = 'hesabpak:lastRates';
+
   async function fetchRates(){
     try{
       const r = await fetch(PREFIX + '/api/rates');
-      if(!r.ok) return null;
-      return await r.json();
-    }catch(e){ console.warn('rates fetch failed', e); return null; }
+      if(!r.ok) throw new Error('rates endpoint unavailable');
+      const data = await r.json();
+      try{ localStorage.setItem(CACHE_KEY, JSON.stringify(data)); }catch(_){}
+      return data;
+    }catch(e){
+      try{
+        const cached = localStorage.getItem(CACHE_KEY);
+        if(cached) return JSON.parse(cached);
+      }catch(_){}
+      console.warn('rates fetch failed', e);
+      return null;
+    }
   }
 
   function fmt(n){
@@ -17,7 +28,7 @@
   async function updateRatesOnce(el){
     const data = await fetchRates();
     if(!data) return;
-    // API returns { ok: true, rates: { currencies: {...}, gold: {...}, updated_at: ... } }
+    // API returns { ok: true, rates: { currencies: {...}, gold: {...}, updated_at: ... } }; cached data is used when offline.
     const snap = data.rates || data || {};
     const cur = snap.currencies || {};
     const usd = (cur.USD && cur.USD.rate) ? cur.USD.rate : null;
