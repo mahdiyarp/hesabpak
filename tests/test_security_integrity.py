@@ -207,3 +207,10 @@ def test_security_headers_include_compatible_csp():
     assert "https://cdn.jsdelivr.net" in csp
     assert "object-src 'none'" in csp
     assert "frame-ancestors 'self'" in csp
+
+
+def test_logout_route_requires_post():
+    rules = app_module.app.url_map.iter_rules()
+    logout_rules = [r for r in rules if r.endpoint == "logout"]
+    assert logout_rules
+    assert all("POST" in r.methods and "GET" not in r.methods for r in logout_rules)
