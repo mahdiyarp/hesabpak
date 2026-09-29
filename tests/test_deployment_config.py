@@ -54,3 +54,9 @@ def test_legacy_install_is_only_a_compatibility_wrapper():
     assert "git clone" not in install
     assert "python3 -m venv" not in install
     assert "supervisor" not in install
+def test_deploy_site_creates_preupdate_full_backup():
+    deploy = (ROOT / "deploy_site.sh").read_text(encoding="utf-8")
+    assert "pre-update full backup" in deploy
+    assert 'create_full_backup(app, user="deploy", reason="pre-update")' in deploy
+    assert 'source "$VENV_DIR/bin/activate"' in deploy
+    assert 'DATA_DIR="${DATA_DIR:-$APP_DIR/data}"' in deploy
