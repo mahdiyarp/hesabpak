@@ -760,18 +760,24 @@ AI_RESPONSE_SCHEMA = {
         "type": "object",
         "additionalProperties": False,
         "properties": {
-            "reply": {"type": "string", "description": "متن پاسخ به کاربر به زبان فارسی"},
+            "reply": {
+                "type": "string",
+                "description": "متن پاسخ به کاربر به زبان فارسی",
+            },
             "needs_confirmation": {"type": "boolean"},
             "follow_up": {"type": ["string", "null"]},
             "uncertain_fields": {
                 "type": "array",
                 "items": {"type": "string"},
-                "default": [],
             },
             "invoice": {
                 "type": ["null", "object"],
+                "additionalProperties": False,
                 "properties": {
-                    "kind": {"type": "string", "enum": ["sales", "purchase", "unknown"], "default": "sales"},
+                    "kind": {
+                        "type": "string",
+                        "enum": ["sales", "purchase", "unknown"],
+                    },
                     "number": {"type": ["string", "null"]},
                     "date": {"type": ["string", "null"]},
                     "partner": {
@@ -781,9 +787,9 @@ AI_RESPONSE_SCHEMA = {
                             "name": {"type": "string"},
                             "code": {"type": ["string", "null"]},
                             "phone": {"type": ["string", "null"]},
-                            "role": {"type": ["string", "null"], "description": "buyer | seller"},
+                            "role": {"type": ["string", "null"]},
                         },
-                        "required": ["name"],
+                        "required": ["name", "code", "phone", "role"],
                     },
                     "items": {
                         "type": "array",
@@ -798,33 +804,68 @@ AI_RESPONSE_SCHEMA = {
                                 "unit_price": {"type": ["number", "null"]},
                                 "total": {"type": ["number", "null"]},
                             },
-                            "required": ["name", "qty"],
+                            "required": [
+                                "name",
+                                "code",
+                                "qty",
+                                "unit",
+                                "unit_price",
+                                "total",
+                            ],
                         },
                     },
                     "notes": {"type": ["string", "null"]},
                 },
-                "required": ["kind", "partner", "items"],
+                "required": [
+                    "kind",
+                    "number",
+                    "date",
+                    "partner",
+                    "items",
+                    "notes",
+                ],
             },
             "cash": {
                 "type": ["null", "object"],
                 "additionalProperties": False,
                 "properties": {
-                    "doc_type": {"type": "string", "enum": ["receive", "payment", "unknown"], "default": "unknown"},
+                    "doc_type": {
+                        "type": "string",
+                        "enum": ["receive", "payment", "unknown"],
+                    },
                     "number": {"type": ["string", "null"]},
                     "date": {"type": ["string", "null"]},
-                    "person": {"type": ["null", "object"], "properties": {"name": {"type": "string"}, "code": {"type": ["string", "null"]}}, "required": ["name"]},
+                    "person": {
+                        "type": ["null", "object"],
+                        "additionalProperties": False,
+                        "properties": {
+                            "name": {"type": "string"},
+                            "code": {"type": ["string", "null"]},
+                        },
+                        "required": ["name", "code"],
+                    },
                     "amount": {"type": "number"},
                     "method": {"type": ["string", "null"]},
                     "bank_account": {"type": ["string", "null"]},
                     "bank_name": {"type": ["string", "null"]},
                     "cheque_number": {"type": ["string", "null"]},
-                    "cheque_due": {"type": ["string", "null"]}
+                    "cheque_due": {"type": ["string", "null"]},
                 },
-                "required": ["amount", "person"]
+                "required": [
+                    "doc_type",
+                    "number",
+                    "date",
+                    "person",
+                    "amount",
+                    "method",
+                    "bank_account",
+                    "bank_name",
+                    "cheque_number",
+                    "cheque_due",
+                ],
             },
             "actions": {
                 "type": "array",
-                "default": [],
                 "items": {
                     "type": "object",
                     "additionalProperties": False,
@@ -837,13 +878,22 @@ AI_RESPONSE_SCHEMA = {
                         "content": {"type": ["string", "null"]},
                         "description": {"type": ["string", "null"]},
                     },
-                    "required": ["operation", "path"],
+                    "required": ["operation", "path", "content", "description"],
                 },
             },
         },
-        "required": ["reply", "needs_confirmation"],
+        "required": [
+            "reply",
+            "needs_confirmation",
+            "follow_up",
+            "uncertain_fields",
+            "invoice",
+            "cash",
+            "actions",
+        ],
     },
 }
+
 
 def _cleanup_ai_tasks():
     expired = []
