@@ -4165,7 +4165,29 @@ def api_bank_detect():
 
 
 # ----------------- Search API -----------------
-@app.route(URL_PREFIX + "/api/search", methods=["GET"])
+def _search_targets_for_permissions(targets, permissions, admin=False):
+    """Limit search record types to the modules visible to a user."""
+    if admin:
+        return set(targets)
+    permissions = set(permissions or ())
+    allowed = set()
+    if "entities" in permissions:
+        allowed.update({"item", "person"})
+    if "sales" in permissions:
+        allowed.add("invoice")
+    if "purchase" in permissions:
+        allowed.add("invoice")
+    if "reports" in permissions:
+        allowed.update({"invoice", "receive", "payment"})
+    if "receive" in permissions:
+        allowed.add("receive")
+    if "payment" in permissions:
+        allowed.add("payment")
+    return set(targets).intersection(allowed)
+
+
+def api_search():
+    q_raw = (request.args.get("q") or "").strip()@app.route(URL_PREFIX + "/api/search", methods=["GET"])
 @login_required
 def api_search():
     q_raw = (request.args.get("q") or "").strip()
