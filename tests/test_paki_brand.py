@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import app as app_module
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -77,3 +79,15 @@ def test_demo_share_link_can_use_configured_public_base_url():
     assert 'base_url = PUBLIC_BASE_URL or request.url_root.rstrip("/")' in app
     env = (ROOT / ".env.example").read_text(encoding="utf-8")
     assert "PUBLIC_BASE_URL=" in env
+
+
+def test_demo_share_link_preserves_forwarded_https_when_public_base_is_unset(monkeypatch):
+    monkeypatch.setattr(app_module, "DEMO_MODE", True)
+    monkeypatch.setattr(app_module, "PUBLIC_BASE_URL", "")
+    response = app_module.app.test_client().get(
+        "/demo",
+        base_url="http://example.com",
+        headers={"X-Forwarded-Proto": "https"},
+    )
+    assert response.status_code == 200
+    assert "https://example.com/demo" in response.get_data(as_text=True)
