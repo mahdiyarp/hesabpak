@@ -2371,10 +2371,6 @@ def developer_console():
     return render_template("developer.html", prefix=URL_PREFIX)
 
 # ----------------- Unified Invoice (Sales & Purchase) -----------------
-@app.route(URL_PREFIX + "/invoice", methods=["GET", "POST"])
-@app.route(URL_PREFIX + "/sales", methods=["GET", "POST"])  # backward compatibility
-@app.route(URL_PREFIX + "/purchase", methods=["GET", "POST"])  # backward compatibility
-@login_required
 def _invoice_kind_from_request() -> str:
     """Resolve sales/purchase from an explicit kind or a legacy URL."""
     requested_kind = (request.args.get("kind") or "").strip().lower()
@@ -2387,6 +2383,10 @@ def _invoice_kind_from_request() -> str:
     return "sales"
 
 
+@app.route(URL_PREFIX + "/invoice", methods=["GET", "POST"])
+@app.route(URL_PREFIX + "/sales", methods=["GET", "POST"])  # backward compatibility
+@app.route(URL_PREFIX + "/purchase", methods=["GET", "POST"])  # backward compatibility
+@login_required
 def unified_invoice():
     kind = _invoice_kind_from_request()
     
