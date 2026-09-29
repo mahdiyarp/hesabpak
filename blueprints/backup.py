@@ -149,11 +149,14 @@ def _restore_global_db_state(state):
 
 def _restore_global_state_preserving_fiscal_settings(state):
     """Restore global tables but keep fiscal settings from the selected case."""
-    target_fiscal_rows = db.session.execute(
-        text("SELECT key, value FROM settings WHERE key IN :keys"),
-        {"keys": tuple(FISCAL_ONLY_SETTING_KEYS)},
+    target_settings = db.session.execute(
+        text("SELECT key, value FROM settings")
     ).mappings().all()
-    target_fiscal = {row["key"]: row["value"] for row in target_fiscal_rows}
+    target_fiscal = {
+        row["key"]: row["value"]
+        for row in target_settings
+        if row["key"] in FISCAL_ONLY_SETTING_KEYS
+    }
 
     global_settings = [
         row for row in (state.get("settings") or [])
