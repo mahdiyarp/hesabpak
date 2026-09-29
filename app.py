@@ -279,6 +279,24 @@ app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SESSION_COOKIE_SECURE", "").strip().lower() in {"1", "true", "yes", "on"}
 app.config["MAX_CONTENT_LENGTH"] = int(os.environ.get("MAX_UPLOAD_MB", "15")) * 1024 * 1024
 
+
+@app.after_request
+def _security_headers(response):
+    """Apply low-risk browser security headers to every response."""
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "SAMEORIGIN")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault(
+        "Permissions-Policy",
+        "camera=(), microphone=(), geolocation=()",
+    )
+    if request.is_secure:
+        response.headers.setdefault(
+            "Strict-Transport-Security",
+            "max-age=31536000; includeSubDomains",
+        )
+    return response
+
 if os.environ.get("FLASK_ENV", "").strip().lower() == "production":
     if SECRET_KEY == "change-me-please":
         raise RuntimeError("SECRET_KEY must be configured in production.")
@@ -4192,10 +4210,47 @@ def assistant_parse():
     file = request.files.get("image")
     saved_path = None
     ocr_text = ""
-    if file:
+    if file and (file.filename or "").strip():
         from werkzeug.utils import secure_filename
-        fname = secure_filename(file.filename or f"upload_{int(datetime.utcnow().timestamp())}.dat")
-        dest = Path(app.config.get("ASSISTANT_UPLOAD_DIR")) / f"{int(datetime.utcnow().timestamp())}_{fname}"
+
+        max_image_mb = float(os.environ.get("ASSISTANT_MAX_IMAGE_MB", "2"))
+        max_image_bytes = max(1, int(max_image_mb * 1024 * 1024))
+        allowed_mimes = {"image/png", "image/jpeg", "image/webp", "image/gif"}
+        content_type = (file.mimetype or "").strip().lower()
+        if content_type not in allowed_mimes:
+            return jsonify({
+                "ok": False,
+                "message": "فرمت تصویر پشتیبانی نمی‌شود. فقط PNG، JPEG، WebP و GIF مجاز است.",
+            }), 400
+
+        stream = file.stream
+        try:
+            stream.seek(0, os.SEEK_END)
+            size = stream.tell()
+            stream.seek(0)
+        except Exception:
+            size = 0
+        if size <= 0 or size > max_image_bytes:
+            return jsonify({
+                "ok": False,
+                "message": f"حجم تصویر باید بین ۱ بایت و {max_image_mb:g} مگابایت باشد.",
+            }), 413
+
+        fname = secure_filename(file.filename or "")
+        if not fname:
+            fname = f"upload_{uuid.uuid4().hex}.img"
+        suffix = Path(fname).suffix.lower()
+        if suffix not in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
+            ext_by_mime = {
+                "image/png": ".png",
+                "image/jpeg": ".jpg",
+                "image/webp": ".webp",
+                "image/gif": ".gif",
+            }
+            fname = f"{Path(fname).stem or 'upload'}{ext_by_mime[content_type]}"
+
+        unique_prefix = f"{datetime.utcnow().strftime('%Y%m%dT%H%M%S')}_{uuid.uuid4().hex[:12]}"
+        dest = Path(app.config.get("ASSISTANT_UPLOAD_DIR")) / f"{unique_prefix}_{fname}"
         file.save(str(dest))
         saved_path = str(dest)
         # try OCR if pytesseract available

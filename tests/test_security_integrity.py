@@ -162,3 +162,36 @@ def test_record_ledger_serializes_concurrent_appends():
     ordered = sorted(results, key=lambda row: row[0])
     assert ordered[0][2] is None
     assert ordered[1][2] == ordered[0][1]
+
+
+def test_security_headers_are_applied():
+    with app_module.app.test_request_context("/", base_url="https://example.test"):
+        response = app_module.app.make_response("ok")
+        response = app_module._security_headers(response)
+
+    assert response.headers["X-Content-Type-Options"] == "nosniff"
+    assert response.headers["X-Frame-Options"] == "SAMEORIGIN"
+    assert response.headers["Referrer-Policy"] == "strict-origin-when-cross-origin"
+    assert response.headers["Permissions-Policy"] == "camera=(), microphone=(), geolocation=()"
+    assert "max-age=31536000" in response.headers["Strict-Transport-Security"]
+
+
+def test_security_headers_skip_hsts_on_http():
+    with app_module.app.test_request_context("/", base_url="http://example.test"):
+        response = app_module.app.make_response("ok")
+        response = app_module._security_headers(response)
+
+    assert "Strict-Transport-Security" not in response.headers
+
+
+def test_assistant_upload_rejects_non_image_without_touching_disk(monkeypatch):
+    monkeypatch.setattr(app_module, "ensure_permission", lambda *args, **kwargs: None)
+    with app_module.app.test_request_context(
+        "/assistant/api/parse",
+        method="POST",
+        data={"image": (b"not an image", "note.txt", "text/plain")},
+        content_type="multipart/form-data",
+    ):
+        response = app_module.assistant_parse()
+
+    assert response[1] == 400
