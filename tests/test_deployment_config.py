@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import app as app_module
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
