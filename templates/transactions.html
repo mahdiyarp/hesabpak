@@ -4,7 +4,7 @@
 .tx-page{display:grid;gap:18px}
 .tx-hero{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(240px,.65fr);gap:16px;padding:22px;border-radius:22px;background:linear-gradient(135deg,#101d30,#172b46);color:#f4f8ff;box-shadow:0 18px 42px rgba(5,12,24,.14)}
 .tx-hero h1{margin:0 0 7px;font-size:28px}.tx-hero p{margin:0;opacity:.78;line-height:1.8;font-size:13px}
-.tx-search{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;margin-top:18px}.tx-search input{height:48px;border-radius:13px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.08);color:#fff;padding:0 14px;outline:none}.tx-search input::placeholder{color:rgba(255,255,255,.6)}.tx-search button{height:48px;padding:0 18px;border-radius:13px;border:1px solid rgba(130,204,255,.35);background:rgba(94,178,255,.18);color:#fff;font:inherit;cursor:pointer}
+.tx-search{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;margin-top:18px}.tx-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}.tx-actions a{display:inline-flex;align-items:center;min-height:34px;padding:0 11px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.05);color:#eaf5ff;text-decoration:none;font-size:11px}.tx-actions a:hover{text-decoration:none;background:rgba(255,255,255,.1)}.tx-search input{height:48px;border-radius:13px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.08);color:#fff;padding:0 14px;outline:none}.tx-search input::placeholder{color:rgba(255,255,255,.6)}.tx-search button{height:48px;padding:0 18px;border-radius:13px;border:1px solid rgba(130,204,255,.35);background:rgba(94,178,255,.18);color:#fff;font:inherit;cursor:pointer}
 .tx-hero-side{display:grid;place-items:center}.tx-hero-side img{width:170px;filter:drop-shadow(0 0 24px rgba(100,184,255,.2))}
 .tx-tabs{display:flex;gap:8px;flex-wrap:wrap}.tx-tab{display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:0 13px;border-radius:999px;border:1px solid #dce4eb;background:#fff;color:#334456;text-decoration:none;font-size:12px}.tx-tab:hover{text-decoration:none;border-color:#9db4ca}.tx-tab.active{background:#172b46;color:#fff;border-color:#172b46}
 .tx-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.tx-stat{padding:16px;border-radius:17px;border:1px solid #e4eaf0;background:#fff}.tx-stat small{display:block;color:#6b7c8e;font-size:11px;margin-bottom:7px}.tx-stat strong{font-size:18px}.tx-stat .unit{font-size:11px;color:#708195}
@@ -26,6 +26,12 @@
         <input type="hidden" name="type" value="all">
         <button type="submit">جستجو در تراکنش‌ها</button>
       </form>
+      <div class="tx-actions">
+        {% if has_permission('sales') %}<a href="{{ prefix }}/invoice?kind=sales">+ فروش جدید</a>{% endif %}
+        {% if has_permission('purchase') %}<a href="{{ prefix }}/invoice?kind=purchase">+ خرید جدید</a>{% endif %}
+        {% if has_permission('receive') %}<a href="{{ prefix }}/cash_doc?kind=receive">+ دریافت</a>{% endif %}
+        {% if has_permission('payment') %}<a href="{{ prefix }}/cash_doc?kind=payment">+ پرداخت</a>{% endif %}
+      </div>
     </div>
     <div class="tx-hero-side">
       <img src="{{ prefix }}/static/icons/paki.svg" alt="پکی" width="170" height="128">
