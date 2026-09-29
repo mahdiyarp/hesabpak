@@ -23,7 +23,12 @@ cd "$APP_DIR"
 if [ ! -d ".git" ]; then
     git clone https://github.com/mahdiyarp/hesabpak.git .
 else
-    git pull
+    if [ -n "$(git status --porcelain)" ]; then
+        echo "خطا: تغییر محلی ثبت‌نشده وجود دارد؛ نصب روی آن متوقف شد." >&2
+        exit 1
+    fi
+    git fetch origin main --prune
+    git merge --ff-only origin/main
 fi
 
 # تنظیمات
