@@ -1,1 +1,30 @@
-const CACHE_NAME="hesabpak-static-v1";const ASSETS=["./paki.css","./paki.js","./app.js","./style.css","./search.css","./favicon.svg","./manifest.webmanifest","./icons/paki.svg"];self.addEventListener("install",e=>e.waitUntil(caches.open(CACHE_NAME).then(c=>c.addAll(ASSETS)).then(()=>self.skipWaiting())));self.addEventListener("activate",e=>e.waitUntil(caches.keys().then(k=>Promise.all(k.filter(x=>x!==CACHE_NAME).map(x=>caches.delete(x)))).then(()=>self.clients.claim())));self.addEventListener("fetch",e=>{const q=e.request;if(q.method!=="GET")return;const u=new URL(q.url);if(u.origin!==self.location.origin||!u.pathname.includes("/static/"))return;e.respondWith(caches.match(q).then(c=>c||fetch(q).then(res=>{const cp=res.clone();caches.open(CACHE_NAME).then(x=>x.put(q,cp)).catch(()=>{});return res})))})
+const CACHE_NAME="hesabpak-static-v2";
+const ASSETS=[
+  "./app.js","./assistant.js","./rates.js","./sales.js",
+  "./search-ajax.js","./search-unified.js",
+  "./style.css","./sales.css","./search.css","./paki.css","./paki.js",
+  "./favicon.svg","./manifest.webmanifest","./icons/paki.svg"
+];
+self.addEventListener("install",event=>{
+  event.waitUntil(caches.open(CACHE_NAME).then(cache=>cache.addAll(ASSETS)).then(()=>self.skipWaiting()));
+});
+self.addEventListener("activate",event=>{
+  event.waitUntil(caches.keys().then(keys=>Promise.all(
+    keys.filter(key=>key!==CACHE_NAME).map(key=>caches.delete(key))
+  )).then(()=>self.clients.claim()));
+});
+self.addEventListener("fetch",event=>{
+  const request=event.request;
+  if(request.method!=="GET") return;
+  const url=new URL(request.url);
+  if(url.origin!==self.location.origin || !url.pathname.includes("/static/")) return;
+  event.respondWith(
+    caches.match(request).then(cached=>cached||fetch(request).then(response=>{
+      if(response.ok){
+        const copy=response.clone();
+        caches.open(CACHE_NAME).then(cache=>cache.put(request,copy)).catch(()=>{});
+      }
+      return response;
+    }))
+  );
+});
