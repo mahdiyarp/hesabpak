@@ -2349,6 +2349,7 @@ def demo_landing():
         "demo_landing.html",
         prefix=URL_PREFIX,
         share_url=share_url,
+        title="دموی حساب پاک | Paki",
     )
 
 
