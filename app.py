@@ -3136,7 +3136,6 @@ def payment():
 @app.route(URL_PREFIX + "/settings", methods=["GET", "POST"])
 @login_required
 def settings_stub():
-    admin_required()
     current_key, current_label = _pos_device_config()
     
     # دریافت تنظیمات شخصی کاربر
@@ -3146,6 +3145,7 @@ def settings_stub():
     if request.method == "POST":
         form_id = (request.form.get("form_id") or "pos").strip().lower()
         if form_id == "pos":
+            admin_required()
             key = (request.form.get("pos_device") or "none").strip()
             if key not in dict(POS_DEVICE_CHOICES):
                 flash("دستگاه انتخاب‌شده نامعتبر است.", "danger")
@@ -3154,6 +3154,7 @@ def settings_stub():
             db.session.commit()
             flash("تنظیمات ذخیره شد.", "success")
         elif form_id == "ui":
+            admin_required()
             theme = (request.form.get("ui_theme") or "light").strip().lower()
             sort_key = (request.form.get("search_sort") or _search_sort_key()).strip().lower()
             price_mode = (request.form.get("price_display_mode") or _price_display_mode()).strip().lower()
@@ -3185,6 +3186,7 @@ def settings_stub():
             db.session.commit()
             flash("تنظیمات ظاهری و جستجو ذخیره شد.", "success")
         elif form_id == "ai":
+            admin_required()
             api_key = (request.form.get("openai_api_key") or "").strip()
             model = (request.form.get("openai_model") or _assistant_model()).strip()
             valid_models = {k for k, _ in ASSISTANT_MODEL_CHOICES}
