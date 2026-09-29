@@ -23,3 +23,31 @@ def test_non_admin_file_actions_are_rejected():
     assert result["applied"] == 0
     assert result["failed"] == 1
     assert result["errors"]
+
+
+def test_build_openai_messages_uses_input_content_types():
+    messages = app_module._build_openai_messages([
+        {
+            "role": "user",
+            "text": "این یک فاکتور است",
+            "attachments": [
+                {
+                    "type": "image",
+                    "mime_type": "image/png",
+                    "data": "aGVsbG8=",
+                }
+            ],
+        }
+    ])
+
+    assert messages[0]["content"][0] == {
+        "type": "input_text",
+        "text": "این یک فاکتور است",
+    }
+    assert messages[0]["content"][1]["type"] == "input_image"
+    assert messages[0]["content"][1]["image_url"].startswith("data:image/png;base64,")
+    assert all(
+        part.get("type") != "output_text"
+        for part in messages[0]["content"]
+        if isinstance(part, dict)
+    )
