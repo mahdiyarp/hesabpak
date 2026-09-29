@@ -58,7 +58,9 @@ echo -e "${BLUE}📁 ایجاد دایرکتوری داده...${NC}"
 mkdir -p data/backups/autosave
 
 # 8. ایجاد فایل .env اگر وجود ندارد
+FIRST_INSTALL=0
 if [ ! -f ".env" ]; then
+    FIRST_INSTALL=1
     echo -e "${YELLOW}⚙️  ایجاد فایل تنظیمات .env${NC}"
     SECRET=$(openssl rand -hex 32)
     ADMIN_PASS=$(openssl rand -hex 12)
@@ -70,6 +72,7 @@ ADMIN_PASSWORD=$ADMIN_PASS
 DATA_DIR=data
 URL_PREFIX=
 EOF
+    rm -f data/users.json
 fi
 
 # 9. راه‌اندازی دیتابیس
