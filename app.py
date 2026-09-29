@@ -618,11 +618,11 @@ def _to_float(x, default=0.0):
     try:
         if x is None:
             return default
-        text = str(x).strip().translate(str.maketrans(
-            "۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩٬،٫",
-            "01234567890123456789,,,.",
-        ))
-        text = text.replace(",", "").replace("٬", "").replace("،", "").replace(" ", "")
+        text = str(x).strip()
+        text = text.translate(str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789"))
+        text = text.translate(str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789"))
+        text = text.replace("٬", "").replace("،", "").replace(",", "")
+        text = text.replace("٫", ".").replace(" ", "")
         if text == "":
             return default
         return float(text)
