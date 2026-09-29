@@ -23,3 +23,4 @@ def test_paki_interaction_hooks_are_present():
     assert "@keyframes paki-float" in css
     assert 'data-paki-mood="happy"' in css
     assert "serviceWorker.register" in js
+    assert "p+"/\"sw.js\"" in js
