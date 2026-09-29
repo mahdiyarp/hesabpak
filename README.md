@@ -47,3 +47,9 @@ DEMO_PASSWORD=demo123
 نسخه توسعه فعلی: 0.9.0
 
 برای انتشار production نهایی، بررسی CI و release رسمی باید سبز و تکمیل شود.
+
+## استقرار کاملاً آفلاین
+
+برای ساخت بسته قابل انتقال، `build_offline_bundle.sh` wheelهای runtime را جمع می‌کند و یک archive همراه checksum می‌سازد. سپس روی سرور بدون اینترنت `install_offline.sh` اجرا می‌شود. راهنمای کامل در `OFFLINE_INSTALL.md` است.
+
+بسته آفلاین برای نصب جدید است؛ روی مسیر دارای `.env` متوقف می‌شود تا داده موجود بدون backup/migration دستکاری نشود.
