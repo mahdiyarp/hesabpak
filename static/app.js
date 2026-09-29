@@ -14,53 +14,64 @@ function show(el){ if(!el) return; el.hidden=false; el.style.display='block'; }
 function hide(el){ if(!el) return; el.hidden=true; el.style.display='none'; }
 function normalizeNumberString(value){
   return String(value == null ? '' : value).trim()
-    .translate ? String(value == null ? '' : value).trim()
-      .replace(/[۰-۹]/g, d => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
-      .replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
-      .replace(/[٬،]/g, '')
-      .replace(/[٫]/g, '.')
-      .replace(/,/g, '')
-      .replace(/\s+/g, '')
-    : String(value == null ? '' : value).trim().replace(/,/g, '');
+    .replace(/[۰-۹]/g, d => String('۰۱۲۳۴۵۶۷۸۹'.indexOf(d)))
+    .replace(/[٠-٩]/g, d => String('٠١٢٣٤٥٦٧٨٩'.indexOf(d)))
+    .replace(/[٬،]/g, '')
+    .replace(/[٫]/g, '.')
+    .replace(/,/g, '')
+    .replace(/\s+/g, '');
 }
 function toNum(x){
   const normalized = normalizeNumberString(x);
-  var f = parseFloat(normalized);
+  const f = parseFloat(normalized);
   return isNaN(f) ? 0 : f;
 }
 function formatGroupedNumber(value){
   const normalized = normalizeNumberString(value);
   if(!normalized) return '';
-  const match = normalized.match(/^(-?)(\\d+)(?:\\.(\\d+))?$/);
+  const match = normalized.match(/^(-?)(\d+)(?:\.(\d+))?$/);
   if(!match) return normalized;
   const sign = match[1] || '';
-  const integer = match[2].replace(/\\B(?=(\\d{3})+(?!\\d))/g, ',');
+  const integer = match[2].replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   return sign + integer + (match[3] ? '.' + match[3] : '');
+}
+function isAmountField(input){
+  if(!input || input.tagName !== 'INPUT') return false;
+  return input.matches('input[name="amount"], input[name="unit_price[]"], input[name="qty[]"], input[name="discount"], input[name="tax"], input[data-format-number]');
 }
 function setupAmountFormatting(root){
   const scope = root || document;
-  const selector = 'input[name="amount"], input[name="unit_price[]"], input[name="qty[]"], input[name="discount"], input[name="tax"], input[data-format-number]';
-  scope.querySelectorAll(selector).forEach(function(input){
-    if(input.dataset.amountFormattingBound === '1') return;
-    input.dataset.amountFormattingBound = '1';
-    input.addEventListener('focus', function(){
-      this.value = normalizeNumberString(this.value);
-    });
-    input.addEventListener('blur', function(){
-      this.value = formatGroupedNumber(this.value);
-    });
-    if(input.value) input.value = formatGroupedNumber(input.value);
-    const form = input.form;
-    if(form && form.dataset.amountFormattingSubmit !== '1'){
-      form.dataset.amountFormattingSubmit = '1';
-      form.addEventListener('submit', function(){
-        form.querySelectorAll(selector).forEach(function(field){
-          field.value = normalizeNumberString(field.value);
-        });
+  if(scope.dataset && scope.dataset.amountFormattingDelegated === '1') return;
+  if(scope.dataset) scope.dataset.amountFormattingDelegated = '1';
+
+  const formatExisting = function(){
+    scope.querySelectorAll('input[name="amount"], input[name="unit_price[]"], input[name="qty[]"], input[name="discount"], input[name="tax"], input[data-format-number]')
+      .forEach(function(input){
+        if(!input.readOnly && input.value) input.value = formatGroupedNumber(input.value);
       });
-    }
+  };
+
+  scope.addEventListener('focusin', function(ev){
+    if(isAmountField(ev.target)) ev.target.value = normalizeNumberString(ev.target.value);
   });
+  scope.addEventListener('focusout', function(ev){
+    if(isAmountField(ev.target)) ev.target.value = formatGroupedNumber(ev.target.value);
+  });
+  scope.addEventListener('submit', function(ev){
+    const form = ev.target;
+    if(!(form instanceof HTMLFormElement)) return;
+    form.querySelectorAll('input[name="amount"], input[name="unit_price[]"], input[name="qty[]"], input[name="discount"], input[name="tax"], input[data-format-number]')
+      .forEach(function(field){
+        field.value = normalizeNumberString(field.value);
+      });
+  }, true);
+
+  formatExisting();
 }
+window.normalizeNumberString = normalizeNumberString;
+window.formatGroupedNumber = formatGroupedNumber;
+window.isAmountField = isAmountField;
+window.setupAmountFormatting = setupAmountFormatting;
 window.normalizeNumberString = normalizeNumberString;
 window.formatGroupedNumber = formatGroupedNumber;
 window.setupAmountFormatting = setupAmountFormatting;
