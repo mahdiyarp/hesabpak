@@ -2375,17 +2375,20 @@ def developer_console():
 @app.route(URL_PREFIX + "/sales", methods=["GET", "POST"])  # backward compatibility
 @app.route(URL_PREFIX + "/purchase", methods=["GET", "POST"])  # backward compatibility
 @login_required
-def unified_invoice():
-    # Determine invoice kind from explicit query parameter or legacy route.
+def _invoice_kind_from_request() -> str:
+    """Resolve sales/purchase from an explicit kind or a legacy URL."""
     requested_kind = (request.args.get("kind") or "").strip().lower()
     if requested_kind in ("sales", "purchase"):
-        kind = requested_kind
-    elif "/purchase" in request.path:
-        kind = "purchase"
-    elif "/sales" in request.path:
-        kind = "sales"
-    else:
-        kind = "sales"
+        return requested_kind
+    if "/purchase" in request.path:
+        return "purchase"
+    if "/sales" in request.path:
+        return "sales"
+    return "sales"
+
+
+def unified_invoice():
+    kind = _invoice_kind_from_request()
     
     # Check permission
     if kind == "sales":
