@@ -1379,6 +1379,8 @@ def _prepare_invoice_plan(invoice_data: Dict[str, Any]) -> Dict[str, Any]:
 
     partner_payload = invoice_data.get("partner") or {}
     partner_info = _resolve_entity("person", partner_payload)
+    if not partner_info["name"] and not partner_info["entity"]:
+        raise ValueError("طرف حساب فاکتور مشخص نیست.")
 
     raw_date = (invoice_data.get("date") or "").strip()
     parsed_date = _parse_invoice_date(raw_date)
@@ -1427,6 +1429,9 @@ def _prepare_invoice_plan(invoice_data: Dict[str, Any]) -> Dict[str, Any]:
                 "unit_price": unit_price,
             })
 
+    if not items_preview:
+        raise ValueError("فاکتور حداقل یک قلم کالا نیاز دارد.")
+
     plan = {
         "kind": kind,
         "number": number,
@@ -1459,6 +1464,8 @@ def _prepare_cash_plan(cash_data: Dict[str, Any]) -> Dict[str, Any]:
 
     person_payload = cash_data.get("person") or {}
     person_info = _resolve_entity("person", person_payload)
+    if not person_info["name"] and not person_info["entity"]:
+        raise ValueError("طرف حساب سند مشخص نیست.")
 
     amount = _to_float(cash_data.get("amount"), 0.0)
     number = (cash_data.get("number") or "").strip()
@@ -3663,7 +3670,11 @@ def assistant_chat():
 
     invoice_payload = result.get("invoice") if isinstance(result.get("invoice"), dict) else None
     if invoice_payload:
-        plan = _prepare_invoice_plan(invoice_payload)
+        try:
+            plan = _prepare_invoice_plan(invoice_payload)
+        except ValueError as exc:
+            db.session.rollback()
+            return jsonify({"status": "error", "message": str(exc)}), 400
         invoice_preview = plan
         missing_partner = plan.get("missing_partner")
         missing_items = plan.get("missing_items")
@@ -3695,7 +3706,11 @@ def assistant_chat():
     cash_payload = result.get("cash") if isinstance(result.get("cash"), dict) else None
     applied_cash_number = None
     if cash_payload:
-        cplan = _prepare_cash_plan(cash_payload)
+        try:
+            cplan = _prepare_cash_plan(cash_payload)
+        except ValueError as exc:
+            db.session.rollback()
+            return jsonify({"status": "error", "message": str(exc)}), 400
         # if assistant couldn't determine direction or missing critical info, require confirmation
         if cplan.get("missing_person") or (not cplan.get("bank_account") and (cplan.get("method") or '').lower()=='bank'):
             needs_confirmation = True
