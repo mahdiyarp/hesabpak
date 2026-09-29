@@ -10,7 +10,7 @@ def test_paki_brand_assets_exist_and_are_nonempty():
         "static/manifest.webmanifest",
         "static/paki.css",
         "static/paki.js",
-        "static/sw.js",
+        "sw.js",
     ]:
         path = ROOT / rel
         assert path.is_file(), rel
