@@ -255,9 +255,7 @@ function badgeOf(t){
       if(allow('reports') || allow('sales') || allow('purchase')){
         acts.push({href:`${window.prefix}/invoice/${id}`, label:'مشاهده فاکتور'});
       }
-      if(isAdmin){
-        acts.push({href:`${window.prefix}/invoice/${id}/edit`, label:'ویرایش فاکتور'});
-      }
+      // Invoice edit endpoint is not implemented; do not expose a broken action.
     }else if(typ === 'receive' || typ === 'payment'){
       if(allow('reports') || allow(typ)){
         acts.push({href:`${window.prefix}/cash/${id}`, label:'مشاهده سند'});
