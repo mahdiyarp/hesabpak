@@ -2260,8 +2260,29 @@ def _run_script_lines(lines:list[str]):
                 if not ent:
                     msgs.append("یافت نشد.")
                 else:
-                    db.session.delete(ent); db.session.commit()
-                    msgs.append("حذف شد.")
+                    references = _entity_delete_references(ent.id)
+                    if references:
+                        msgs.append(
+                            "رد شد: حذف فیزیکی مجاز نیست؛ سابقه در "
+                            + "، ".join(references)
+                        )
+                    else:
+                        db.session.delete(ent)
+                        db.session.commit()
+                        try:
+                            record_ledger(
+                                "entity",
+                                ent.id,
+                                "delete",
+                                {
+                                    "type": ent.type,
+                                    "code": ent.code,
+                                    "name": ent.name,
+                                },
+                            )
+                        except Exception:
+                            app.logger.exception("failed to write developer entity delete ledger entry")
+                        msgs.append("حذف شد.")
 
             elif cmd == "SEED_ITEMS":
                 if not Entity.query.filter_by(type="item", code="101").first():
@@ -2672,15 +2693,8 @@ def entities_edit(eid):
     parents_lvl2 = Entity.query.filter_by(level=2).order_by(Entity.code.asc()).all()
     return render_template("entities/edit.html", ent=ent, parents_lvl1=parents_lvl1, parents_lvl2=parents_lvl2, prefix=URL_PREFIX)
 
-@app.route(URL_PREFIX + "/entities/<int:eid>/delete", methods=["POST"])
-@login_required
-def entities_delete(eid):
-    admin_required()
-    ent = Entity.query.get_or_404(eid)
-    t = ent.type
-
-    # Preserve accounting history: entities referenced by any document or
-    # parent relation must not be physically deleted.
+def _entity_delete_references(eid: int) -> list[str]:
+    """Return accounting relations that prevent physical entity deletion."""
     references = []
     if Entity.query.filter_by(parent_id=eid).first():
         references.append("زیرمجموعه‌ها")
@@ -2690,8 +2704,22 @@ def entities_delete(eid):
         references.append("ردیف فاکتورها")
     if CashDoc.query.filter_by(person_id=eid).first():
         references.append("اسناد دریافت/پرداخت")
-    if PriceHistory.query.filter((PriceHistory.person_id == eid) | (PriceHistory.item_id == eid)).first():
+    if PriceHistory.query.filter(
+        (PriceHistory.person_id == eid) | (PriceHistory.item_id == eid)
+    ).first():
         references.append("سوابق قیمت")
+    return references
+
+
+@app.route(URL_PREFIX + "/entities/<int:eid>/delete", methods=["POST"])
+@login_required
+def entities_delete(eid):
+    admin_required()
+    ent = Entity.query.get_or_404(eid)
+    t = ent.type
+
+    # Preserve accounting history in the primary UI and every admin path.
+    references = _entity_delete_references(eid)
 
     if references:
         flash(
