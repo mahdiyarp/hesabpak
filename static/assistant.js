@@ -82,7 +82,7 @@
   function renderPreview(data, applyError){
     if(!previewCard || !data){ return; }
     previewCard.hidden = false;
-    if(previewTableBody){ previewTableBody.innerHTML = ''; }
+    if(previewTableBody){ previewTableBody.replaceChildren(); }
     const kindEl = previewCard.querySelector('[data-field="kind"]');
     const partnerEl = previewCard.querySelector('[data-field="partner"]');
     const dateEl = previewCard.querySelector('[data-field="date"]');
