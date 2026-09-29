@@ -57,45 +57,37 @@ def _compute_entry_hash(prev_hash: Optional[str], payload_text: str, ts_iso: str
     return m.hexdigest()
 
 
-def record_ledger(object_type: str, object_id: Optional[str], action: str, payload: Dict[str, Any]) -> LedgerEntry:
-    """Create a new ledger entry (append-only)."""
+def record_ledger(
+    object_type: str,
+    object_id: Optional[str],
+    action: str,
+    payload: Dict[str, Any],
+) -> LedgerEntry:
+    """Append a tamper-evident ledger entry.
+
+    The caller owns the business transaction; this helper commits only the
+    ledger row because it is deliberately a separate audit trail.
+    """
     try:
-        # get last hash
         last = db.session.query(LedgerEntry).order_by(LedgerEntry.id.desc()).first()
         prev = last.hash if last else None
-        ts = datetime.utcnow().isoformat()
-        payload_text = json.dumps(payload, ensure_ascii=False, sort_keys=True)
-        h = _compute_entry_hash(prev, payload_text, ts)
-        entry = LedgerEntry(object_type=object_type, object_id=str(object_id) if object_id is not None else None, action=action, payload=payload_text, prev_hash=prev, hash=h)
+        ts = datetime.utcnow().isoformat(timespec="microseconds")
+        payload_text = json.dumps(payload or {}, ensure_ascii=False, sort_keys=True)
+        digest = _compute_entry_hash(prev, payload_text, ts)
+        entry = LedgerEntry(
+            object_type=str(object_type or "unknown"),
+            object_id=str(object_id) if object_id is not None else None,
+            action=str(action or "unknown"),
+            payload=payload_text,
+            prev_hash=prev,
+            hash=digest,
+        )
         db.session.add(entry)
         db.session.commit()
-
-        # record ledger entry for invoice created via UI
-        try:
-            ledger_lines = []
-            for r in rows:
-                try:
-                    ledger_lines.append({"item_id": int(r['item'].id), "qty": float(r['qty']), "unit_price": float(r['unit_price'])})
-                except Exception:
-                    continue
-            ledger_payload = {
-                "invoice_id": inv.id,
-                "number": inv.number,
-                "kind": inv.kind,
-                "total": float(inv.total or 0.0),
-                "person_id": person.id if person else None,
-                "lines": ledger_lines,
-            }
-            try:
-                record_ledger("invoice", inv.id, "create", ledger_payload)
-            except Exception:
-                app.logger.exception("failed to write invoice ledger entry (ui)")
-        except Exception:
-            app.logger.exception("failed to prepare invoice ledger payload (ui)")
         return entry
     except Exception:
         db.session.rollback()
-        app.logger.exception('ledger record failed')
+        app.logger.exception("ledger record failed")
         raise
 
 # ----------------- Config -----------------
