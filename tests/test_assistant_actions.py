@@ -51,3 +51,25 @@ def test_build_openai_messages_uses_input_content_types():
         for part in messages[0]["content"]
         if isinstance(part, dict)
     )
+
+
+def test_assistant_schema_is_strict_compatible():
+    schema = app_module.AI_RESPONSE_SCHEMA["schema"]
+
+    def check(node):
+        if isinstance(node, list):
+            for item in node:
+                check(item)
+            return
+        if not isinstance(node, dict):
+            return
+
+        if node.get("type") == "object":
+            properties = node.get("properties", {})
+            assert node.get("additionalProperties") is False
+            assert set(node.get("required", [])) == set(properties)
+            for value in properties.values():
+                check(value)
+
+        check(node.get("items"))
+    check(schema)
