@@ -118,6 +118,17 @@ def create_full_backup(app, user="system", reason="manual"):
                         p = Path(root)/f
                         rel = p.relative_to(data_dir)
                         z.write(p, arcname=str(rel))
+        # User catalog and fiscal-year case files are runtime state outside SQLite.
+        if include_users:
+            z.write(users_path, arcname="runtime/users.json")
+        if include_fiscal_cases:
+            for root, dirs, files in os.walk(fiscal_cases_dir):
+                for f in files:
+                    p = Path(root) / f
+                    rel = p.relative_to(fiscal_cases_dir)
+                    z.write(p, arcname=str(Path("runtime") / "fiscal_cases" / rel))
+                    meta["fiscal_case_files"] += 1
+
         # metadata
         z.writestr("metadata.json", json.dumps(meta, ensure_ascii=False, indent=2))
     return str(out)
@@ -172,19 +183,15 @@ def _safe_archive_relative_path(name: str) -> Path:
     return rel
 
 
-def _extract_backup_uploads(z: zipfile.ZipFile, staging_root: Path) -> bool:
-    """Extract upload members into an isolated staging directory.
-
-    Never uses ZipFile.extractall(); every member path is validated before the
-    file is created, which prevents archive path traversal.
-    """
+def _extract_archive_tree(z: zipfile.ZipFile, archive_prefix: str, staging_root: Path) -> bool:
+    """Extract one archive directory safely into an isolated staging directory."""
     found = False
-    upload_prefix = "uploads/"
+    prefix = archive_prefix.rstrip("/") + "/"
     for info in z.infolist():
         name = info.filename.replace("\\", "/")
-        if not name.startswith(upload_prefix) or info.is_dir():
+        if not name.startswith(prefix) or info.is_dir():
             continue
-        rel = _safe_archive_relative_path(name[len(upload_prefix):])
+        rel = _safe_archive_relative_path(name[len(prefix):])
         if not rel.parts:
             continue
         target = (staging_root / rel).resolve()
@@ -192,12 +199,17 @@ def _extract_backup_uploads(z: zipfile.ZipFile, staging_root: Path) -> bool:
         try:
             target.relative_to(root)
         except ValueError as exc:
-            raise ValueError("مسیر فایل آپلود خارج از پوشه مجاز است.") from exc
+            raise ValueError("مسیر عضو بکاپ خارج از پوشه مجاز است.") from exc
         target.parent.mkdir(parents=True, exist_ok=True)
         with z.open(info, "r") as src, target.open("wb") as dst:
             shutil.copyfileobj(src, dst)
         found = True
     return found
+
+
+def _extract_backup_uploads(z: zipfile.ZipFile, staging_root: Path) -> bool:
+    """Extract upload members with archive path traversal protection."""
+    return _extract_archive_tree(z, "uploads", staging_root)
 
 
 def restore_backup(app, zip_filename):
@@ -279,6 +291,12 @@ def restore_backup(app, zip_filename):
                 shutil.rmtree(uploads_dir)
             if uploads_moved_aside and old_uploads.exists():
                 shutil.move(str(old_uploads), str(uploads_dir))
+            if users_replaced and old_users.exists():
+                shutil.copy2(old_users, users_path)
+            if fiscal_cases_replaced and fiscal_cases_dir.exists():
+                shutil.rmtree(fiscal_cases_dir)
+            if fiscal_cases_moved_aside and old_fiscal_cases.exists():
+                shutil.move(str(old_fiscal_cases), str(fiscal_cases_dir))
         except Exception:
             try:
                 app.logger.exception("backup restore rollback failed")
