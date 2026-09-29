@@ -11,7 +11,7 @@ from flask_login import LoginManager, login_user, logout_user, login_required, U
 from dotenv import load_dotenv
 from markupsafe import Markup, escape
 from werkzeug.security import check_password_hash, generate_password_hash
-from sqlalchemy import func, or_, UniqueConstraint, text, text   # <- مهم
+from sqlalchemy import func, or_, UniqueConstraint, text
 
 try:
     from openai import OpenAI
