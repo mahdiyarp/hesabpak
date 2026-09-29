@@ -30,7 +30,7 @@
     // resolve list element (may be legacy wrapper). If a portal list was created
     // for legacy mode (moved to document.body), prefer that stored reference.
     const list = box._legacyList || $(".search-results", box) || (box._legacyWrapper && box._legacyWrapper.querySelector('.search-results'));
-  if(!rows || !rows.length){ list.innerHTML=""; try{ list.hidden = true; list.style.display = 'none'; }catch(e){} return; }
+  if(!rows || !rows.length){ list.replaceChildren(); try{ list.hidden = true; list.style.display = 'none'; }catch(e){} return; }
 
   // Filter client-side by requested type to avoid showing items when the
   // input is intended for persons (or vice versa). Backend should respect
@@ -306,7 +306,7 @@
 
     const onSearch = debounce(async ()=>{
       const q = (input && input.value) ? input.value.trim() : '';
-      if(q.length<1){ list.innerHTML=""; try{ list.hidden=true; list.style.display='none'; }catch(e){} return; }
+      if(q.length<1){ list.replaceChildren(); try{ list.hidden=true; list.style.display='none'; }catch(e){} return; }
       // For global wrappers, prefer the selected kind/sort controls if present
       let effectiveType = type;
       try{
@@ -324,7 +324,7 @@
 
     input.addEventListener("input", onSearch);
     input.addEventListener("focus", ()=>{
-      if(list.innerHTML.trim()) list.hidden=false;
+      if(list.childNodes.length) list.hidden=false;
     });
 
     // remember mapping from list -> box so delegated handlers can resolve the wrapper
