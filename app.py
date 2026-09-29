@@ -1815,13 +1815,11 @@ def _apply_invoice_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
 
     inv.total = total
 
-    try:
-        if kind == "sales":
-            partner_entity.balance = float(partner_entity.balance or 0.0) + float(total)
-        else:
-            partner_entity.balance = float(partner_entity.balance or 0.0) - float(total)
-    except Exception:
-        partner_entity.balance = float(total) if kind == "sales" else -float(total)
+    # Update the denormalized person balance atomically in the same transaction.
+    _adjust_person_balance_delta(
+        partner_entity,
+        float(total) if kind == "sales" else -float(total),
+    )
 
     db.session.commit()
 
@@ -2467,17 +2465,11 @@ def unified_invoice():
             else:
                 ph.last_price = up
 
-        # Update person balance: sales increases balance (customer owes), purchase decreases (we owe vendor)
-        if form_kind == "sales":
-            try:
-                person.balance = float(person.balance or 0.0) + float(total)
-            except Exception:
-                person.balance = float(total)
-        else:  # purchase
-            try:
-                person.balance = float(person.balance or 0.0) - float(total)
-            except Exception:
-                person.balance = -float(total)
+        # Update person balance atomically inside the same transaction.
+        _adjust_person_balance_delta(
+            person,
+            float(total) if form_kind == "sales" else -float(total),
+        )
 
         db.session.commit()
 
