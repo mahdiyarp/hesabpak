@@ -35,6 +35,7 @@ DATA_DIR=data
 SESSION_COOKIE_SECURE=false
 MAX_UPLOAD_MB=15
 EOF
+    chmod 600 .env
 fi
 
 # Python setup
