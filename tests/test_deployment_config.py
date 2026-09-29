@@ -58,3 +58,19 @@ def test_deploy_site_creates_preupdate_full_backup():
     assert 'create_full_backup(app, user="deploy", reason="pre-update")' in deploy
     assert 'source "$VENV_DIR/bin/activate"' in deploy
     assert 'DATA_DIR="${DATA_DIR:-$APP_DIR/data}"' in deploy
+
+def test_offline_distribution_is_self_contained():
+    build = (ROOT / "build_offline_bundle.sh").read_text(encoding="utf-8")
+    install = (ROOT / "install_offline.sh").read_text(encoding="utf-8")
+
+    assert "pip download" in build
+    assert "vendor/wheels" in build
+    assert "name '.env*'" in build
+    assert "--no-index" in install
+    assert "vendor/wheels" in install
+
+
+def test_health_endpoint_is_declared():
+    app = (ROOT / "app.py").read_text(encoding="utf-8")
+    assert '@app.route(URL_PREFIX + "/healthz", methods=["GET"])' in app
+    assert 'return jsonify({"status": "ok", "version": APP_VERSION}), 200' in app
