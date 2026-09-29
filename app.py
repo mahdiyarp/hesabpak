@@ -2087,7 +2087,13 @@ def unified_invoice():
             form_kind = kind
         
         number = (request.form.get("inv_number") or "").strip() or inv_number_generated
-        inv_date = parse_gregorian_date(request.form.get("inv_date_greg"))
+        inv_date = parse_gregorian_date(
+            request.form.get("inv_date_greg"),
+            allow_none=True,
+        )
+        if not inv_date:
+            flash("تاریخ فاکتور معتبر نیست.", "danger")
+            return redirect(URL_PREFIX + f"/invoice?kind={form_kind}")
 
         person = None
         pid = (request.form.get("person_token") or "").strip()
