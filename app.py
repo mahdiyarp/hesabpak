@@ -64,28 +64,60 @@ def record_ledger(
     action: str,
     payload: Dict[str, Any],
 ) -> LedgerEntry:
-    """Append a tamper-evident ledger entry."""
+    """Append a tamper-evident ledger entry with a serialized SQLite write."""
+    conn = None
     try:
-        last = db.session.query(LedgerEntry).order_by(LedgerEntry.id.desc()).first()
+        # SQLite BEGIN IMMEDIATE serializes competing writers before the chain
+        # head is read, preventing two concurrent requests from sharing prev_hash.
+        conn = db.engine.connect()
+        conn.exec_driver_sql("BEGIN IMMEDIATE")
+
+        last = conn.execute(
+            text("SELECT id, hash FROM ledger_entries ORDER BY id DESC LIMIT 1")
+        ).first()
         prev = last.hash if last else None
+
         ts = datetime.utcnow().isoformat(timespec="microseconds")
         payload_text = json.dumps(payload or {}, ensure_ascii=False, sort_keys=True)
         digest = _compute_entry_hash(prev, payload_text, ts)
-        entry = LedgerEntry(
-            object_type=str(object_type or "unknown"),
-            object_id=str(object_id) if object_id is not None else None,
-            action=str(action or "unknown"),
-            payload=payload_text,
-            prev_hash=prev,
-            hash=digest,
+
+        result = conn.execute(
+            text(
+                """
+                INSERT INTO ledger_entries
+                    (created_at, object_type, object_id, action, payload, prev_hash, hash)
+                VALUES
+                    (:created_at, :object_type, :object_id, :action, :payload, :prev_hash, :hash)
+                """
+            ),
+            {
+                "created_at": datetime.utcnow(),
+                "object_type": str(object_type or "unknown"),
+                "object_id": str(object_id) if object_id is not None else None,
+                "action": str(action or "unknown"),
+                "payload": payload_text,
+                "prev_hash": prev,
+                "hash": digest,
+            },
         )
-        db.session.add(entry)
-        db.session.commit()
+        entry_id = result.lastrowid
+        conn.exec_driver_sql("COMMIT")
+
+        entry = db.session.get(LedgerEntry, entry_id)
+        if entry is None:
+            raise RuntimeError("رکورد ledger ایجاد شد اما قابل بازیابی نبود.")
         return entry
     except Exception:
-        db.session.rollback()
+        if conn is not None:
+            try:
+                conn.exec_driver_sql("ROLLBACK")
+            except Exception:
+                pass
         app.logger.exception("ledger record failed")
         raise
+    finally:
+        if conn is not None:
+            conn.close()
 
 # ----------------- Config -----------------
 load_dotenv()
