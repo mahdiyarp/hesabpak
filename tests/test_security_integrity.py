@@ -229,3 +229,32 @@ def test_csv_export_cells_are_safe_for_spreadsheet_formulas():
     assert app_module._csv_safe_cell("=HYPERLINK(\"http://evil.test\", \"click\")").startswith("'=")
     assert app_module._csv_safe_cell("  +SUM(A1)").startswith("'")
     assert app_module._csv_safe_cell("normal text") == "normal text"
+
+
+def test_last_active_admin_cannot_be_removed_or_demoted():
+    catalog = {
+        "admin": {"role": "admin", "is_active": True},
+    }
+    assert app_module._would_remove_last_active_admin(
+        catalog, "admin", deleting=True
+    ) is True
+    assert app_module._would_remove_last_active_admin(
+        catalog, "admin", new_role="staff", new_is_active=True
+    ) is True
+    assert app_module._would_remove_last_active_admin(
+        {
+            "admin": {"role": "admin", "is_active": True},
+            "second": {"role": "admin", "is_active": True},
+        },
+        "admin",
+        new_role="staff",
+        new_is_active=True,
+    ) is False
+
+
+def test_inactive_admin_is_not_counted_as_active_admin():
+    catalog = {
+        "admin": {"role": "admin", "is_active": False},
+        "second": {"role": "staff", "is_active": True},
+    }
+    assert app_module._active_admin_usernames(catalog) == set()
