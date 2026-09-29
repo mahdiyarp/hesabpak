@@ -3,6 +3,7 @@ import os
 import json
 import shutil
 import sqlite3
+import re
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -27,10 +28,14 @@ def _admin_only():
 
 
 def _year_key(value: Optional[str]) -> str:
+    """Convert a fiscal-year label into a filesystem-safe directory key."""
     raw = (value or "").strip()
     if not raw:
         return "unknown"
-    return raw.replace("/", "-").replace(" ", "-")
+    raw = raw.replace("\\", "-").replace("/", "-")
+    safe = re.sub(r"[^\w-]", "-", raw, flags=re.UNICODE)
+    safe = re.sub(r"-{2,}", "-", safe).strip(".-")
+    return (safe[:80] or "unknown")
 
 
 def _cases_dir() -> Path:
