@@ -202,6 +202,45 @@ def _permissions_for_role(role: str, requested) -> list:
 
 # ----------------- Flask & DB -----------------
 app = Flask(__name__, static_url_path=(URL_PREFIX + "/static") if URL_PREFIX else "/static")
+
+
+def _request_origin_is_trusted():
+    """Allow same-origin requests and reject definite cross-origin state changes."""
+    sec_fetch_site = (request.headers.get("Sec-Fetch-Site") or "").strip().lower()
+    if sec_fetch_site == "cross-site":
+        return False
+
+    origin = (request.headers.get("Origin") or "").strip()
+    if not origin:
+        return True
+
+    try:
+        from urllib.parse import urlparse
+        parsed = urlparse(origin)
+        origin_host = parsed.netloc.lower()
+        request_host = request.host.lower()
+        return bool(origin_host) and origin_host == request_host
+    except Exception:
+        return False
+
+
+@app.before_request
+def _csrf_origin_guard():
+    if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
+        return None
+    if request.endpoint in {"login"}:
+        return None
+    if not _request_origin_is_trusted():
+        app.logger.warning(
+            "CSRF_ORIGIN_REJECTED method=%s path=%s origin=%s sec_fetch_site=%s ip=%s",
+            request.method,
+            request.path,
+            request.headers.get("Origin"),
+            request.headers.get("Sec-Fetch-Site"),
+            request.remote_addr,
+        )
+        abort(403)
+    return None
 app.config["SECRET_KEY"] = SECRET_KEY
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"

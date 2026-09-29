@@ -65,3 +65,29 @@ def test_search_permissions_scope_targets():
         set(),
         admin=True,
     ) == {"item", "person", "invoice", "receive", "payment"}
+
+
+def test_request_origin_guard():
+    with app_module.app.test_request_context(
+        "/invoice",
+        method="POST",
+        base_url="https://hesabpak.example",
+        headers={"Origin": "https://hesabpak.example"},
+    ):
+        assert app_module._request_origin_is_trusted()
+
+    with app_module.app.test_request_context(
+        "/invoice",
+        method="POST",
+        base_url="https://hesabpak.example",
+        headers={"Origin": "https://evil.example"},
+    ):
+        assert not app_module._request_origin_is_trusted()
+
+    with app_module.app.test_request_context(
+        "/invoice",
+        method="POST",
+        base_url="https://hesabpak.example",
+        headers={"Sec-Fetch-Site": "cross-site"},
+    ):
+        assert not app_module._request_origin_is_trusted()
