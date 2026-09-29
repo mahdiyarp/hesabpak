@@ -34,6 +34,7 @@ from utils.date_utils import (
 )
 from utils import rates as rates_utils
 from utils import bank_utils
+from utils.secret_store import encrypt_secret, decrypt_secret, is_encrypted
 import hashlib
 
 # --- Simple append-only ledger for traceability (blockchain-like) ----------
@@ -129,6 +130,10 @@ URL_PREFIX = os.environ.get("URL_PREFIX", "") or ""   # مثلا: /hesabpak
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin").strip() or "admin"
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "").strip()
 DATA_DIR = os.environ.get("DATA_DIR", "data")
+CREDENTIAL_ENCRYPTION_KEY = os.environ.get("CREDENTIAL_ENCRYPTION_KEY", "").strip()
+DEMO_MODE = os.environ.get("DEMO_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
+DEMO_USERNAME = os.environ.get("DEMO_USERNAME", "demo").strip() or "demo"
+DEMO_PASSWORD = os.environ.get("DEMO_PASSWORD", "demo123") or "demo123"
 
 # Development may start with ephemeral credentials for local testing. Production
 # must always receive explicit credentials from the environment/configuration.
@@ -303,6 +308,8 @@ def _csrf_origin_guard():
         abort(403)
     return None
 app.config["SECRET_KEY"] = SECRET_KEY
+app.config["CREDENTIAL_ENCRYPTION_KEY"] = CREDENTIAL_ENCRYPTION_KEY
+app.config["DEMO_MODE"] = DEMO_MODE
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SESSION_COOKIE_SECURE", "").strip().lower() in {"1", "true", "yes", "on"}
@@ -788,6 +795,7 @@ def inject_ctx():
         "dashboard_widgets": _dashboard_widgets(),
         "dashboard_widget_choices": DASHBOARD_WIDGET_CHOICES,
         "allow_negative_sales": _allow_negative_sales(),
+        "demo_mode": DEMO_MODE,
     }
 
 # === فیلتر جینجا برای جداکننده هزارگان ===
@@ -894,10 +902,16 @@ def _assistant_model() -> str:
     return key
 
 def _openai_api_key() -> str:
-    key = (Setting.get("openai_api_key", "") or "").strip()
+    stored = (Setting.get("openai_api_key", "") or "").strip()
+    key = decrypt_secret(current_app, stored) if stored else ""
     if not key:
         key = (os.environ.get("OPENAI_API_KEY") or "").strip()
     return key
+
+
+def _user_openai_api_key(user_settings) -> str:
+    stored = (getattr(user_settings, "openai_api_key", "") or "").strip()
+    return decrypt_secret(current_app, stored) if stored else ""
 
 
 def _assistant_api_ready() -> bool:
@@ -912,7 +926,7 @@ def _assistant_api_ready() -> bool:
     if not username:
         return False
     user_settings = UserSettings.query.filter_by(username=username).first()
-    return bool(user_settings and (user_settings.openai_api_key or "").strip())
+    return bool(user_settings and _user_openai_api_key(user_settings))
 
 def _csv_safe_cell(value: Any) -> str:
     """Prevent spreadsheet formula injection in exported text cells."""
@@ -1237,7 +1251,7 @@ def _call_openai_assistant(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
     user_settings = UserSettings.get_for_user(username)
     
     # استفاده از کلید API شخصی یا سراسری
-    api_key = user_settings.openai_api_key if user_settings.openai_api_key else _openai_api_key()
+    api_key = _user_openai_api_key(user_settings) or _openai_api_key()
     if not api_key:
         raise RuntimeError("کلید API تنظیم نشده است.")
     if OpenAI is None:
@@ -2230,12 +2244,85 @@ def login():
         app.logger.warning(f"LOGIN_FAIL  USER={username}  IP={request.remote_addr}")
     return render_template("login.html", prefix=URL_PREFIX)
 
+def _seed_demo_data():
+    if not DEMO_MODE:
+        return
+    if Entity.query.filter_by(type="person", code="D001").first():
+        return
+    db.session.add_all([
+        Entity(type="person", code="D001", name="فروشگاه نمونه", unit="شرکت", level=1),
+        Entity(type="person", code="D002", name="مشتری نمونه", unit="فروشگاه", level=1),
+        Entity(type="item", code="I001", name="لپ‌تاپ نمونه", unit="عدد", level=1, stock_qty=8),
+        Entity(type="item", code="I002", name="ماوس بی‌سیم نمونه", unit="عدد", level=1, stock_qty=25),
+        Entity(type="item", code="I003", name="کیبورد نمونه", unit="عدد", level=1, stock_qty=14),
+        CashBox(name="صندوق اصلی", kind="cash", description="صندوق نمونه حساب پاک", is_active=True),
+    ])
+    Setting.set("ui_theme", "dark")
+    Setting.set("dashboard_widgets", json.dumps([k for k, _ in DASHBOARD_WIDGET_CHOICES], ensure_ascii=False))
+    Setting.set("price_display_mode", "last")
+    Setting.set("search_sort", "recent")
+    db.session.commit()
+
+
+def _reset_demo_workspace():
+    if not DEMO_MODE:
+        return
+    try:
+        db.session.remove()
+        db.drop_all()
+        db.create_all()
+        for path in (DB_DIR / "backups", DB_DIR / "fiscal_cases", DB_DIR / "uploads"):
+            shutil.rmtree(path, ignore_errors=True)
+        (DB_DIR / "backups").mkdir(parents=True, exist_ok=True)
+        (DB_DIR / "fiscal_cases").mkdir(parents=True, exist_ok=True)
+        ASSISTANT_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+        try:
+            Path(LOG_FILE).write_text("", encoding="utf-8")
+        except OSError:
+            pass
+        save_users_catalog({
+            DEMO_USERNAME: {
+                "password": DEMO_PASSWORD,
+                "role": "staff",
+                "permissions": DEFAULT_PERMISSIONS,
+                "is_active": True,
+                "email": "",
+            }
+        })
+        _seed_demo_data()
+        db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("demo workspace reset failed")
+        raise
+
+
+@app.route(URL_PREFIX + "/demo/start", methods=["GET"])
+def demo_start():
+    if not DEMO_MODE:
+        abort(404)
+    if current_user.is_authenticated:
+        logout_user()
+        session.clear()
+    _reset_demo_workspace()
+    catalog = load_users_catalog()
+    entry = catalog.get(DEMO_USERNAME) or {}
+    login_user(User(DEMO_USERNAME, role=entry.get("role", "staff"), permissions=entry.get("permissions", DEFAULT_PERMISSIONS), is_active=True))
+    session["login_at_utc"] = datetime.utcnow().isoformat()
+    session["demo_session"] = True
+    flash("وارد محیط آزمایشی شدید؛ این داده‌ها موقتی هستند و با خروج از دمو پاک می‌شوند.", "success")
+    return redirect(URL_PREFIX + "/")
+
+
 @app.route(URL_PREFIX + "/logout", methods=["POST"])
 def logout():
+    is_demo = bool(DEMO_MODE and session.get("demo_session"))
     if current_user.is_authenticated:
         app.logger.info(f"LOGOUT USER={current_user.username} IP={request.remote_addr}")
     logout_user()
-    session.pop("login_at_utc", None)
+    session.clear()
+    if is_demo:
+        _reset_demo_workspace()
     return redirect(URL_PREFIX + "/login")
 
 # ----------------- Developer console -----------------
@@ -3427,18 +3514,18 @@ def settings_stub():
             admin_required()
             api_key = (request.form.get("openai_api_key") or "").strip()
             clear_api_key = request.form.get("clear_openai_api_key") == "1"
-            current_api_key = Setting.get("openai_api_key", "") or ""
+            current_api_key = _openai_api_key()
             model = (request.form.get("openai_model") or _assistant_model()).strip()
             valid_models = {k for k, _ in ASSISTANT_MODEL_CHOICES}
             if model not in valid_models:
                 model = _assistant_model()
             if api_key:
-                Setting.set("openai_api_key", api_key)
+                Setting.set("openai_api_key", encrypt_secret(current_app, api_key))
             elif clear_api_key:
                 Setting.set("openai_api_key", "")
             else:
                 # Empty credential input means "leave unchanged", not "delete".
-                Setting.set("openai_api_key", current_api_key)
+                Setting.set("openai_api_key", encrypt_secret(current_app, current_api_key) if current_api_key else "")
             Setting.set("openai_model", model)
             db.session.commit()
             if clear_api_key:
@@ -3452,7 +3539,7 @@ def settings_stub():
             user_api_key = (request.form.get("user_openai_api_key") or "").strip()
             clear_user_api_key = request.form.get("clear_user_openai_api_key") == "1"
             if user_api_key:
-                user_settings.openai_api_key = user_api_key
+                user_settings.openai_api_key = encrypt_secret(current_app, user_api_key)
             elif clear_user_api_key:
                 user_settings.openai_api_key = None
             # Empty credential input otherwise leaves the existing key unchanged.
@@ -3495,8 +3582,8 @@ def settings_stub():
         assistant_model_choices=ASSISTANT_MODEL_CHOICES,
         assistant_api_mask=_mask_secret(_openai_api_key()),
         assistant_api_has=bool(_openai_api_key()),
-        user_api_mask=_mask_secret(user_settings.openai_api_key),
-        user_api_has=bool(user_settings.openai_api_key),
+        user_api_mask=_mask_secret(_user_openai_api_key(user_settings)),
+        user_api_has=bool(_user_openai_api_key(user_settings)),
         user_settings=user_settings,
     )
 
@@ -4867,6 +4954,26 @@ def _ensure_column_sqlite(table:str, col:str, coltype:str, default_val:str="0"):
     except Exception as ex:
         app.logger.error(f"ALTER TABLE failed for {table}.{col}: {ex}")
 
+def _migrate_ai_credentials_to_encrypted():
+    """Encrypt legacy plaintext AI keys without breaking existing installs."""
+    try:
+        changed = False
+        global_key = (Setting.get("openai_api_key", "") or "").strip()
+        if global_key and not is_encrypted(global_key):
+            Setting.set("openai_api_key", encrypt_secret(current_app, global_key))
+            changed = True
+        for item in UserSettings.query.all():
+            raw = (item.openai_api_key or "").strip()
+            if raw and not is_encrypted(raw):
+                item.openai_api_key = encrypt_secret(current_app, raw)
+                changed = True
+        if changed:
+            db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("AI credential encryption migration failed")
+
+
 with app.app_context():
     db.create_all()
     _ensure_column_sqlite("entities", "stock_qty", "REAL", "0")
@@ -4879,6 +4986,7 @@ with app.app_context():
     _ensure_column_sqlite("cash_docs", "cheque_owner", "TEXT", "NULL")
     _ensure_column_sqlite("cash_docs", "cheque_due_date", "TEXT", "NULL")
     _ensure_column_sqlite("invoices", "kind", "TEXT", "'sales'")
+    _migrate_ai_credentials_to_encrypted()
     # ensure invoices.kind column exists; do NOT force a 'sales' default that would
     # incorrectly mark existing purchase invoices as sales. Use NULL as default so
     # we can run a reliable backfill below.
