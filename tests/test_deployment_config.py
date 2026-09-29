@@ -74,3 +74,10 @@ def test_health_endpoint_is_declared():
     app = (ROOT / "app.py").read_text(encoding="utf-8")
     assert '@app.route(URL_PREFIX + "/healthz", methods=["GET"])' in app
     assert 'return jsonify({"status": "ok", "version": APP_VERSION}), 200' in app
+
+def test_health_endpoint_returns_version_without_authentication():
+    response = app_module.app.test_client().get("/healthz")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["status"] == "ok"
+    assert payload["version"] == app_module.APP_VERSION
