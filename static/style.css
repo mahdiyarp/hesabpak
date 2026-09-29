@@ -147,9 +147,10 @@ body.theme-slate .widget-option{ background: rgba(255,255,255,0.6); border-color
 .topbar .brand .en{ opacity: .85; font-weight: 400; font-family: Tahoma, Arial, sans-serif; }
 .topbar .who{ display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .topbar .who .sep{ opacity: .85; }
+.topbar .who .logout-form{ display:inline; margin:0; padding:0; }
 .topbar .who .logout{
   color: #fff; background: #5b1b1b; padding: 6px 10px;
-  border-radius: 8px;
+  border: 0; border-radius: 8px; cursor: pointer; font: inherit;
 }
 .topbar .who .logout:hover{ filter: brightness(1.05); }
 .topbar .clock{ display: flex; align-items: center; gap: 8px; opacity: .95; }
