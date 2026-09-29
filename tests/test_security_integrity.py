@@ -409,3 +409,20 @@ def test_sensitive_query_values_are_redacted_from_request_logs():
     assert safe["api_key"] == "***"
     assert safe["authorization"] == "***"
     assert safe["name"] == "Mahdi"
+def test_unified_form_routes_authorize_posted_invoice_and_cash_kinds(monkeypatch):
+    observed = []
+    monkeypatch.setattr(app_module, "ensure_permission", lambda perm: observed.append(perm))
+    monkeypatch.setattr(app_module, "parse_gregorian_date", lambda *args, **kwargs: None)
+
+    with app_module.app.test_request_context(
+        "/sales", method="POST", data={"invoice_kind": "purchase", "inv_date_greg": "bad"}
+    ):
+        app_module.unified_invoice.__wrapped__()
+    assert observed[-1] == "purchase"
+
+    observed.clear()
+    with app_module.app.test_request_context(
+        "/receive", method="POST", data={"cash_kind": "payment", "doc_date_greg": "bad"}
+    ):
+        app_module.unified_cash.__wrapped__()
+    assert observed[-1] == "payment"
