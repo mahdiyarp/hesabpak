@@ -101,3 +101,10 @@ def test_sheba_validation_and_bank_code_detection():
 def test_bank_detection_normalizes_persian_digits():
     assert detect_bank_from_bin("۶۰۳۷۹۹")["bank"] == "بانک ملی ایران"
     assert detect_bank("۶۰۳۷۹۹۱۲۳۴۵۶۷۸۹۳")["valid"] is True
+
+from utils.rates import _parse_number
+
+
+def test_rate_parser_accepts_persian_and_arabic_digits():
+    assert _parse_number("۱٬۲۳۴٬۵۶۷") == 1234567
+    assert _parse_number("١،٢٣٤٫٥") == 1234.5
