@@ -58,6 +58,14 @@
     {% endif %}
   </div>
 </header>
+{% if session.get('demo_session') %}
+<div class="paki-demo-ribbon" role="note">
+  <span class="paki-demo-ribbon-dot" aria-hidden="true"></span>
+  <strong>نسخه نمایشی</strong>
+  <span>این محیط برای آزمایش است؛ اطلاعات واقعی وارد نکنید. داده‌ها با پایان دمو پاک می‌شوند.</span>
+  <a href="{{ prefix }}/demo">راهنمای دمو و لینک اشتراک‌گذاری</a>
+</div>
+{% endif %}
 <!-- top quick-menu removed per user request; pages will use .module-wrap under the global search -->
 
 <!-- نوار جست‌وجوی سراسری -->
@@ -101,6 +109,7 @@
     <a class="menu-item" href="{{ prefix }}/cash_doc?kind=receive"><span class="icon">➕</span><span class="label">دریافت</span></a>
     <a class="menu-item" href="{{ prefix }}/cash_doc?kind=payment"><span class="icon">➖</span><span class="label">پرداخت</span></a>
     {# Reports and Settings #}
+    <a class="menu-item" href="{{ prefix }}/transactions"><span class="icon">↔️</span><span class="label">تراکنش‌ها</span></a>
     <a class="menu-item" href="{{ prefix }}/reports"><span class="icon">📊</span><span class="label">گزارشات</span></a>
     <a class="menu-item" href="{{ prefix }}/settings"><span class="icon">⚙️</span><span class="label">تنظیمات</span></a>
     {# Admin and Assistant (show if permitted) #}
