@@ -33,3 +33,9 @@ def test_legacy_install_script_uses_production_service_defaults():
     assert "user=$RUN_USER" in install
     assert "X-Forwarded-Proto $scheme" in install
     assert "HTTPS را فعال کنید" in install
+def test_deploy_site_does_not_swallow_git_update_failures():
+    deploy = (ROOT / "deploy_site.sh").read_text(encoding="utf-8")
+    assert 'git pull origin main || true' not in deploy
+    assert 'git fetch origin main --prune' in deploy
+    assert 'git merge --ff-only origin/main' in deploy
+    assert 'git status --porcelain' in deploy
