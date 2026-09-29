@@ -302,3 +302,44 @@ def test_legacy_receive_route_is_get_only_compat_redirect():
     assert len(rules) == 1
     assert "GET" in rules[0].methods
     assert "POST" not in rules[0].methods
+
+def test_rates_save_is_atomic_and_requires_object(tmp_path, monkeypatch):
+    import pytest
+    import utils.rates as rates
+
+    target = tmp_path / "rates.json"
+    monkeypatch.setattr(rates, "DATA_FILE", target)
+
+    rates.save_rates({"updated_at": None})
+    assert target.read_text(encoding="utf-8").strip().startswith("{")
+    assert not list(tmp_path.glob(".rates-*.json.tmp"))
+
+    with pytest.raises(ValueError):
+        rates.save_rates(["invalid"])
+
+
+def test_rates_updater_interval_is_bounded(monkeypatch):
+    import utils.rates as rates
+
+    observed = {}
+
+    class FakeThread:
+        def __init__(self, *args, **kwargs):
+            observed["args"] = args
+            observed["kwargs"] = kwargs
+        def start(self):
+            pass
+        def is_alive(self):
+            return False
+
+    monkeypatch.setattr(rates.threading, "Thread", FakeThread)
+    monkeypatch.setattr(rates, "fetch_and_update", lambda save=True: {})
+    rates._updater_thread = None
+    rates._stop_event = None
+
+    rates.start_background_updater(interval_seconds=-100, run_on_start=False)
+    assert observed["args"][1] == (10,)
+    assert rates._stop_event is not None
+
+    rates._stop_event = None
+    rates._updater_thread = None

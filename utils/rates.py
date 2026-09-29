@@ -9,6 +9,8 @@
 from __future__ import annotations
 import json
 from pathlib import Path
+import os
+import tempfile
 from typing import Dict, Any, Optional
 import logging
 import re
@@ -52,8 +54,26 @@ def load_rates() -> Dict[str, Any]:
 
 
 def save_rates(payload: Dict[str, Any]) -> None:
+    """Persist the rates snapshot atomically and validate its top-level shape."""
+    if not isinstance(payload, dict):
+        raise ValueError("ساختار snapshot نرخ‌ها باید یک شیء JSON باشد.")
     _ensure_path()
-    DATA_FILE.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
+    fd, tmp_name = tempfile.mkstemp(
+        prefix=".rates-", suffix=".json.tmp", dir=str(DATA_FILE.parent)
+    )
+    tmp_path = Path(tmp_name)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump(payload, fh, ensure_ascii=False, indent=2)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp_path, DATA_FILE)
+    finally:
+        try:
+            tmp_path.unlink(missing_ok=True)
+        except TypeError:
+            if tmp_path.exists():
+                tmp_path.unlink()
 
 
 def set_rate(kind: str, key: str, value: Any) -> None:
@@ -198,11 +218,12 @@ def _updater_loop(interval_seconds: int):
 
 
 def start_background_updater(interval_seconds: int = DEFAULT_REFRESH_SECONDS, run_on_start: bool = True) -> None:
-    """Start a background thread that periodically fetches rates.
-
-    If already running, this is a no-op. To stop, call `stop_background_updater()`.
-    """
+    """Start a bounded background updater for rates."""
     global _updater_thread, _stop_event
+    try:
+        interval_seconds = max(10, min(int(interval_seconds), 3600))
+    except (TypeError, ValueError):
+        interval_seconds = DEFAULT_REFRESH_SECONDS
     if _updater_thread is not None and _updater_thread.is_alive():
         return
     _stop_event = threading.Event()
