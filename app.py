@@ -396,6 +396,7 @@ if not os.path.exists(USERS_FILE):
                         "role": "admin",
                         "permissions": ADMIN_PERMISSIONS,
                         "is_active": True,
+                        "email": os.environ.get("ADMIN_EMAIL", "").strip(),
                     }
                 ]
             },
@@ -446,6 +447,7 @@ def load_users_catalog() -> dict:
                 "role": "admin",
                 "permissions": ADMIN_PERMISSIONS,
                 "is_active": True,
+                        "email": os.environ.get("ADMIN_EMAIL", "").strip(),
             },
         )
     return catalog
