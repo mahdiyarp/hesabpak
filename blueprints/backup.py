@@ -356,6 +356,7 @@ def _reset_transactions():
 @backup_bp.route("/")
 @login_required
 def index():
+    _admin_only()
     fiscal_years = _load_fiscal_years()
     current_value = Setting.get("fiscal_year_current") or Setting.get("fiscal_year_start")
     current_entry = _find_year_entry(fiscal_years, current_value)
