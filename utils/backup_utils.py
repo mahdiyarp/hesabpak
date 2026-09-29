@@ -371,7 +371,7 @@ def restore_backup(app, zip_filename):
             runtime_json_backup.mkdir(parents=True, exist_ok=True)
             current_json = {
                 p.name: p for p in data_dir.glob("*.json")
-                if p.is_file() and p.name != "users.json.example"
+                if p.is_file() and p.name not in {"users.json", "users.json.example"}
             }
             for name, p in current_json.items():
                 shutil.copy2(p, runtime_json_backup / name)
@@ -423,7 +423,7 @@ def restore_backup(app, zip_filename):
 
             if runtime_json_replaced:
                 for p in data_dir.glob("*.json"):
-                    if p.is_file() and p.name != "users.json.example":
+                    if p.is_file() and p.name not in {"users.json", "users.json.example"}:
                         p.unlink()
                 if runtime_json_moved_aside:
                     for p in runtime_json_backup.glob("*.json"):
