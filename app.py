@@ -127,6 +127,23 @@ load_dotenv()
 PROJECT_ROOT = Path(__file__).resolve().parent
 VERSION_FILE = PROJECT_ROOT / "VERSION"
 APP_VERSION = VERSION_FILE.read_text(encoding="utf-8").strip() if VERSION_FILE.exists() else "0.9.0"
+def _runtime_git_commit() -> str:
+    """Expose a short, non-sensitive build identity for deployment verification."""
+    configured = os.environ.get("HESABPAK_GIT_COMMIT", "").strip()
+    if configured:
+        return configured[:12]
+    try:
+        value = subprocess.check_output(
+            ["git", "-C", str(PROJECT_ROOT), "rev-parse", "--short=12", "HEAD"],
+            stderr=subprocess.DEVNULL,
+            text=True,
+        ).strip()
+        return value or "unknown"
+    except (OSError, subprocess.CalledProcessError):
+        return "unknown"
+
+
+RUNTIME_GIT_COMMIT = _runtime_git_commit()
 PORT = int(os.environ.get("PORT", "8000"))
 FLASK_ENV = os.environ.get("FLASK_ENV", "development").strip().lower()
 SECRET_KEY = os.environ.get("SECRET_KEY", "").strip()
@@ -2228,10 +2245,10 @@ def healthz():
     """Lightweight deployment health probe; never exposes application data."""
     try:
         db.session.execute(text("SELECT 1"))
-        return jsonify({"status": "ok", "version": APP_VERSION}), 200
+        return jsonify({"status": "ok", "version": APP_VERSION, "commit": RUNTIME_GIT_COMMIT}), 200
     except Exception:
         db.session.rollback()
-        return jsonify({"status": "error", "version": APP_VERSION}), 503
+        return jsonify({"status": "error", "version": APP_VERSION, "commit": RUNTIME_GIT_COMMIT}), 503
 
 
 @app.route(URL_PREFIX + "/login", methods=["GET", "POST"])
