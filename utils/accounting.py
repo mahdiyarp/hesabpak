@@ -658,6 +658,12 @@ def reprice_invoice(
     balance_sign = invoice_balance_sign(kind)
     old_person = invoice.person
     old_total = _num(invoice.total)
+    # Captured before the mutation below, for the same reason as the cash
+    # document path: reading invoice.date afterwards would always yield the new
+    # value and the audit trail would claim the date never moved.
+    old_date = invoice.date
+    new_date = doc_date if doc_date is not None else old_date
+    date_changed = new_date != old_date
 
     # Net quantity per item: new lines minus the lines currently on the invoice.
     net_qty: Dict[int, float] = {}
@@ -730,6 +736,8 @@ def reprice_invoice(
             "total_after": new_total,
             "person_before": old_person.id if old_person is not None else None,
             "person_after": new_person.id,
+            "date_before": str(old_date) if date_changed else None,
+            "date_after": str(new_date) if date_changed else None,
             "stock_delta": {
                 str(k): stock_sign * v for k, v in net_qty.items() if abs(v) >= EPS
             },

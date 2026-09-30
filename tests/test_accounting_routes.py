@@ -132,6 +132,19 @@ def reconcile_against_person_rows(person):
     assert stored == pytest.approx(recomputed, abs=1e-6)
 
 
+
+def _form_fields(body: str):
+    """Yield (name, value) for every input the rendered form would submit."""
+    import re as _re2
+
+    for tag in _re2.findall(r"<input\b[^>]*>", body):
+        name = _re2.search(r'name="([^"]*)"', tag)
+        if not name:
+            continue
+        value = _re2.search(r'value="([^"]*)"', tag)
+        yield name.group(1), (value.group(1) if value else "")
+
+
 @pytest.fixture()
 def ledger(admin_client, make_person, make_item):
     return admin_client, make_person(balance=0.0), make_item(stock=50.0)
@@ -704,3 +717,104 @@ def test_cash_edit_refuses_a_forged_counterparty_that_is_an_item(ledger, make_it
 
     assert balance_of(person) == pytest.approx(-100.0)
     assert stock_of(decoy) == pytest.approx(5.0)
+
+
+def test_cash_edit_date_field_offers_a_value_the_server_can_parse(
+    admin_client, make_person
+):
+    """BUG: the cash edit form rendered a *Jalali* string into the
+    ``doc_date_greg`` field, which the server parses with %Y-%m-%d. Parsing
+    failed, so any date the user typed was silently discarded while the page
+    still reported success -- and the field could not be used at all."""
+    import re as _re
+
+    person = make_person(balance=0.0)
+    assert (
+        admin_client.post(
+            "/receive",
+            data=cash_payload(person, number="RCV-DATE-UI", date="2026-04-03"),
+        ).status_code
+        == 302
+    )
+    doc_id = only_cashdoc()
+
+    page = admin_client.get(f"/cash/{doc_id}/edit")
+    assert page.status_code == 200
+    body = page.data.decode()
+    # Whatever the browser would submit for the date field must be parseable by
+    # the very parser the POST handler uses.
+    match = _re.search(r'name="doc_date_greg"[^>]*value="([^"]*)"', body)
+    assert match, body[:2000]
+    submitted = match.group(1)
+    from app import parse_gregorian_date
+
+    assert parse_gregorian_date(submitted, allow_none=True) is not None, (
+        f"the form offered {submitted!r} but the server parses %Y-%m-%d, so a "
+        "round-trip save silently drops the user's date"
+    )
+    assert parse_gregorian_date(submitted, allow_none=True).isoformat() == "2026-04-03"
+
+
+def test_cash_edit_date_change_over_http_is_stored_and_audited(
+    admin_client, make_person
+):
+    import json
+
+    person = make_person(balance=0.0)
+    assert (
+        admin_client.post(
+            "/receive",
+            data=cash_payload(person, number="RCV-DATE-UI-2", date="2026-04-03"),
+        ).status_code
+        == 302
+    )
+    doc_id = only_cashdoc()
+
+    page = admin_client.get(f"/cash/{doc_id}/edit")
+    # Take the form as rendered and change only the date, the way a user would.
+    fields = dict(_form_fields(page.data.decode()))
+    fields["doc_date_greg"] = "2026-05-20"
+
+    assert admin_client.post(f"/cash/{doc_id}/edit", data=fields).status_code == 302
+
+    with books():
+        stored = db.session.get(app_module.CashDoc, doc_id)
+        assert stored.date.isoformat() == "2026-05-20"
+        entry = app_module.LedgerEntry.query.filter_by(
+            object_type="cashdoc", object_id=str(doc_id), action="update"
+        ).one()
+        payload = json.loads(entry.payload)
+        assert payload["date_before"] == "2026-04-03"
+        assert payload["date_after"] == "2026-05-20"
+
+
+def test_cash_edit_round_trip_save_does_not_move_the_document_to_year_1405(
+    admin_client, make_person
+):
+    """BUG (data corruption): opening the cash edit form and saving it without
+    touching the date posted the *Jalali* rendering of the date, which
+    %Y-%m-%d happily parses as a Gregorian year 1405 -- so an ordinary amount
+    edit silently moved the document four centuries into the future."""
+    person = make_person(balance=0.0)
+    assert (
+        admin_client.post(
+            "/receive",
+            data=cash_payload(person, number="RCV-ROUNDTRIP", date="2026-04-03"),
+        ).status_code
+        == 302
+    )
+    doc_id = only_cashdoc()
+
+    page = admin_client.get(f"/cash/{doc_id}/edit")
+    fields = dict(_form_fields(page.data.decode()))
+    # Change only the amount, exactly as an operator fixing a typo would.
+    fields["amount"] = "123"
+
+    assert admin_client.post(f"/cash/{doc_id}/edit", data=fields).status_code == 302
+
+    with books():
+        stored = db.session.get(app_module.CashDoc, doc_id)
+        assert stored.date.isoformat() == "2026-04-03", (
+            f"the date moved to {stored.date.isoformat()} just because the "
+            "operator saved the form without editing the date"
+        )

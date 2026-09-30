@@ -1364,3 +1364,30 @@ def test_cheque_details_are_dropped_from_a_non_cheque_document(
     assert stored.method == "cash"
     assert stored.cheque_number is None
     assert stored.cheque_bank is None
+
+
+def test_invoice_date_change_is_auditable_in_the_ledger(ctx, make_person, make_item):
+    """BUG: reprice_invoice could rewrite a posted invoice's date with the
+    ledger recording only total/person -- the date change left no audit trace
+    at all, while the cash-document edit path does record it."""
+    import json
+    from datetime import date as _date
+
+    person = make_person(balance=0.0)
+    item = make_item(stock=10.0)
+    invoice = post_invoice(person, item, qty=2, unit_price=100.0, doc_date=_date(2026, 3, 3))
+    assert invoice.date == _date(2026, 3, 3)
+
+    accounting.reprice_invoice(
+        invoice,
+        lines=[{"item": item, "qty": 2, "unit_price": 100.0}],
+        person=person,
+        doc_date=_date(2026, 7, 19),
+    )
+
+    entry = app_module.LedgerEntry.query.filter_by(
+        object_type="invoice", object_id=str(invoice.id), action=accounting.LEDGER_UPDATE
+    ).one()
+    payload = json.loads(entry.payload)
+    assert payload.get("date_before") == "2026-03-03", payload
+    assert payload.get("date_after") == "2026-07-19", payload

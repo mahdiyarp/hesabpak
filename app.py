@@ -3659,8 +3659,16 @@ def cash_edit(doc_id):
           {person_options}
         </select>
         <input type="hidden" name="person_code" value="{escape(doc.person.code if doc.person else "")}">
-        <label class="lbl" style="margin-top:8px">تاریخ سند (شمسی)</label>
-        <input class="inp" name="doc_date_greg" value="{escape(to_jdate_str(doc.date))}">
+        <label class="lbl" for="doc_date_fa" style="margin-top:8px">تاریخ سند (شمسی)</label>
+        <!-- The visible field is the Jalali picker that static/app.js syncs to
+             the hidden Gregorian field. It used to carry the name itself, so
+             the form posted a Jalali string to a %Y-%m-%d parser -- which read
+             it as the Gregorian year 1405 and moved the document four centuries
+             forward on any save. Only the hidden field is read by the server. -->
+        <input class="inp" id="doc_date_fa" data-jalali-input data-jalali-target="doc_date_greg"
+               value="{escape(to_jdate_str(doc.date))}">
+        <input type="hidden" name="doc_date_greg" id="doc_date_greg"
+               value="{escape(doc.date.isoformat() if doc.date else "")}">
         <label class="lbl" style="margin-top:8px">روش</label>
         <input class="inp" value="{escape(CASH_METHOD_LABELS.get(current_method, "نامشخص"))}" disabled>
         <input type="hidden" name="method" value="{escape(current_method)}">
