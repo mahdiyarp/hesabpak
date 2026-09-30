@@ -1355,3 +1355,52 @@ def test_the_negative_stock_setting_is_honoured_on_both_paths(
         finally:
             app_module.Setting.set("allow_negative_sales", "off")
             db.session.rollback()
+
+
+def test_a_non_positive_quantity_is_refused_instead_of_silently_dropped(
+    admin_client, make_item, make_person
+):
+    """A line the operator can see must either reach the books or be refused.
+
+    A negative quantity used to fall through the row loop and be dropped by
+    post_invoice: an invoice of 5 and -2 units was posted as 5 units, for 500
+    instead of 300, and the page reported success with no warning at all.
+    """
+    item = make_item(stock=100.0)
+    person = make_person(balance=0.0)
+
+    def _form(quantities):
+        return {
+            "invoice_kind": "sales",
+            "inv_number": "QTY-1",
+            "inv_date_greg": "2026-04-03",
+            "person_token": str(person.id),
+            "item_id[]": [str(item.id)] * len(quantities),
+            "item_code[]": ["101"] * len(quantities),
+            "qty[]": [str(q) for q in quantities],
+            "unit_price[]": ["100"] * len(quantities),
+        }
+
+    response = admin_client.post(
+        "/sales", data=_form([5, -2]), follow_redirects=True
+    )
+    assert "flash danger" in response.data.decode()
+    assert "بزرگ‌تر از صفر" in response.data.decode()
+    with books():
+        assert db.session.query(app_module.Invoice).count() == 0
+        assert stock_of(item) == pytest.approx(100.0)
+        assert balance_of(person) == pytest.approx(0.0)
+
+    # a zero-quantity line is refused the same way
+    response = admin_client.post(
+        "/sales", data=_form([5, 0]), follow_redirects=True
+    )
+    assert "بزرگ‌تر از صفر" in response.data.decode()
+    with books():
+        assert db.session.query(app_module.Invoice).count() == 0
+
+    # and the ordinary invoice still posts
+    assert admin_client.post("/sales", data=_form([5])).status_code == 302
+    with books():
+        assert db.session.query(app_module.Invoice).count() == 1
+        assert stock_of(item) == pytest.approx(95.0)

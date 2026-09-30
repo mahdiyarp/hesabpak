@@ -2473,6 +2473,19 @@ def unified_invoice():
             if (not item) and icode:
                 item = Entity.query.filter_by(type="item", code=icode).first()
 
+            if item is not None and item.type == "item" and q <= 0:
+                # A non-positive quantity used to fall through the loop and be
+                # dropped by post_invoice, so a line the operator could see on
+                # the form simply never reached the books -- and the page still
+                # said the invoice had been registered. Returns are not a
+                # document kind here, so say so instead of quietly dropping it.
+                flash(
+                    f"مقدار کالای «{item.name}» باید بزرگ‌تر از صفر باشد"
+                    " (برگشت از فروش با فاکتور برگشتی ثبت می‌شود).",
+                    "danger",
+                )
+                return redirect(URL_PREFIX + f"/invoice?kind={form_kind}")
+
             if (item is not None) and item.type == "item" and q > 0 and up >= 0:
                 # Stock check only for sales
                 if form_kind == "sales" and not allow_negative:
