@@ -1,0 +1,93 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="cash-paper-wrap">
+  <div class="cash-toolbar no-print">
+    <a class="btn" href="{{ prefix }}/reports">بازگشت به تراکنش‌ها</a>
+    <a class="btn" href="{{ prefix }}/cash/{{ doc.id }}/edit">ویرایش سند</a>
+    <button class="btn btn-primary" type="button" onclick="window.print()">چاپ / ذخیره PDF</button>
+  </div>
+
+  <article class="cash-paper">
+    <header class="cash-head">
+      <div>
+        <div class="cash-kicker">حساب پاک · HesabPak</div>
+        <h1>{{ kind }}</h1>
+        <div class="muted">سند دریافت / پرداخت</div>
+      </div>
+      <div class="cash-meta">
+        <div><span>شماره سند</span><strong>{{ doc.number|fa_digits }}</strong></div>
+        <div><span>تاریخ</span><strong>{{ doc.date|jdate|fa_digits }}</strong></div>
+      </div>
+    </header>
+
+    <section class="cash-grid">
+      <div><span>طرف حساب</span><strong>{{ doc.person.name }}</strong></div>
+      <div><span>روش</span><strong>{{ method_label }}</strong></div>
+      {% if doc.cashbox %}
+      <div><span>صندوق / حساب</span><strong>{{ doc.cashbox.name }}{% if doc.cashbox.bank_name %} · {{ doc.cashbox.bank_name }}{% endif %}</strong></div>
+      {% endif %}
+      {% if doc.note %}
+      <div class="wide"><span>یادداشت</span><strong>{{ doc.note }}</strong></div>
+      {% endif %}
+    </section>
+
+    <section class="cash-amount">
+      <span>مبلغ</span>
+      <strong>{{ doc.amount|sep|fa_digits }} <small>تومان</small></strong>
+    </section>
+
+    {% if (doc.method or "").lower() == "cheque" %}
+    <section class="cash-cheque">
+      <h2>جزئیات چک</h2>
+      <div class="cash-grid">
+        {% if doc.cheque_number %}<div><span>شماره صیادی</span><strong>{{ doc.cheque_number|fa_digits }}</strong></div>{% endif %}
+        {% if doc.cheque_bank %}<div><span>بانک</span><strong>{{ doc.cheque_bank }}</strong></div>{% endif %}
+        {% if doc.cheque_branch %}<div><span>شعبه</span><strong>{{ doc.cheque_branch }}</strong></div>{% endif %}
+        {% if doc.cheque_account %}<div><span>شماره حساب</span><strong>{{ doc.cheque_account|fa_digits }}</strong></div>{% endif %}
+        {% if doc.cheque_owner %}<div><span>صاحب حساب</span><strong>{{ doc.cheque_owner }}</strong></div>{% endif %}
+        {% if doc.cheque_due_date %}<div><span>سررسید</span><strong>{{ doc.cheque_due_date|jdate|fa_digits }}</strong></div>{% endif %}
+      </div>
+    </section>
+    {% endif %}
+
+    <footer class="cash-footer">
+      <span>این برگه از حساب پاک تولید شده است.</span>
+      <span class="no-print">برای PDF گزینه «ذخیره به‌صورت PDF» مرورگر را انتخاب کنید.</span>
+    </footer>
+  </article>
+</section>
+
+<style>
+.cash-paper-wrap{max-width:900px;margin:0 auto;padding:8px 0 28px}
+.cash-toolbar{display:flex;gap:8px;justify-content:flex-start;align-items:center;margin-bottom:12px;flex-wrap:wrap}
+.cash-paper{background:#fff;border:1px solid var(--c-border);border-radius:16px;padding:28px;box-shadow:0 18px 45px rgba(16,24,40,.08)}
+.cash-head{display:flex;justify-content:space-between;gap:18px;align-items:flex-start;border-bottom:2px solid var(--c-border);padding-bottom:18px}
+.cash-head h1{margin:4px 0;font-size:28px}
+.cash-kicker{font-size:13px;color:var(--c-mid)}
+.cash-meta{display:grid;grid-template-columns:repeat(2,minmax(120px,1fr));gap:8px;min-width:280px}
+.cash-meta div{border:1px solid var(--c-border);border-radius:10px;padding:9px 12px}
+.cash-meta span,.cash-grid span{display:block;font-size:12px;color:var(--c-muted);margin-bottom:3px}
+.cash-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin:16px 0}
+.cash-grid>div{border:1px solid var(--c-border);border-radius:10px;padding:12px}
+.cash-grid .wide{grid-column:1/-1}
+.cash-amount{display:flex;justify-content:space-between;align-items:center;padding:20px;border-top:2px solid var(--c-border);border-bottom:2px solid var(--c-border);margin-top:12px}
+.cash-amount strong{font-size:28px}
+.cash-amount small{font-size:13px;font-weight:500}
+.cash-cheque{margin-top:18px}
+.cash-cheque h2{font-size:17px;margin:0 0 10px}
+.cash-footer{display:flex;justify-content:space-between;gap:14px;margin-top:28px;padding-top:12px;border-top:1px dashed var(--c-border);font-size:12px;color:var(--c-muted)}
+@media (max-width:700px){
+  .cash-paper{padding:16px;border-radius:12px}
+  .cash-head,.cash-footer{flex-direction:column}
+  .cash-meta{min-width:0;width:100%}
+  .cash-grid{grid-template-columns:1fr}
+  .cash-grid .wide{grid-column:auto}
+}
+@media print{
+  .no-print,header.topbar,.search-wrap,.paki-fab{display:none !important}
+  body{background:#fff !important}
+  .cash-paper-wrap{max-width:none;padding:0}
+  .cash-paper{border:0;box-shadow:none;border-radius:0;padding:0}
+}
+</style>
+{% endblock %}
