@@ -47,16 +47,16 @@ ensure_command() {
 }
 
 ensure_tools() {
-  ensure_command git "git را نصب کنید." 
-  ensure_command python3 "python3 را نصب کنید." 
+  ensure_command git "git را نصب کنید."
+  ensure_command python3 "python3 را نصب کنید."
 }
 
 clone_or_update_repo() {
   mkdir -p "$REPO_PARENT"
   if [[ -d "$REPO_DIR/.git" ]]; then
-    echo "ℹ️ مخزن قبلاً وجود دارد؛ به‌روزرسانی شاخه $BRANCH_NAME"
+    echo "ℹ️ مخزن قبلاً وجود دارد؛ برای نصب/بازسازی به‌صورت امن به‌روزرسانی می‌شود."
     git -C "$REPO_DIR" remote set-url "$REMOTE_NAME" "$REPO_URL"
-    git -C "$REPO_DIR" fetch "$REMOTE_NAME"
+    git -C "$REPO_DIR" fetch "$REMOTE_NAME" --prune
     git -C "$REPO_DIR" checkout "$BRANCH_NAME"
     git -C "$REPO_DIR" pull --ff-only "$REMOTE_NAME" "$BRANCH_NAME"
   else
@@ -75,7 +75,10 @@ run_bootstrap() {
     fi
   fi
   echo "🚀 اجرای bootstrap جهت آماده‌سازی Passenger"
-  (cd "$REPO_DIR" && PUBLIC_HTML="$PUBLIC_HTML" "$DEPLOY_SCRIPT" bootstrap)
+  (
+    cd "$REPO_DIR"
+    PUBLIC_HTML="$PUBLIC_HTML" GIT_BRANCH="$BRANCH_NAME" GIT_REMOTE="$REMOTE_NAME" "$DEPLOY_SCRIPT" bootstrap
+  )
 }
 
 show_diff() {
@@ -117,21 +120,28 @@ update_flow() {
     echo "❌ مخزن $REPO_DIR پیدا نشد. ابتدا دستور install را اجرا کنید." >&2
     exit 1
   fi
-  git -C "$REPO_DIR" fetch "$REMOTE_NAME"
+
+  git -C "$REPO_DIR" fetch "$REMOTE_NAME" --prune
   local local_head remote_head merge_base
   local_head="$(git -C "$REPO_DIR" rev-parse HEAD)"
   remote_head="$(git -C "$REPO_DIR" rev-parse "$REMOTE_NAME/$BRANCH_NAME")"
   merge_base="$(git -C "$REPO_DIR" merge-base "$local_head" "$remote_head")"
+
   if ! show_diff "$local_head" "$remote_head"; then
     return
   fi
+
   if [[ "$merge_base" != "$local_head" ]]; then
-    echo "⚠️ شاخه محلی دارای تغییرات محلی یا اختلافات است. ابتدا آنها را برطرف کنید." >&2
+    echo "⚠️ شاخه محلی دارای تغییرات محلی/تاریخی است و fast-forward نیست. ابتدا آن را بررسی کنید." >&2
     exit 1
   fi
+
   if confirm "آیا تغییرات فوق روی سرور اعمال شود؟"; then
-    git -C "$REPO_DIR" pull --ff-only "$REMOTE_NAME" "$BRANCH_NAME"
-    (cd "$REPO_DIR" && PUBLIC_HTML="$PUBLIC_HTML" "$DEPLOY_SCRIPT" update)
+    # deploy_host.sh performs the actual backup + ff-only pull exactly once.
+    (
+      cd "$REPO_DIR"
+      REPO_DIR="$REPO_DIR" PUBLIC_HTML="$PUBLIC_HTML" GIT_BRANCH="$BRANCH_NAME" GIT_REMOTE="$REMOTE_NAME" "$DEPLOY_SCRIPT" update
+    )
     echo "✅ به‌روزرسانی با موفقیت انجام شد."
   fi
 }
@@ -144,7 +154,7 @@ status_flow() {
   fi
   git -C "$REPO_DIR" status -sb
   git -C "$REPO_DIR" remote -v | grep "^$REMOTE_NAME" || true
-  git -C "$REPO_DIR" fetch "$REMOTE_NAME"
+  git -C "$REPO_DIR" fetch "$REMOTE_NAME" --prune
   show_diff "$(git -C "$REPO_DIR" rev-parse HEAD)" "$(git -C "$REPO_DIR" rev-parse "$REMOTE_NAME/$BRANCH_NAME")" || true
 }
 
