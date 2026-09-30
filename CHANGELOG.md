@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Verification now also checks required runtime files and Bash syntax for all project shell scripts.
+- Cash-document edit forms now use the same grouped amount formatting as other accounting forms.
+- Offline bundles preserve their source commit and expose it through `/healthz` after `.git` removal.
 - Permission-aware navigation and invoice/cash document tabs now reflect user module access.
 - Direct document viewing now requires the actual accounting module permission unless the user has reports access.
 - Added a local verification script for compile + pytest when hosted CI is unavailable.
