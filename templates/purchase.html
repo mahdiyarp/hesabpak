@@ -15,6 +15,7 @@
         <div>
           <label class="lbl">تاریخ (شمسی)</label>
           <input class="inp" id="inv_date_fa" readonly value="{{ current_jdate }}" data-greg="{{ current_gdate }}">
+          <input type="hidden" name="idempotency_key" value="{{ idempotency_key() }}">
           <input type="hidden" name="inv_date_greg" id="inv_date_greg" value="{{ current_gdate }}">
         </div>
 
