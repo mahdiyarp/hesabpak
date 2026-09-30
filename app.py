@@ -3278,8 +3278,11 @@ def reports():
 @app.route(URL_PREFIX + "/invoice/<int:inv_id>")
 @login_required
 def invoice_view(inv_id):
-    ensure_permission("reports", "sales", "purchase")
     inv = Invoice.query.get_or_404(inv_id)
+    # Reports permission grants cross-module visibility; otherwise require
+    # permission for the actual invoice kind to prevent direct-URL disclosure.
+    if not has_permission("reports") and not has_permission(inv.kind):
+        abort(403)
     lines = InvoiceLine.query.filter_by(invoice_id=inv.id).all()
     title = "فاکتور فروش" if inv.kind == "sales" else "فاکتور خرید"
     html = [
@@ -3298,8 +3301,11 @@ def invoice_view(inv_id):
 @app.route(URL_PREFIX + "/cash/<int:doc_id>")
 @login_required
 def cash_view(doc_id):
-    ensure_permission("reports", "receive", "payment")
     doc = CashDoc.query.get_or_404(doc_id)
+    # Reports permission grants cross-module visibility; otherwise require
+    # permission for the actual cash document type to prevent direct-URL disclosure.
+    if not has_permission("reports") and not has_permission(doc.doc_type):
+        abort(403)
     kind = "دریافت" if doc.doc_type == "receive" else "پرداخت"
     cheque_meta = ""
     if (doc.method or "").lower() == "cheque":
