@@ -88,6 +88,11 @@ def cash_edit_payload(person, *, amount=100.0, method="cash", note="", date=""):
     return payload
 
 
+def with_invoices():
+    with books():
+        return db.session.query(app_module.Invoice).all()
+
+
 def only_invoice():
     with books():
         invoices = db.session.query(app_module.Invoice).all()
@@ -937,3 +942,180 @@ def test_a_stale_cash_edit_form_cannot_silently_overwrite_a_newer_save(
         assert stored.amount == 9000.0, "the stale save overwrote the newer amount"
         assert stored.revision == 1
         assert balance_of(person) == -9000.0
+
+# --------------------------------------------------------------------------- #
+# Reconciliation: do the stored aggregates match an independent recomputation?
+#
+# The ledger is a hash-chained audit log, not a double-entry journal, so
+# "the books balance" here means something concrete and testable: the stock and
+# balance stored on each entity must equal what you get by re-deriving them
+# from the surviving active documents, using the documented sign convention
+# and nothing else. This recomputation deliberately does NOT call
+# utils.accounting -- if it did, a sign error would cancel itself out and the
+# test would prove nothing.
+# --------------------------------------------------------------------------- #
+
+
+def _recompute_from_documents():
+    """Derive expected stock/balance from the documents that are still active."""
+    stock = {}
+    balance = {}
+    cashbox = {}
+
+    for inv in db.session.query(app_module.Invoice).all():
+        if accounting.is_void(inv):
+            continue
+        if inv.kind == "sales":
+            sign_stock, sign_balance = -1.0, 1.0
+        else:
+            sign_stock, sign_balance = 1.0, -1.0
+        for line in inv.lines:
+            stock[line.item_id] = stock.get(line.item_id, 0.0) + sign_stock * line.qty
+        balance[inv.person_id] = balance.get(inv.person_id, 0.0) + sign_balance * inv.total
+
+    for doc in db.session.query(app_module.CashDoc).all():
+        if accounting.is_void(doc):
+            continue
+        if doc.doc_type == "receive":
+            sign_party, sign_box = -1.0, 1.0
+        else:
+            sign_party, sign_box = 1.0, -1.0
+        balance[doc.person_id] = balance.get(doc.person_id, 0.0) + sign_party * doc.amount
+        if doc.cashbox_id:
+            cashbox[doc.cashbox_id] = cashbox.get(doc.cashbox_id, 0.0) + sign_box * doc.amount
+
+    return stock, balance, cashbox
+
+
+def test_stored_aggregates_reconcile_with_an_independent_recomputation(
+    admin_client, make_item, make_person
+):
+    """A realistic mixed book, then void / edit / delete, then reconciliation."""
+    item = make_item(stock=0.0)
+    customer = make_person(balance=0.0, name="مشتری", code="201")
+    supplier = make_person(balance=0.0, name="تامین‌کننده", code="202")
+
+    # 1. purchase 10 @ 100 from the supplier
+    r = admin_client.post(
+        "/purchase",
+        data=invoice_payload(
+            supplier, item, kind="purchase", number="PO-1", qty=10, unit_price=100.0
+        ),
+    )
+    assert r.status_code == 302
+    purchase_id = only_invoice()
+
+    # 2. sale 4 @ 300 to the customer
+    r = admin_client.post(
+        "/sales",
+        data=invoice_payload(
+            customer, item, kind="sales", number="SO-1", qty=4, unit_price=300.0
+        ),
+    )
+    assert r.status_code == 302
+    sale_id = next(i.id for i in with_invoices() if i.number == "SO-1")
+
+    # 3. receive 500 from the customer, then delete it again
+    r = admin_client.post(
+        "/receive",
+        data=cash_payload(customer, number="RCV-1", amount=500.0),
+    )
+    assert r.status_code == 302
+    receive_id = only_cashdoc()
+
+    # 4. pay 200 to the supplier
+    r = admin_client.post(
+        "/payment",
+        data=cash_payload(supplier, doc_type="payment", number="PAY-1", amount=200.0),
+    )
+    assert r.status_code == 302
+
+    # 5. void the sale
+    assert (
+        admin_client.post(f"/invoice/{sale_id}/cancel", data={"reason": "test"}).status_code
+        == 302
+    )
+    # 6. edit the purchase to 12 units
+    form = dict(_form_fields(admin_client.get(f"/invoice/{purchase_id}/edit").data.decode()))
+    form["qty[]"] = ["12"]
+    assert admin_client.post(f"/invoice/{purchase_id}/edit", data=form).status_code == 302
+    # 7. delete the receipt
+    assert admin_client.post(f"/cash/{receive_id}/delete").status_code == 302
+
+    # -- reconciliation -------------------------------------------------- #
+    with books():
+        expected_stock, expected_balance, expected_box = _recompute_from_documents()
+
+        item_row = db.session.get(app_module.Entity, item.id)
+        assert item_row.stock_qty == pytest.approx(expected_stock.get(item.id, 0.0)), (
+            f"stock {item_row.stock_qty} != recomputed {expected_stock.get(item.id, 0.0)}"
+        )
+
+        for row in db.session.query(app_module.Entity).filter_by(type="person").all():
+            assert row.balance == pytest.approx(
+                expected_balance.get(row.id, 0.0)
+            ), f"person {row.code}: stored {row.balance} != recomputed {expected_balance.get(row.id, 0.0)}"
+
+        for box in db.session.query(app_module.CashBox).all():
+            assert box.balance == pytest.approx(
+                expected_box.get(box.id, 0.0)
+            ), f"cashbox {box.id}: stored {box.balance} != recomputed {expected_box.get(box.id, 0.0)}"
+
+    # and the numbers, spelled out, so a failure says what went wrong
+    with books():
+        assert stock_of(item) == pytest.approx(12.0)      # 12 units purchased
+        assert balance_of(customer) == pytest.approx(0.0)
+        assert balance_of(supplier) == pytest.approx(-1000.0)
+
+
+def test_the_ledger_deltas_sum_to_the_same_story_as_the_documents(
+    admin_client, make_item, make_person
+):
+    """The audit trail and the books must tell the same story.
+
+    Every create/update/delete entry records the deltas it applied, so summing
+    the chain has to reproduce the stored aggregates. A mutation that moved a
+    balance without writing its delta -- or wrote a delta it did not apply --
+    would pass a document-only reconciliation and fail here.
+    """
+    import json
+
+    item = make_item(stock=10.0)
+    customer = make_person(balance=0.0, name="مشتری", code="201")
+
+    assert (
+        admin_client.post(
+            "/sales",
+            data=invoice_payload(
+                customer, item, kind="sales", number="SO-L1", qty=5, unit_price=400.0
+            ),
+        ).status_code
+        == 302
+    )
+    sale_id = next(i.id for i in with_invoices() if i.number == "SO-L1")
+
+    form = dict(_form_fields(admin_client.get(f"/invoice/{sale_id}/edit").data.decode()))
+    form["qty[]"] = ["3"]
+    admin_client.post(f"/invoice/{sale_id}/edit", data=form)
+    admin_client.post(f"/invoice/{sale_id}/cancel", data={"reason": "test"})
+
+    stock_delta = 0.0
+    balance_delta = 0.0
+    with books():
+        for entry in (
+            db.session.query(app_module.LedgerEntry)
+            .filter_by(object_type="invoice", object_id=str(sale_id))
+            .order_by(app_module.LedgerEntry.id)
+            .all()
+        ):
+            payload = json.loads(entry.payload or "{}")
+            stock_delta += sum((payload.get("stock_delta") or {}).values())
+            balance_delta += float(payload.get("person_balance_delta") or 0.0)
+
+        assert stock_delta == pytest.approx(0.0), (
+            "the recorded stock deltas for a voided sale must cancel out"
+        )
+        assert balance_delta == pytest.approx(0.0)
+        # the item started at 10 units; a cancelled sale must leave it there
+        assert stock_of(item) == pytest.approx(10.0)
+        assert balance_of(customer) == pytest.approx(0.0)
