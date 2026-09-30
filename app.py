@@ -3313,7 +3313,13 @@ def invoice_view(inv_id):
             for ln in lines
         ) + "</ul>",
     ]
-    return render_template("page.html", title=title, content=Markup("".join(html)), prefix=URL_PREFIX)
+    return render_template(
+        "invoice_view.html",
+        title=title,
+        inv=inv,
+        lines=lines,
+        prefix=URL_PREFIX,
+    )
 
 @app.route(URL_PREFIX + "/cash/<int:doc_id>")
 @login_required
