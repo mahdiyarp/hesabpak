@@ -37,9 +37,9 @@ import json
 from contextlib import contextmanager
 from datetime import datetime
 from typing import Any, Dict, Iterable, List, Optional, Sequence, Tuple
-from markupsafe import Markup
 
 from extensions import db
+from markupsafe import Markup
 from models.accounting_models import (CashDoc, Entity, Invoice, InvoiceLine,
                                       LedgerEntry, PriceHistory)
 from sqlalchemy import case, func, text
@@ -343,14 +343,10 @@ def verify_ledger_chain(limit: Optional[int] = None) -> Dict[str, Any]:
 def adjust_item_stock_delta(
     item: Entity, delta: float, allow_negative: bool = False
 ) -> None:
-    """Change an item's stock by *delta* inside the current transaction.
-
-    The update is a single SQL statement (``col = col + delta``) so concurrent
-    movements cannot lose each other. For stock-out movements the same
-    statement carries the non-negative guard, so the check and the write are
-    one indivisible step.
-    """
+    """Change an item's stock by *delta* inside the current transaction."""
     delta = _num(delta)
+    if getattr(item, "opening_stock_qty", None) is None:
+        item.opening_stock_qty = _num(getattr(item, "stock_qty", 0.0))
     if abs(delta) < EPS:
         return
     item_id = getattr(item, "id", None)
@@ -392,6 +388,8 @@ def adjust_item_stock_delta(
 def adjust_person_balance_delta(person: Entity, delta: float) -> None:
     """Change a party's denormalized balance inside the current transaction."""
     delta = _num(delta)
+    if getattr(person, "opening_balance", None) is None:
+        person.opening_balance = _num(getattr(person, "balance", 0.0))
     if abs(delta) < EPS:
         return
     person_id = getattr(person, "id", None)
@@ -1306,8 +1304,9 @@ def lifecycle_html(document: Any) -> Markup:
     reason = (getattr(document, "void_reason", None) or "").strip()
     if reason:
         parts.append(f"<br><b>دلیل:</b> {escape(reason)}")
-    return Markup('<div class="doc-lifecycle is-void no-print">'
-                  + "".join(parts) + "</div>")
+    return Markup(
+        '<div class="doc-lifecycle is-void no-print">' + "".join(parts) + "</div>"
+    )
 
 
 def _fmt_ts(value: Any) -> str:

@@ -102,6 +102,12 @@ class Entity(db.Model):
     balance = db.Column(
         db.Float, nullable=False, default=0.0
     )  # meaningful for type=person
+    opening_stock_qty = db.Column(
+        db.Float, nullable=True
+    )  # baseline captured at first ledger touch
+    opening_balance = db.Column(
+        db.Float, nullable=True
+    )  # baseline captured at first ledger touch
 
     parent = db.relationship("Entity", remote_side=[id], lazy="joined")
     __table_args__ = (db.UniqueConstraint("type", "code", name="uq_entity_type_code"),)
