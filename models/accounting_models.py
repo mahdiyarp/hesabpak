@@ -126,6 +126,11 @@ class Invoice(db.Model):
     # stock, person balances, cashbox totals and reports. A voided document
     # keeps its rows (and therefore its audit history) but is excluded from
     # every aggregate through utils.accounting.active_invoices()/active_cashdocs().
+    # Monotonic optimistic-concurrency token. Two operators can hold the same
+    # edit form; without this the second save silently discards the first one's
+    # changes, because the browser has no way to say "I was looking at an older
+    # version of this document".
+    revision = db.Column(db.Integer, nullable=False, default=0, server_default="0")
     status = db.Column(
         db.String(16),
         nullable=False,
@@ -207,6 +212,11 @@ class CashDoc(db.Model):
     created_at = db.Column(db.DateTime, nullable=False, default=datetime.now)
 
     # Lifecycle state -- see Invoice.status for the contract.
+    # Monotonic optimistic-concurrency token. Two operators can hold the same
+    # edit form; without this the second save silently discards the first one's
+    # changes, because the browser has no way to say "I was looking at an older
+    # version of this document".
+    revision = db.Column(db.Integer, nullable=False, default=0, server_default="0")
     status = db.Column(
         db.String(16),
         nullable=False,

@@ -818,3 +818,122 @@ def test_cash_edit_round_trip_save_does_not_move_the_document_to_year_1405(
             f"the date moved to {stored.date.isoformat()} just because the "
             "operator saved the form without editing the date"
         )
+
+
+def test_a_stale_edit_form_cannot_silently_overwrite_a_newer_save(
+    admin_client, make_item, make_person
+):
+    """A second operator holding the same form must not wipe the first one's work.
+
+    Operator A renders the edit form and corrects the unit price; operator B
+    still holds the copy rendered before that. When B saves, the browser has no
+    way to say "I was looking at an older document", so the last write simply
+    won: A's price change vanished and B was told he had succeeded.
+    """
+    item = make_item(stock=100.0)
+    person = make_person(balance=0.0)
+    assert (
+        admin_client.post(
+            "/sales",
+            data=invoice_payload(
+                person, item, number="INV-CAS-1", qty=10, unit_price=2000.0
+            ),
+        ).status_code
+        == 302
+    )
+    inv_id = only_invoice()
+
+    form_a = dict(_form_fields(admin_client.get(f"/invoice/{inv_id}/edit").data.decode()))
+    form_b = dict(_form_fields(admin_client.get(f"/invoice/{inv_id}/edit").data.decode()))
+    assert form_a["revision"] == form_b["revision"] == "0"
+
+    # A raises the unit price and saves.
+    form_a["unit_price[]"] = ["3000"]
+    assert (
+        admin_client.post(f"/invoice/{inv_id}/edit", data=form_a).status_code == 302
+    )
+
+    # B, still holding the pre-A copy, changes only the quantity.
+    form_b["qty[]"] = ["7"]
+    response = admin_client.post(
+        f"/invoice/{inv_id}/edit", data=form_b, follow_redirects=True
+    )
+    assert "flash danger" in response.data.decode()
+    assert "تغییر کرده است" in response.data.decode()
+
+    with books():
+        inv = db.session.get(app_module.Invoice, inv_id)
+        line = inv.lines[0]
+        # A's correction survives; B was told his stale save did not apply.
+        assert line.unit_price == 3000.0
+        assert line.qty == 10.0
+        assert inv.total == 30000.0
+        assert stock_of(item) == 90.0
+        assert balance_of(person) == 30000.0
+        assert inv.revision == 1, "one accepted edit means one revision bump"
+
+
+def test_a_freshly_rendered_form_still_saves(admin_client, make_item, make_person):
+    """The guard must not break the ordinary sequential edit."""
+    item = make_item(stock=100.0)
+    person = make_person(balance=0.0)
+    assert (
+        admin_client.post(
+            "/sales",
+            data=invoice_payload(
+                person, item, number="INV-CAS-2", qty=10, unit_price=2000.0
+            ),
+        ).status_code
+        == 302
+    )
+    inv_id = only_invoice()
+
+    for expected_revision, qty in ((0, 5), (1, 6), (2, 7)):
+        form = dict(
+            _form_fields(admin_client.get(f"/invoice/{inv_id}/edit").data.decode())
+        )
+        assert form["revision"] == str(expected_revision)
+        form["qty[]"] = [str(qty)]
+        assert (
+            admin_client.post(f"/invoice/{inv_id}/edit", data=form).status_code == 302
+        )
+
+    with books():
+        inv = db.session.get(app_module.Invoice, inv_id)
+        assert inv.lines[0].qty == 7.0
+        assert inv.revision == 3
+        assert stock_of(item) == 93.0
+        assert balance_of(person) == 14000.0
+
+
+def test_a_stale_cash_edit_form_cannot_silently_overwrite_a_newer_save(
+    admin_client, make_person
+):
+    person = make_person(balance=0.0)
+    assert (
+        admin_client.post(
+            "/receive",
+            data=cash_payload(person, number="RCV-CAS-1", amount=5000.0),
+        ).status_code
+        == 302
+    )
+    doc_id = only_cashdoc()
+
+    form_a = dict(_form_fields(admin_client.get(f"/cash/{doc_id}/edit").data.decode()))
+    form_b = dict(_form_fields(admin_client.get(f"/cash/{doc_id}/edit").data.decode()))
+    assert form_a["revision"] == form_b["revision"] == "0"
+
+    form_a["amount"] = "9000"
+    assert admin_client.post(f"/cash/{doc_id}/edit", data=form_a).status_code == 302
+
+    form_b["amount"] = "123"
+    response = admin_client.post(
+        f"/cash/{doc_id}/edit", data=form_b, follow_redirects=True
+    )
+    assert "flash danger" in response.data.decode()
+
+    with books():
+        stored = db.session.get(app_module.CashDoc, doc_id)
+        assert stored.amount == 9000.0, "the stale save overwrote the newer amount"
+        assert stored.revision == 1
+        assert balance_of(person) == -9000.0

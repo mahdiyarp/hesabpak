@@ -3206,6 +3206,27 @@ def invoice_view(inv_id):
     )
 
 
+def _stale_revision(document, submitted):
+    """True when the submitted copy of a document predates its current state.
+
+    Two operators can hold the same edit form. Without a concurrency token the
+    second save is applied on top of the first save's result, so the first
+    operator's correction is silently discarded while both are told they
+    succeeded. Every accepted edit bumps the document's monotonic
+    ``revision``, so a form rendered before someone else's save is caught here.
+    """
+    if submitted is None or submitted == "":
+        # No token in the form (a client that never rendered one). Refusing
+        # would break such callers for no gain, and the column is additive, so
+        # accept and rely on the revision bump alone.
+        return False
+    try:
+        expected = int(submitted)
+    except (TypeError, ValueError):
+        return True
+    return expected != int(document.revision or 0)
+
+
 # ===================== چرخه عمر فاکتور: ویرایش، ابطال، حذف =====================
 @app.route(URL_PREFIX + "/invoice/<int:inv_id>/edit", methods=["GET", "POST"])
 @login_required
@@ -3223,6 +3244,14 @@ def invoice_edit(inv_id):
         return redirect(URL_PREFIX + f"/invoice/{inv.id}")
 
     if request.method == "POST":
+        if _stale_revision(inv, request.form.get("revision")):
+            flash(
+                "این سند بین باز شدن این فرم و ذخیرهٔ شما توسط کاربر دیگری "
+                "تغییر کرده است؛ تغییرات شما اعمال نشد. صفحه را تازه کنید.",
+                "danger",
+            )
+            return redirect(URL_PREFIX + f"/invoice/{inv.id}/edit")
+
         person = _load_form_person(request.form)
         if person is None:
             flash("لطفاً طرف حساب معتبر انتخاب کنید.", "danger")
@@ -3272,6 +3301,7 @@ def invoice_edit(inv_id):
         escape((inv.person.code if inv.person else "") or "")
     }">
         <input type="hidden" name="person_token" value="{int(inv.person_id)}">
+        <input type="hidden" name="revision" value="{escape(str(inv.revision or 0))}">
         <label class="lbl" style="margin-top:8px">نوع فاکتور</label>
         <input class="inp" value="{
         escape("فروش" if inv.kind == "sales" else "خرید")
@@ -3582,6 +3612,13 @@ def cash_edit(doc_id):
     ensure_permission(doc.doc_type)
 
     if request.method == "POST":
+        if _stale_revision(doc, request.form.get("revision")):
+            flash(
+                "این سند بین باز شدن این فرم و ذخیرهٔ شما توسط کاربر دیگری "
+                "تغییر کرده است؛ تغییرات شما اعمال نشد. صفحه را تازه کنید.",
+                "danger",
+            )
+            return redirect(URL_PREFIX + f"/cash/{doc.id}/edit")
         current_method = (doc.method or "").strip().lower()
         m = (request.form.get("method") or "").strip().lower()
         # Validate the immutability guard BEFORE any accounting mutation, so a
@@ -3659,6 +3696,7 @@ def cash_edit(doc_id):
           {person_options}
         </select>
         <input type="hidden" name="person_code" value="{escape(doc.person.code if doc.person else "")}">
+        <input type="hidden" name="revision" value="{escape(str(doc.revision or 0))}">
         <label class="lbl" for="doc_date_fa" style="margin-top:8px">تاریخ سند (شمسی)</label>
         <!-- The visible field is the Jalali picker that static/app.js syncs to
              the hidden Gregorian field. It used to carry the name itself, so
@@ -5295,6 +5333,10 @@ with app.app_context():
     _ensure_column_sqlite("cash_docs", "voided_at", "DATETIME", "NULL")
     _ensure_column_sqlite("cash_docs", "void_reason", "TEXT", "NULL")
     _ensure_column_sqlite("invoices", "kind", "TEXT", "NULL")
+    # Optimistic-concurrency tokens. Existing rows start at 0, which is exactly
+    # what an edit form rendered before this column existed would carry.
+    _ensure_column_sqlite("invoices", "revision", "INTEGER", "0")
+    _ensure_column_sqlite("cash_docs", "revision", "INTEGER", "0")
 
     # Backfill invoice.kind for all existing invoices using the number prefix
     # heuristic. Run unconditionally to correct any rows that may have been

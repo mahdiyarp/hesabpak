@@ -716,6 +716,9 @@ def reprice_invoice(
             for item, qty, unit_price in normalized
         ]
         invoice.total = new_total
+        # Bump the CAS token so a second operator holding this same form is told
+        # their copy is stale instead of silently overwriting this change.
+        invoice.revision = int(invoice.revision or 0) + 1
         invoice.discount = new_discount
         invoice.tax = new_tax
         if doc_date is not None:
@@ -1117,6 +1120,7 @@ def reprice_cashdoc(
             adjust_cash_person_balance(doc_type, current_person, old_amount, new_amount)
 
         doc.amount = new_amount
+        doc.revision = int(doc.revision or 0) + 1
         doc.date = new_date
         if note is not None:
             doc.note = (note or "").strip() or None
