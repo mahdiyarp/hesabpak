@@ -3302,17 +3302,6 @@ def invoice_view(inv_id):
         abort(403)
     lines = InvoiceLine.query.filter_by(invoice_id=inv.id).all()
     title = "فاکتور فروش" if inv.kind == "sales" else "فاکتور خرید"
-    html = [
-        f"<b>شماره:</b> {escape(inv.number)}",
-        f"<br><b>تاریخ (شمسی):</b> {escape(to_jdate_str(inv.date))}",
-        f"<br><b>مشتری/تأمین‌کننده:</b> {escape(inv.person.name)}",
-        f"<br><b>جمع:</b> {int(inv.total):,}",
-        "<hr><b>آیتم‌ها:</b>",
-        "<ul>" + "".join(
-            f"<li>{escape(ln.item.name)} | {ln.qty} × {ln.unit_price} = {ln.line_total}</li>"
-            for ln in lines
-        ) + "</ul>",
-    ]
     return render_template(
         "invoice_view.html",
         title=title,
@@ -3330,39 +3319,7 @@ def cash_view(doc_id):
     if not has_permission("reports") and not has_permission(doc.doc_type):
         abort(403)
     kind = "دریافت" if doc.doc_type == "receive" else "پرداخت"
-    cheque_meta = ""
-    if (doc.method or "").lower() == "cheque":
-        cheque_parts = []
-        if doc.cheque_number:
-            cheque_parts.append(f"شماره صیادی: <code>{escape(doc.cheque_number)}</code>")
-        if doc.cheque_bank:
-            cheque_parts.append(f"بانک: {escape(doc.cheque_bank)}")
-        if doc.cheque_branch:
-            cheque_parts.append(f"شعبه: {escape(doc.cheque_branch)}")
-        if doc.cheque_due_date:
-            cheque_parts.append(f"سررسید: {escape(to_jdate_str(doc.cheque_due_date))}")
-        if doc.cheque_account:
-            cheque_parts.append(f"شماره حساب: {escape(doc.cheque_account)}")
-        if doc.cheque_owner:
-            cheque_parts.append(f"صاحب حساب: {escape(doc.cheque_owner)}")
-        if cheque_parts:
-            cheque_meta = "<br><b>جزئیات چک:</b> " + "<br>".join(cheque_parts)
-    cashbox_line = ""
-    if doc.cashbox:
-        box_label = escape(doc.cashbox.name)
-        if doc.cashbox.kind == "bank" and doc.cashbox.bank_name:
-            box_label = f"{box_label} ({escape(doc.cashbox.bank_name)})"
-        cashbox_line = f"<br><b>صندوق/حساب:</b> {box_label}"
     method_label = CASH_METHOD_LABELS.get(doc.method or "", doc.method or "—")
-    html = (
-        f"<b>نوع:</b> {escape(kind)}<br><b>شماره:</b> {escape(doc.number)}"
-        f"<br><b>تاریخ (شمسی):</b> {escape(to_jdate_str(doc.date))}"
-        f"<br><b>طرف حساب:</b> {escape(doc.person.name)}"
-        f"<br><b>مبلغ:</b> {int(doc.amount):,}"
-        f"<br><b>روش:</b> {escape(method_label)}"
-        + cashbox_line
-        + cheque_meta
-    )
     return render_template(
         "cash_view.html",
         title="سند نقدی",
