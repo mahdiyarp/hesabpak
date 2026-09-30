@@ -91,3 +91,12 @@ def test_demo_share_link_preserves_forwarded_https_when_public_base_is_unset(mon
     )
     assert response.status_code == 200
     assert "https://example.com/demo" in response.get_data(as_text=True)
+
+def test_authenticated_navigation_hides_unpermitted_module_links():
+    base = (ROOT / "templates" / "base.html").read_text(encoding="utf-8")
+    assert "{% if 'sales' in perms %}" in base
+    assert "{% if 'purchase' in perms %}" in base
+    assert "{% if 'entities' in perms %}" in base
+    assert "{% if 'receive' in perms %}" in base
+    assert "{% if 'payment' in perms %}" in base
+    assert "{% if 'reports' in perms %}" in base
