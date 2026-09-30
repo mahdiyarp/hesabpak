@@ -83,7 +83,8 @@ def test_offline_distribution_is_self_contained():
 
 def test_invoice_kind_migration_does_not_default_legacy_rows_to_sales():
     source = (ROOT / "app.py").read_text(encoding="utf-8")
-    assert '_ensure_column_sqlite("invoices", "kind", "TEXT", "'sales'")' not in source
+    legacy_default = '_ensure_column_sqlite("invoices", "kind", "TEXT", "sales")'
+    assert legacy_default not in source
     assert '_ensure_column_sqlite("invoices", "kind", "TEXT", "NULL")' in source
 
 def test_health_endpoint_is_declared():
