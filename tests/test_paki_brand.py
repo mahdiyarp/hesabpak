@@ -100,3 +100,11 @@ def test_authenticated_navigation_hides_unpermitted_module_links():
     assert "{% if 'receive' in perms %}" in base
     assert "{% if 'payment' in perms %}" in base
     assert "{% if 'reports' in perms %}" in base
+
+def test_invoice_and_cash_type_tabs_are_permission_aware():
+    invoice = (ROOT / "templates" / "invoice.html").read_text(encoding="utf-8")
+    cash = (ROOT / "templates" / "cash_doc.html").read_text(encoding="utf-8")
+    assert "{% if has_permission('sales') %}" in invoice
+    assert "{% if has_permission('purchase') %}" in invoice
+    assert "{% if has_permission('receive') %}" in cash
+    assert "{% if has_permission('payment') %}" in cash
