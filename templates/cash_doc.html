@@ -38,6 +38,7 @@
         <div style="flex: 1; min-width: 160px;">
           <label class="lbl" for="doc_date_fa">تاریخ (شمسی)</label>
           <input class="inp" id="doc_date_fa" readonly value="{{ current_jdate }}" data-greg="{{ current_gdate }}">
+          <input type="hidden" name="idempotency_key" value="{{ idempotency_key() }}">
           <input type="hidden" name="doc_date_greg" id="doc_date_greg" value="{{ current_gdate }}">
         </div>
         <div style="flex: 2; min-width: 250px;">

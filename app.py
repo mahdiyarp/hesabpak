@@ -41,6 +41,7 @@ from utils import rates as rates_utils
 from utils import bank_utils
 from utils.secret_store import encrypt_secret, decrypt_secret, is_encrypted
 from utils import accounting
+from utils import idempotency
 from utils.accounting import (
     STATUS_ACTIVE,
     STATUS_VOID,
@@ -238,6 +239,11 @@ def _permissions_for_role(role: str, requested) -> list:
 
 # ----------------- Flask & DB -----------------
 app = Flask(__name__, static_url_path=(URL_PREFIX + "/static") if URL_PREFIX else "/static")
+
+# Every create form embeds a freshly generated idempotency token, so a resubmit
+# of the same rendered form (double click, browser retry, back button) is
+# recognised as one request instead of a second sale.
+app.jinja_env.globals["idempotency_key"] = idempotency.new_key
 
 # The production deployment sits behind one trusted reverse proxy (Nginx).
 # Trust only the forwarded scheme so generated share links preserve HTTPS.
@@ -573,7 +579,24 @@ def load_user(user_id):
 
 
 def is_admin() -> bool:
-    return current_user.is_authenticated and getattr(current_user, "role", "") == "admin"
+    return (
+        current_user.is_authenticated and getattr(current_user, "role", "") == "admin"
+    )
+
+
+def _actor_name() -> str:
+    """The operator on whose behalf a financial request is being posted.
+
+    Recorded on every idempotency claim so a replay is only ever returned to
+    the person who made the original request: a leaked token must not become a
+    way to discover another operator's document.
+    """
+    # current_user is None outside a request context -- the assistant can be
+    # driven programmatically -- so it must be probed defensively.
+    user = current_user
+    if user is not None and getattr(user, "is_authenticated", False):
+        return (getattr(user, "username", "") or "")[:64]
+    return ""
 
 
 def _active_admin_usernames(catalog: Dict[str, Any]) -> set:
@@ -1558,20 +1581,46 @@ def _apply_cash_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
         if cheque_due is None:
             raise ValueError("تاریخ سررسید چک معتبر نیست.")
 
-    number = plan.get("number") or None
-    if not number:
-        number = jalali_reference("RCV" if doc_type=="receive" else "PAY", datetime.utcnow())
+    raw_number = (plan.get("number") or "").strip() or None
 
     raw_date = (plan.get("date") or "").strip()
     if raw_date:
-        date_val = parse_gregorian_date(raw_date, allow_none=True) or parse_jalali_date(raw_date, allow_none=True)
+        date_val = parse_gregorian_date(raw_date, allow_none=True) or parse_jalali_date(
+            raw_date, allow_none=True
+        )
         if date_val is None:
             raise ValueError("تاریخ سند معتبر نیست.")
     else:
         date_val = datetime.utcnow().date()
 
-    try:
-        doc = accounting.post_cashdoc(
+    amount_value = _to_float(plan.get('amount'), 0.0)
+
+    # A repeated plan is the same logical request, so the key is derived from the
+    # plan's own content and the first result is replayed instead of paying twice.
+    plan_fp = idempotency.request_fingerprint(
+        kind=doc_type,
+        doc_type=doc_type,
+        number=raw_number,
+        doc_date=date_val,
+        person_id=person_entity.id if person_entity is not None else None,
+        amount=amount_value,
+    )
+    plan_key = (plan.get("idempotency_key") or "").strip() or "plan:" + plan_fp
+
+    def _allocate_cash_plan_number():
+        if raw_number:
+            if CashDoc.query.filter_by(number=raw_number).first():
+                raise ValueError(f"شماره سند «{raw_number}» قبلاً ثبت شده است.")
+            return raw_number, False
+        return (
+            jalali_reference(
+                "RCV" if doc_type == "receive" else "PAY", datetime.utcnow()
+            ),
+            True,
+        )
+
+    def _post_cash_plan(number):
+        return accounting.post_cashdoc(
             doc_type=doc_type,
             number=number,
             doc_date=date_val,
@@ -1582,13 +1631,35 @@ def _apply_cash_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
             cashbox=cb,
             cheque_number=cheque_number,
             cheque_due_date=cheque_due,
-            ledger_payload={"source": "assistant"},
+            ledger_payload={"source": "assistant", "idempotency_key": plan_key},
         )
-    except Exception:
-        db.session.rollback()
-        raise
 
-    return {"doc": doc, "person": person_entity, "cashbox": cb}
+    outcome = idempotency.guard_and_post(
+        scope=idempotency.SCOPE_CASH_CREATE,
+        key=plan_key,
+        request_fingerprint=plan_fp,
+        actor=_actor_name(),
+        allocate_number=_allocate_cash_plan_number,
+        post=_post_cash_plan,
+        object_type="cashdoc",
+        location_for=lambda doc: URL_PREFIX + f"/cash/{doc.id}",
+    )
+    if outcome.replayed:
+        existing = None
+        oid = str(getattr(outcome.result, "object_id", "") or "")
+        if oid.isdigit():
+            existing = db.session.get(CashDoc, int(oid))
+        if existing is None:
+            raise ValueError("این درخواست قبلاً ثبت شده است.")
+        current_app.logger.info("idempotent replay of assistant cash plan")
+        return {
+            "doc": existing,
+            "person": person_entity,
+            "cashbox": cb,
+            "replayed": True,
+        }
+
+    return {"doc": outcome.result, "person": person_entity, "cashbox": cb}
 
 def _ensure_entity(kind: str, data: Dict[str, Any]) -> Entity:
     name = (data.get("name") or "").strip()
@@ -1637,11 +1708,10 @@ def _apply_invoice_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
     if not partner_entity:
         partner_entity = _ensure_entity("person", partner_payload)
 
-    number = (plan.get("number") or "").strip()
-    if not number:
-        number = generate_invoice_number()
-    if Invoice.query.filter_by(number=number).first():
-        number = generate_invoice_number()
+    # The plan's own number, kept separate from the generated one so a repeated
+    # plan is recognised as the same logical request. A *different* plan asking
+    # for a taken number is refused below instead of being quietly re-numbered.
+    raw_number = (plan.get("number") or "").strip()
 
     raw_date = (plan.get("date") or "").strip()
     if raw_date:
@@ -1674,24 +1744,71 @@ def _apply_invoice_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
     if not rows:
         raise ValueError("هیچ ردیف کالایی معتبر نیست.")
 
-    # Any entities the assistant had to invent are part of the same unit of
-    # work: if the posting is rejected they must not survive either.
-    try:
-        inv = accounting.post_invoice(
+    # An assistant plan carries no browser token, so the key is derived from the
+    # plan's own material content: re-running the identical plan -- which is
+    # exactly what a retry after a lost answer looks like -- replays the first
+    # result instead of posting the sale twice. An explicit key, when the
+    # caller supplies one, takes precedence.
+    plan_fp = idempotency.request_fingerprint(
+        kind=kind,
+        number=raw_number or None,
+        doc_date=inv_date,
+        person_id=partner_entity.id if partner_entity is not None else None,
+        lines=[
+            {"item_id": r["item"].id, "qty": r["qty"], "unit_price": r["unit_price"]}
+            for r in rows
+        ],
+    )
+    plan_key = (plan.get("idempotency_key") or "").strip() or "plan:" + plan_fp
+
+    def _allocate_plan_number():
+        if raw_number:
+            if Invoice.query.filter_by(number=raw_number).first():
+                raise ValueError(f"شماره فاکتور «{raw_number}» قبلاً ثبت شده است.")
+            return raw_number, False
+        return idempotency.free_invoice_number(kind), True
+
+    def _post_plan_invoice(number):
+        return accounting.post_invoice(
             kind=kind,
             number=number,
             doc_date=inv_date,
             person=partner_entity,
             lines=rows,
             allow_negative_sales=allow_negative,
-            ledger_payload={"source": "assistant"},
+            ledger_payload={"source": "assistant", "idempotency_key": plan_key},
         )
-    except Exception:
-        db.session.rollback()
-        raise
+
+    # Any entities the assistant had to invent are part of the same unit of
+    # work: if the posting is rejected they must not survive either.
+    outcome = idempotency.guard_and_post(
+        scope=idempotency.SCOPE_INVOICE_CREATE,
+        key=plan_key,
+        request_fingerprint=plan_fp,
+        actor=_actor_name(),
+        allocate_number=_allocate_plan_number,
+        post=_post_plan_invoice,
+        object_type="invoice",
+        location_for=lambda doc: URL_PREFIX + f"/invoice/{doc.id}",
+    )
+    if outcome.replayed:
+        existing = None
+        oid = str(getattr(outcome.result, "object_id", "") or "")
+        if oid.isdigit():
+            existing = db.session.get(Invoice, int(oid))
+        if existing is None:
+            # The claim outlived its document; refuse rather than repost.
+            raise ValueError("این درخواست قبلاً ثبت شده است.")
+        current_app.logger.info("idempotent replay of assistant invoice plan")
+        return {
+            "invoice": existing,
+            "partner": existing.person,
+            "created_items": [],
+            "replayed": True,
+        }
 
     return {
-        "invoice": inv,
+        "invoice": outcome.result,
         "partner": partner_entity,
         "created_items": created_items,
     }
@@ -2431,7 +2548,12 @@ def unified_invoice():
         # Re-authorize using the submitted document type; hidden fields are untrusted.
         ensure_permission(form_kind)
         
-        number = (request.form.get("inv_number") or "").strip() or inv_number_generated
+        # The *submitted* number, kept separately from the generated one. A retry
+        # of a blank-number document gets a different auto-number than the first
+        # attempt, so only the client's own value can be fingerprinted --
+        # otherwise a legitimate retry would look like a conflicting request.
+        raw_number = (request.form.get("inv_number") or "").strip()
+        number = raw_number or inv_number_generated
         inv_date = parse_gregorian_date(
             request.form.get("inv_date_greg"),
             allow_none=True,
@@ -2514,14 +2636,31 @@ def unified_invoice():
             flash("جمع کل فاکتور باید بزرگ‌تر از صفر باشد.", "danger")
             return redirect(URL_PREFIX + f"/invoice?kind={form_kind}")
 
-        if Invoice.query.filter_by(number=number).first():
-            number = generate_invoice_number()
-
         # Posting is delegated to utils.accounting.post_invoice so the UI and
         # the assistant share one implementation of the sign conventions, the
         # atomic stock/balance updates and the transactional ledger entry.
-        try:
-            inv = accounting.post_invoice(
+        idem_key = idempotency.key_from_request(request.form, request.headers)
+        idem_fp = idempotency.request_fingerprint(
+            kind=form_kind,
+            number=raw_number or None,
+            doc_date=inv_date,
+            person_id=person.id,
+            discount=discount,
+            tax=tax,
+            lines=rows,
+        )
+
+        def _allocate_invoice_number():
+            # An explicitly typed number is never swapped for another one; a
+            # blank one is allocated, and retried if a concurrent request wins it.
+            if raw_number:
+                if Invoice.query.filter_by(number=raw_number).first():
+                    raise ValueError(f"شماره فاکتور «{raw_number}» قبلاً ثبت شده است.")
+                return raw_number, False
+            return idempotency.free_invoice_number(form_kind), True
+
+        def _post_invoice_with(number):
+            return accounting.post_invoice(
                 kind=form_kind,
                 number=number,
                 doc_date=inv_date,
@@ -2530,8 +2669,40 @@ def unified_invoice():
                 discount=discount,
                 tax=tax,
                 allow_negative_sales=allow_negative,
-                ledger_payload={"source": "web"},
+                ledger_payload={"source": "web", "idempotency_key": idem_key},
             )
+
+        try:
+            outcome = idempotency.guard_and_post(
+                scope=idempotency.SCOPE_INVOICE_CREATE,
+                key=idem_key,
+                request_fingerprint=idem_fp,
+                actor=_actor_name(),
+                allocate_number=_allocate_invoice_number,
+                post=_post_invoice_with,
+                object_type="invoice",
+                # A replay must reproduce the *original* answer, so the stored
+                # location is the same page a first-time success would send the
+                # operator to -- not merely a page that mentions the document.
+                location_for=lambda doc: URL_PREFIX
+                + (f"/receive?invoice_id={doc.id}" if form_kind == "sales"
+                   else f"/payment?invoice_id={doc.id}"),
+            )
+            if outcome.replayed:
+                current_app.logger.info(
+                    "idempotent replay of invoice create key=%s", idem_key
+                )
+                flash("این درخواست قبلاً ثبت شده است؛ نتیجه تکرار نشد.", "info")
+                return redirect(
+                    outcome.location or (URL_PREFIX + f"/invoice?kind={form_kind}")
+                )
+            inv = outcome.result
+        except idempotency.NumberTaken as exc:
+            flash(str(exc), "danger")
+            return redirect(URL_PREFIX + f"/invoice?kind={form_kind}")
+        except idempotency.IdempotencyConflict as exc:
+            flash(str(exc), "danger")
+            return redirect(URL_PREFIX + f"/invoice?kind={form_kind}")
         except AccountingError as exc:
             # AccountingError already implies the transaction was rolled back.
             current_app.logger.info(
@@ -2542,9 +2713,11 @@ def unified_invoice():
             )
             flash(str(exc), "danger")
             return redirect(URL_PREFIX + f"/invoice?kind={form_kind}")
-        except Exception as exc:
+        except Exception:
+            # The driver message can name tables, columns and the SQLAlchemy
+            # documentation URL, so it goes to the log and never to the operator.
             current_app.logger.exception("invoice posting failed")
-            flash(f"خطا در ثبت فاکتور: {exc}", "danger")
+            flash("خطا در ثبت فاکتور. لطفاً دوباره تلاش کنید.", "danger")
             return redirect(URL_PREFIX + f"/invoice?kind={form_kind}")
 
         total = float(inv.total or 0.0)
@@ -3492,7 +3665,11 @@ def unified_cash():
         # Re-authorize using the submitted document type; hidden fields are untrusted.
         ensure_permission(form_kind)
 
-        number = (request.form.get("doc_number") or "").strip() or doc_number
+        # Only the client's own value may be fingerprinted: a retry of a
+        # blank-number document gets a different generated number, and that
+        # must still count as the same logical request.
+        raw_number = (request.form.get("doc_number") or "").strip()
+        number = raw_number or doc_number
         doc_date = parse_gregorian_date(request.form.get("doc_date_greg"))
         if not doc_date:
             flash("تاریخ سند معتبر نیست.", "danger")
@@ -3558,8 +3735,30 @@ def unified_cash():
             if cashbox.kind != required_kind:
                 flash("نوع صندوق با روش پرداخت مطابقت ندارد.", "warning")
 
-        try:
-            doc = accounting.post_cashdoc(
+        idem_key = idempotency.key_from_request(request.form, request.headers)
+        idem_fp = idempotency.request_fingerprint(
+            kind=form_kind,
+            doc_type=form_kind,
+            number=raw_number or None,
+            doc_date=doc_date,
+            person_id=person.id if person is not None else None,
+            amount=amount,
+        )
+
+        def _allocate_cash_number():
+            if raw_number:
+                if CashDoc.query.filter_by(number=raw_number).first():
+                    raise ValueError(f"شماره سند «{raw_number}» قبلاً ثبت شده است.")
+                return raw_number, False
+            return (
+                jalali_reference(
+                    "RCV" if form_kind == "receive" else "PAY", now_info["datetime"]
+                ),
+                True,
+            )
+
+        def _post_cash_with(number):
+            return accounting.post_cashdoc(
                 doc_type=form_kind,
                 number=number,
                 doc_date=doc_date,
@@ -3568,16 +3767,47 @@ def unified_cash():
                 method=method,
                 note=note,
                 cashbox=cashbox,
-                ledger_payload={"source": "web"},
+                ledger_payload={"source": "web", "idempotency_key": idem_key},
                 **cheque,
             )
+
+        try:
+            # Claim and posting share one transaction, so a rejected posting
+            # leaves the key free and a successful one makes the replay exact.
+            outcome = idempotency.guard_and_post(
+                scope=idempotency.SCOPE_CASH_CREATE,
+                key=idem_key,
+                request_fingerprint=idem_fp,
+                actor=_actor_name(),
+                allocate_number=_allocate_cash_number,
+                post=_post_cash_with,
+                object_type="cashdoc",
+                location_for=lambda doc: URL_PREFIX + f"/cash/{doc.id}",
+            )
+            if outcome.replayed:
+                current_app.logger.info(
+                    "idempotent replay of cash create key=%s", idem_key
+                )
+                flash("این درخواست قبلاً ثبت شده است؛ نتیجه تکرار نشد.", "info")
+                return redirect(
+                    outcome.location or (URL_PREFIX + f"/cash_doc?kind={form_kind}")
+                )
+            doc = outcome.result
+        except idempotency.NumberTaken as exc:
+            flash(str(exc), "danger")
+            return redirect(URL_PREFIX + f"/cash_doc?kind={form_kind}")
+        except idempotency.IdempotencyConflict as exc:
+            flash(str(exc), "danger")
+            return redirect(URL_PREFIX + f"/cash_doc?kind={form_kind}")
         except AccountingError as exc:
             current_app.logger.info("cash document rejected: %s", exc)
             flash(str(exc), "danger")
             return redirect(URL_PREFIX + f"/cash_doc?kind={form_kind}")
-        except Exception as exc:
+        except Exception:
+            # A raw driver error would leak table names, columns, timestamps
+            # and the SQLAlchemy docs URL into the operator's browser.
             current_app.logger.exception("cash document posting failed")
-            flash(f"خطا در ثبت سند: {exc}", "danger")
+            flash("خطا در ثبت سند. لطفاً دوباره تلاش کنید.", "danger")
             return redirect(URL_PREFIX + f"/cash_doc?kind={form_kind}")
 
         action_label = "دریافت" if form_kind == "receive" else "پرداخت"

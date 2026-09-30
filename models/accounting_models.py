@@ -102,6 +102,12 @@ class Entity(db.Model):
     balance = db.Column(
         db.Float, nullable=False, default=0.0
     )  # meaningful for type=person
+    opening_stock_qty = db.Column(
+        db.Float, nullable=True
+    )  # baseline captured at first ledger touch
+    opening_balance = db.Column(
+        db.Float, nullable=True
+    )  # baseline captured at first ledger touch
 
     parent = db.relationship("Entity", remote_side=[id], lazy="joined")
     __table_args__ = (db.UniqueConstraint("type", "code", name="uq_entity_type_code"),)
@@ -229,3 +235,58 @@ class CashDoc(db.Model):
 
     person = db.relationship("Entity", lazy="joined")
     cashbox = db.relationship("CashBox", lazy="joined")
+
+
+# ------------------------------------------------- request idempotency ----
+class IdempotencyKey(db.Model):
+    """A per-request idempotency claim, committed with the money it guards.
+
+    Document-number uniqueness only protects a request that already carries a
+    number. It cannot protect an auto-numbered document, a resend after a lost
+    response, or two identical POSTs racing each other, so a caller-generated
+    token is recorded here instead.
+
+    The row is inserted and completed **inside the same transaction as the
+    financial mutation**. That is what makes the contract hold without any
+    lease or expiry logic:
+
+    * the mutation rolls back -> so does the claim -> the key is immediately
+      reusable, so a failed attempt never poisons it;
+    * the mutation commits -> the completed claim commits with it, so a later
+      replay can only ever describe a document that really exists.
+
+    A claim that is still in flight is invisible to other requests, because it
+    lives in an uncommitted transaction. A second request therefore either
+    blocks until the first commits and then replays its result, or -- if it
+    arrives first -- wins the insert and the loser replays. There is no
+    committed "in progress" state to get stuck in.
+    """
+
+    __tablename__ = "idempotency_keys"
+
+    id = db.Column(db.Integer, primary_key=True)
+    # The operation namespace ("invoice.create", "cash.create", ...). A key is
+    # only ever compared against keys in the same scope, so an accidental reuse
+    # of a token across two different operations cannot make one endpoint
+    # replay the other's result.
+    scope = db.Column(db.String(48), nullable=False)
+    key = db.Column(db.String(128), nullable=False)
+    # SHA-256 of the material request payload. A retry of the same logical
+    # request has the same fingerprint and replays; the same key carrying a
+    # different amount is a client bug and must be refused, not silently
+    # treated as a duplicate.
+    fingerprint = db.Column(db.String(64), nullable=False)
+    status = db.Column(db.String(16), nullable=False, default="succeeded")
+    # Who claimed the key. A replay is only ever handed back to the actor that
+    # created it, so a leaked token cannot be used to discover somebody else's
+    # document.
+    actor = db.Column(db.String(64), nullable=True)
+    object_type = db.Column(db.String(48), nullable=True)
+    object_id = db.Column(db.String(48), nullable=True)
+    result_location = db.Column(db.String(255), nullable=True)
+    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow)
+    completed_at = db.Column(db.DateTime, nullable=True)
+
+    __table_args__ = (
+        db.UniqueConstraint("scope", "key", name="uq_idempotency_scope_key"),
+    )
