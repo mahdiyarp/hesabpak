@@ -863,6 +863,23 @@ def generate_invoice_number():
         nxt = (last.id + 1) if last else 1
     return f"{nxt:08d}"
 
+
+def free_invoice_number() -> str:
+    """Return an invoice number that no invoice is using yet.
+
+    ``generate_invoice_number`` derives its value from the newest row, so a
+    manually entered number can already occupy the slot it picks; this walks
+    forward until it finds a genuinely unused one. It is what a *blank* number
+    field must resolve to, so that two documents posted in the same second are
+    not refused as duplicates of each other.
+    """
+    highest = db.session.query(db.func.coalesce(db.func.max(Invoice.id), 0)).scalar() or 0
+    for offset in range(1, 100000):
+        candidate = f"{int(highest) + offset:08d}"
+        if not Invoice.query.filter_by(number=candidate).first():
+            return candidate
+    raise RuntimeError("unable to allocate a free invoice number")
+
 def _to_float(x, default=0.0):
     try:
         if x is None:
@@ -1803,9 +1820,11 @@ def _apply_invoice_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
 
     number = (plan.get("number") or "").strip()
     if not number:
-        number = generate_invoice_number()
-    if Invoice.query.filter_by(number=number).first():
-        number = generate_invoice_number()
+        number = free_invoice_number()
+    elif Invoice.query.filter_by(number=number).first():
+        raise ValueError(
+            f"شماره فاکتور «{number}» قبلاً ثبت شده است؛ شماره دیگری انتخاب کنید."
+        )
 
     raw_date = (plan.get("date") or "").strip()
     if raw_date:
@@ -2578,6 +2597,10 @@ def unified_invoice():
     # Generate invoice number
     if kind == "sales":
         inv_number_generated = jalali_reference("INV", now_info["datetime"])
+        if Invoice.query.filter_by(number=inv_number_generated).first():
+            # The default carries second resolution, so a second sales form
+            # opened in the same second would otherwise offer a taken number.
+            inv_number_generated = free_invoice_number()
     else:
         # Purchase number logic
         nums = []
@@ -2600,7 +2623,8 @@ def unified_invoice():
         # Re-authorize using the submitted document type; hidden fields are untrusted.
         ensure_permission(form_kind)
         
-        number = (request.form.get("inv_number") or "").strip() or inv_number_generated
+        submitted_number = (request.form.get("inv_number") or "").strip()
+        number = submitted_number or inv_number_generated
         inv_date = parse_gregorian_date(
             request.form.get("inv_date_greg"),
             allow_none=True,
@@ -2671,7 +2695,22 @@ def unified_invoice():
             return redirect(URL_PREFIX + f"/invoice?kind={form_kind}")
 
         if Invoice.query.filter_by(number=number).first():
-            number = generate_invoice_number()
+            if not submitted_number:
+                # The field was blank, so this number is our default rather than
+                # something the operator chose: allocate a free one.
+                number = free_invoice_number()
+            else:
+                # A number the operator typed that is already taken means a
+                # resubmission (double-clicked Save, a browser retry, a
+                # flaky-network resend) or a genuine duplicate. Renaming and
+                # posting anyway silently produced a second document under a
+                # number nobody typed, defeating both the UNIQUE constraint and
+                # the operator's intent.
+                flash(
+                    f"شماره فاکتور «{number}» قبلاً ثبت شده است؛ فاکتور دیگری ثبت نشد.",
+                    "danger",
+                )
+                return redirect(URL_PREFIX + f"/invoice?kind={form_kind}")
 
         inv = Invoice(
             number=number,
