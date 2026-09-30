@@ -345,6 +345,11 @@ def test_rates_updater_interval_is_bounded(monkeypatch):
     rates._updater_thread = None
 
 
+def test_amount_formatter_groups_large_values_and_cash_edit_uses_it():
+    assert app_module.sep_filter(2500000) == "2,500,000"
+    source = Path(app_module.__file__).read_text(encoding="utf-8")
+    assert 'input class="inp" name="amount" inputmode="decimal" data-format-number value="{escape(sep_filter(doc.amount))}"' in source
+
 def test_cash_edit_method_options_are_not_mutable():
     source = Path(app_module.__file__).read_text(encoding="utf-8")
     assert "روش سند هنگام ویرایش قابل تغییر نیست" in source
