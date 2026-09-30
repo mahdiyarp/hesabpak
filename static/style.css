@@ -636,6 +636,8 @@ body.theme-slate .search-results{ border-color:rgba(61,126,230,0.22); box-shadow
 .table .ops form{ margin: 0; }
 .table .ops a{ color: var(--c-accent); font-weight: 600; }
 .table .ops a:focus-visible{ outline: 2px solid var(--c-accent); outline-offset: 2px; border-radius: 6px; }
+/* Document lifecycle actions (cancel / delete): quiet, but still keyboard reachable. */
+.table .ops form.lifecycle-op{ display: inline-flex; gap: 6px; margin-right: 6px; }
 .link-danger{
   background: none;
   border: none;
@@ -1283,3 +1285,12 @@ body.theme-slate .search-results{ border-color:rgba(61,126,230,0.22); box-shadow
 .invoice-module .search-wrapper{ z-index: 2147483648; }
 .invoice-module .search-results{ max-height: 300px; }
 .invoice-module .sale-table col:first-child{ min-width: 260px; }
+
+/* Lifecycle action buttons (POST forms) - link look, button semantics. */
+.doc-lifecycle{ margin:0 0 12px; padding:10px 12px; border:1px solid var(--c-border); border-radius:10px; background:var(--c-bg,#fff); font-size:13px; }
+.doc-lifecycle.is-void{ border-color:#d45b5b; color:#a33b3b; }
+.btn-link{ background: none; border: none; color: var(--c-accent); cursor: pointer; font: inherit; font-weight: 600; padding: 0; }
+.btn-link:hover{ text-decoration: underline; }
+.btn-link:focus-visible{ outline: 2px solid var(--c-accent); outline-offset: 2px; border-radius: 6px; }
+.btn-link--danger{ color: #d45b5b; }
+.btn-link--danger:hover{ color: #a33b3b; }
