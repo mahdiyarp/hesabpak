@@ -1119,3 +1119,163 @@ def test_the_ledger_deltas_sum_to_the_same_story_as_the_documents(
         # the item started at 10 units; a cancelled sale must leave it there
         assert stock_of(item) == pytest.approx(10.0)
         assert balance_of(customer) == pytest.approx(0.0)
+
+
+# --------------------------------------------------------------------------- #
+# Document state machine: what may follow what
+#
+# The transitions below are the ones the lifecycle surface makes reachable.
+# Each is asserted on the *money*, not just the status code: a transition that
+# is wrongly permitted twice reverses the posting twice, which is the one
+# failure mode a status code alone would hide.
+# --------------------------------------------------------------------------- #
+
+
+def test_cancelling_twice_does_not_reverse_the_posting_twice(
+    admin_client, make_item, make_person
+):
+    item = make_item(stock=100.0)
+    customer = make_person(balance=0.0)
+    admin_client.post(
+        "/sales",
+        data=invoice_payload(
+            customer, item, number="SM-1", qty=5, unit_price=100.0
+        ),
+    )
+    inv_id = only_invoice()
+    assert stock_of(item) == 95.0 and balance_of(customer) == 500.0
+
+    first = admin_client.post(f"/invoice/{inv_id}/cancel", data={"reason": "first"})
+    assert first.status_code == 302
+    assert stock_of(item) == 100.0 and balance_of(customer) == 0.0
+
+    second = admin_client.post(f"/invoice/{inv_id}/cancel", data={"reason": "second"})
+    assert second.status_code == 302  # refused, but not a crash
+    # the second attempt must be inert
+    assert stock_of(item) == 100.0, "the posting was reversed a second time"
+    assert balance_of(customer) == 0.0
+
+    with books():
+        inv = db.session.get(app_module.Invoice, inv_id)
+        voids = (
+            db.session.query(app_module.LedgerEntry)
+            .filter_by(
+                object_type="invoice",
+                object_id=str(inv_id),
+                action=accounting.LEDGER_VOID,
+            )
+            .count()
+        )
+        assert voids == 1, f"{voids} void entries for one cancel"
+
+
+def test_a_cancelled_invoice_cannot_be_edited(admin_client, make_item, make_person):
+    item = make_item(stock=100.0)
+    customer = make_person(balance=0.0)
+    admin_client.post(
+        "/sales",
+        data=invoice_payload(
+            customer, item, number="SM-2", qty=5, unit_price=100.0
+        ),
+    )
+    inv_id = only_invoice()
+    admin_client.post(f"/invoice/{inv_id}/cancel", data={"reason": "x"})
+
+    response = admin_client.post(
+        f"/invoice/{inv_id}/edit",
+        data=invoice_payload(customer, item, number="SM-2", qty=99, unit_price=1.0),
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert stock_of(item) == 100.0, "a cancelled invoice was re-priced"
+    assert balance_of(customer) == 0.0
+
+
+def test_lifecycle_actions_are_post_only(admin_client, make_item, make_person):
+    """A GET must never change money: no prefetch, no crawler, no <img src>."""
+    item = make_item(stock=100.0)
+    customer = make_person(balance=0.0)
+    admin_client.post(
+        "/sales",
+        data=invoice_payload(
+            customer, item, number="SM-3", qty=5, unit_price=100.0
+        ),
+    )
+    inv_id = only_invoice()
+
+    for url in (
+        f"/invoice/{inv_id}/cancel",
+        f"/invoice/{inv_id}/delete",
+    ):
+        response = admin_client.get(url)
+        assert response.status_code == 405, f"{url} answered a GET"
+    assert stock_of(item) == 95.0, "a GET moved stock"
+    assert balance_of(customer) == 500.0
+
+
+def test_deleting_an_already_cancelled_invoice_does_not_reverse_twice(
+    admin_client, make_item, make_person
+):
+    item = make_item(stock=100.0)
+    customer = make_person(balance=0.0)
+    admin_client.post(
+        "/sales",
+        data=invoice_payload(
+            customer, item, number="SM-4", qty=5, unit_price=100.0
+        ),
+    )
+    inv_id = only_invoice()
+    admin_client.post(f"/invoice/{inv_id}/cancel", data={"reason": "x"})
+    assert stock_of(item) == 100.0 and balance_of(customer) == 0.0
+
+    response = admin_client.post(f"/invoice/{inv_id}/delete", follow_redirects=True)
+    assert response.status_code == 200
+    # Whether the delete is allowed after a cancel is a policy choice; what
+    # must never happen is the posting being reversed a second time.
+    assert stock_of(item) == 100.0, "delete after cancel reversed the posting again"
+    assert balance_of(customer) == 0.0
+    with books():
+        # Purging a cancelled document is allowed (its posting is already
+        # reversed), but the append-only ledger keeps the history, so the
+        # cancel stays auditable after the row is gone.
+        assert db.session.get(app_module.Invoice, inv_id) is None
+        voids = (
+            db.session.query(app_module.LedgerEntry)
+            .filter_by(
+                object_type="invoice",
+                object_id=str(inv_id),
+                action=accounting.LEDGER_VOID,
+            )
+            .count()
+        )
+        assert voids == 1, f"{voids} void entries for one posting"
+
+
+def test_cancelling_twice_does_not_reverse_a_cash_document_twice(
+    admin_client, make_person
+):
+    customer = make_person(balance=0.0)
+    admin_client.post(
+        "/receive", data=cash_payload(customer, number="SM-RCV-1", amount=750.0)
+    )
+    doc_id = only_cashdoc()
+    assert balance_of(customer) == -750.0
+
+    assert admin_client.post(f"/cash/{doc_id}/cancel", data={"reason": "first"}).status_code == 302
+    assert balance_of(customer) == 0.0
+
+    assert admin_client.post(f"/cash/{doc_id}/cancel", data={"reason": "second"}).status_code == 302
+    assert balance_of(customer) == 0.0, "the receipt was reversed twice"
+
+    with books():
+        doc = db.session.get(app_module.CashDoc, doc_id)
+        voids = (
+            db.session.query(app_module.LedgerEntry)
+            .filter_by(
+                object_type="cashdoc",
+                object_id=str(doc_id),
+                action=accounting.LEDGER_VOID,
+            )
+            .count()
+        )
+        assert voids == 1
