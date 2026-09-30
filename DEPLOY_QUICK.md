@@ -1,6 +1,6 @@
 # 🚀 استقرار سریع حساب‌پاک
 
-همهٔ روش‌های نصب از مسیر hardened واحد استفاده می‌کنند.
+همهٔ روش‌های نصب و بروزرسانی از مسیرهای hardened واحد استفاده می‌کنند.
 
 ## نصب روی Ubuntu
 
@@ -13,8 +13,6 @@ curl -fsSL https://raw.githubusercontent.com/mahdiyarp/hesabpak/main/deploy_site
 ```bash
 wget -qO- https://raw.githubusercontent.com/mahdiyarp/hesabpak/main/deploy_site.sh | sudo bash
 ```
-
-مسیر نصب، production mode، Gunicorn، Nginx، secret تصادفی و بکاپ کامل قبل از update را تنظیم می‌کند.
 
 ## بررسی سرویس
 
@@ -42,33 +40,33 @@ cd /var/www/hesabpak
 sudo bash deploy_site.sh
 ```
 
+در هاست Python/Passenger:
+
+```bash
+./host_setup.sh update --repo-url https://github.com/mahdiyarp/hesabpak.git --branch main
+```
 
 ## اعتبارسنجی محلی
 
-برای اجرای همان compile و pytest مورد انتظار CI روی سرور یا سیستم توسعه:
+برای اجرای verification مستقل از GitHub Actions:
 
 ```bash
 chmod +x scripts/verify.sh
 ./scripts/verify.sh
 ```
 
-این مسیر به GitHub Actions وابسته نیست و برای زمانی که runner گیت‌هاب در دسترس نباشد به‌عنوان verification محلی استفاده می‌شود.
+این اسکریپت علاوه بر compile و pytest، همهٔ اسکریپت‌های `.sh` پروژه را با `bash -n` و فایل‌های ضروری runtime را نیز بررسی می‌کند.
 
-## Paki و محیط آزمایشی
+## صحت نسخه لایو
 
-نسخه اصلی رابط کاربری از هویت تعاملی Paki با لوگوی hp استفاده می‌کند و برای نصب شدن روی دستگاه، manifest و service worker محلی دارد.
+بعد از استقرار:
 
-برای یک **سرور دمو جداگانه**، فایل `.env` را از نمونه کپی کنید و این مقادیر را تنظیم کنید:
-
-```env
-FLASK_ENV=production
-DEMO_MODE=true
-DEMO_USERNAME=demo
-DEMO_PASSWORD=demo123
-DATA_DIR=data-demo
-CREDENTIAL_ENCRYPTION_KEY=<stable-random-secret>
+```
+/healthz
 ```
 
-در این حالت ورود آزمایشی از `/demo/start` انجام می‌شود. فضای دمو قبل از هر شروع دوباره پاک و seed می‌شود و با خروج از دمو نیز تمام داده‌های محیط آزمایشی، بکاپ‌ها و آپلودها پاک می‌شوند. **دمو را هرگز روی DATA_DIR نسخه واقعی حساب پاک قرار ندهید.**
+پاسخ شامل `status`، `version` و `commit` است تا نسخه واقعی کد در حال اجرا مشخص شود.
 
-کلید `CREDENTIAL_ENCRYPTION_KEY` باید در مهاجرت و restore حفظ شود؛ کلیدهای AI جدید در SQLite به‌صورت رمزنگاری‌شده ذخیره می‌شوند.
+## Paki و دمو
+
+دمو فقط روی instance و DATA_DIR جدا اجرا شود. فضای دمو قبل از شروع دوباره reset می‌شود و هنگام logout پاک‌سازی می‌شود.

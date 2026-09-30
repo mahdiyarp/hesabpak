@@ -10,6 +10,23 @@ command -v "$PYTHON_BIN" >/dev/null 2>&1 || {
   echo "❌ $PYTHON_BIN پیدا نشد." >&2
   exit 1
 }
+command -v bash >/dev/null 2>&1 || {
+  echo "❌ bash پیدا نشد." >&2
+  exit 1
+}
+
+echo "==> Required files"
+for required in app.py requirements.txt VERSION sw.js static/manifest.webmanifest; do
+  [[ -f "$required" ]] || {
+    echo "❌ فایل/منبع ضروری پیدا نشد: $required" >&2
+    exit 1
+  }
+done
+
+echo "==> Shell syntax"
+while IFS= read -r -d '' script; do
+  bash -n "$script"
+done < <(find . -path './.git' -prune -o -path './vendor' -prune -o -type f -name '*.sh' -print0)
 
 echo "==> Compile"
 "$PYTHON_BIN" -m compileall app.py autobackup.py blueprints models utils
