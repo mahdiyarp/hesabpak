@@ -99,18 +99,27 @@
   <div class="top-menus-inner">
     {% set perms = user_permissions or [] %}
     <a class="menu-item" href="{{ prefix }}/"><span class="icon">🏠</span><span class="label">داشبورد</span></a>
-    {# Invoices / Sales / Purchase #}
-    <a class="menu-item" href="{{ prefix }}/invoice?kind=sales"><span class="icon">🧾</span><span class="label">فاکتور فروش جدید</span></a>
-    <a class="menu-item" href="{{ prefix }}/invoice?kind=purchase"><span class="icon">📥</span><span class="label">فاکتور خرید جدید</span></a>
-    {# Entities: items / persons #}
-    <a class="menu-item" href="{{ prefix }}/entities?kind=item"><span class="icon">📦</span><span class="label">کالاها</span></a>
-    <a class="menu-item" href="{{ prefix }}/entities?kind=person"><span class="icon">👥</span><span class="label">اشخاص</span></a>
-    {# Cash: receive / payment #}
-    <a class="menu-item" href="{{ prefix }}/cash_doc?kind=receive"><span class="icon">➕</span><span class="label">دریافت</span></a>
-    <a class="menu-item" href="{{ prefix }}/cash_doc?kind=payment"><span class="icon">➖</span><span class="label">پرداخت</span></a>
-    {# Reports and Settings #}
-    <a class="menu-item" href="{{ prefix }}/transactions"><span class="icon">↔️</span><span class="label">تراکنش‌ها</span></a>
-    <a class="menu-item" href="{{ prefix }}/reports"><span class="icon">📊</span><span class="label">گزارشات</span></a>
+    {# Only show actions the current user can actually access; backend permissions remain authoritative. #}
+    {% if 'sales' in perms %}
+      <a class="menu-item" href="{{ prefix }}/invoice?kind=sales"><span class="icon">🧾</span><span class="label">فاکتور فروش جدید</span></a>
+    {% endif %}
+    {% if 'purchase' in perms %}
+      <a class="menu-item" href="{{ prefix }}/invoice?kind=purchase"><span class="icon">📥</span><span class="label">فاکتور خرید جدید</span></a>
+    {% endif %}
+    {% if 'entities' in perms %}
+      <a class="menu-item" href="{{ prefix }}/entities?kind=item"><span class="icon">📦</span><span class="label">کالاها</span></a>
+      <a class="menu-item" href="{{ prefix }}/entities?kind=person"><span class="icon">👥</span><span class="label">اشخاص</span></a>
+    {% endif %}
+    {% if 'receive' in perms %}
+      <a class="menu-item" href="{{ prefix }}/cash_doc?kind=receive"><span class="icon">➕</span><span class="label">دریافت</span></a>
+    {% endif %}
+    {% if 'payment' in perms %}
+      <a class="menu-item" href="{{ prefix }}/cash_doc?kind=payment"><span class="icon">➖</span><span class="label">پرداخت</span></a>
+    {% endif %}
+    {% if 'reports' in perms %}
+      <a class="menu-item" href="{{ prefix }}/transactions"><span class="icon">↔️</span><span class="label">تراکنش‌ها</span></a>
+      <a class="menu-item" href="{{ prefix }}/reports"><span class="icon">📊</span><span class="label">گزارشات</span></a>
+    {% endif %}
     <a class="menu-item" href="{{ prefix }}/settings"><span class="icon">⚙️</span><span class="label">تنظیمات</span></a>
     {# Admin and Assistant (show if permitted) #}
     {% if 'assistant' in perms %}
