@@ -3363,7 +3363,14 @@ def cash_view(doc_id):
         + cashbox_line
         + cheque_meta
     )
-    return render_template("page.html", title="سند نقدی", content=Markup(html), prefix=URL_PREFIX)
+    return render_template(
+        "cash_view.html",
+        title="سند نقدی",
+        doc=doc,
+        kind=kind,
+        method_label=method_label,
+        prefix=URL_PREFIX,
+    )
 
 # ===================== دریافت وجه =====================
 # ----------------- Unified Cash Doc (Receive & Payment) -----------------
