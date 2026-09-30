@@ -19,6 +19,7 @@
 - Paki تعاملی با حالت‌های blink / happy / thinking / idea / alert / sleepy
 - manifest و service worker برای نصب‌پذیری و cache شدن assetهای محلی
 - رمزنگاری credentialهای AI در حالت ذخیره‌شده
+- شناسه نسخه و Commit واقعی سرویس از طریق `/healthz` برای کنترل استقرار
 
 ## نصب سریع
 
@@ -54,6 +55,8 @@ DEMO_PASSWORD=demo123
 ## استقرار کاملاً آفلاین
 
 برای ساخت بسته قابل انتقال، `build_offline_bundle.sh` wheelهای runtime را جمع می‌کند و یک archive همراه checksum می‌سازد. سپس روی سرور بدون اینترنت `install_offline.sh` اجرا می‌شود. راهنمای کامل در `OFFLINE_INSTALL.md` است.
+
+بسته آفلاین شناسه Commit سازنده خود را نیز نگه می‌دارد تا `/healthz` بعد از نصب قابل بررسی باشد.
 
 بسته آفلاین برای نصب جدید است؛ روی مسیر دارای `.env` متوقف می‌شود تا داده موجود بدون backup/migration دستکاری نشود.
 
