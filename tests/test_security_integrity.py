@@ -463,3 +463,51 @@ def test_admin_git_update_does_not_report_ok_after_dependency_or_restart_failure
     source = Path(app_module.__file__).resolve().read_text(encoding="utf-8")
     assert 'return jsonify(result), 500' in source
     assert 'result["ok"] = all(bool(s.get("ok")) for s in result["steps"])' in source
+
+def test_document_view_requires_actual_module_permission(monkeypatch):
+    monkeypatch.setattr(app_module, "render_template", lambda *args, **kwargs: "ok")
+    with app_module.app.app_context():
+        app_module.db.drop_all()
+        app_module.db.create_all()
+
+        person = app_module.Entity(
+            type="person", code="901", name="مشتری تست", unit="شرکت", level=1
+        )
+        app_module.db.session.add(person)
+        app_module.db.session.commit()
+
+        purchase = app_module.Invoice(
+            number="P-SEC-1",
+            date=app_module.datetime.utcnow().date(),
+            person_id=person.id,
+            kind="purchase",
+            total=1000,
+        )
+        payment = app_module.CashDoc(
+            doc_type="payment",
+            number="PAY-SEC-1",
+            date=app_module.datetime.utcnow().date(),
+            person_id=person.id,
+            amount=1000,
+            method="cash",
+        )
+        app_module.db.session.add_all([purchase, payment])
+        app_module.db.session.commit()
+
+        monkeypatch.setattr(
+            app_module,
+            "has_permission",
+            lambda perm: perm == "sales",
+        )
+        with app_module.app.test_request_context(f"/invoice/{purchase.id}"):
+            response = app_module.invoice_view.__wrapped__(purchase.id)
+        assert getattr(response, "status_code", None) == 403
+
+        monkeypatch.setattr(
+            app_module,
+            "has_permission",
+            lambda perm: perm == "receive",
+        )
+        with app_module.app.test_request_context(f"/cash/{payment.id}"):
+            response = app_module.cash_view.__wrapped__(payment.id)
+        assert getattr(response, "status_code", None) == 403
