@@ -6,16 +6,20 @@
   {# Kind selector tabs #}
   <div class="kind-selector" style="margin-bottom: 1rem;">
     <div style="display: flex; gap: 1rem; justify-content: center;">
+      {% if has_permission('receive') %}
       <a href="{{ prefix }}/cash_doc?kind=receive" 
          class="kind-tab {% if cash_kind == 'receive' %}active{% endif %}"
          style="padding: 0.75rem 2rem; border-radius: 8px; text-decoration: none; font-weight: bold; transition: all 0.2s; {% if cash_kind == 'receive' %}background: #28a745; color: white;{% else %}background: #f8f9fa; color: #333; border: 2px solid #ddd;{% endif %}">
         ➕ دریافت
       </a>
+      {% endif %}
+      {% if has_permission('payment') %}
       <a href="{{ prefix }}/cash_doc?kind=payment" 
          class="kind-tab {% if cash_kind == 'payment' %}active{% endif %}"
          style="padding: 0.75rem 2rem; border-radius: 8px; text-decoration: none; font-weight: bold; transition: all 0.2s; {% if cash_kind == 'payment' %}background: #dc3545; color: white;{% else %}background: #f8f9fa; color: #333; border: 2px solid #ddd;{% endif %}">
         ➖ پرداخت
       </a>
+      {% endif %}
     </div>
   </div>
 
