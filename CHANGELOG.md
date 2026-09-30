@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Permission-aware navigation and invoice/cash document tabs now reflect user module access.
+- Direct document viewing now requires the actual accounting module permission unless the user has reports access.
+- Added a local verification script for compile + pytest when hosted CI is unavailable.
+
 - Added a shareable /demo landing with explicit demo labeling, POST-only demo start, Web Share API and clipboard fallback.
 - Added persistent in-app demo warning/ribbon and social link preview metadata.
 - Added a dedicated transaction landing at /transactions and upgraded /reports into the advanced transaction search page.
