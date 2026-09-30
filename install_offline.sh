@@ -7,6 +7,11 @@ VENV_DIR="$APP_DIR/venv"
 SERVICE_NAME="${SERVICE_NAME:-hesabpak}"
 SERVICE_USER="${SERVICE_USER:-www-data}"
 PORT="${PORT:-8000}"
+BUILD_COMMIT="unknown"
+if [ -f "$BUNDLE_DIR/HESABPAK_BUILD_COMMIT" ]; then
+  BUILD_COMMIT="$(tr -d '\r\n' < "$BUNDLE_DIR/HESABPAK_BUILD_COMMIT")"
+fi
+BUILD_COMMIT="${BUILD_COMMIT:-unknown}"
 
 if [ "$(id -u)" -ne 0 ]; then
   echo "این installer باید با root اجرا شود: sudo bash install_offline.sh" >&2
@@ -78,6 +83,7 @@ WorkingDirectory=$APP_DIR
 Environment=FLASK_APP=app.py
 Environment=PORT=$PORT
 Environment=URL_PREFIX=
+Environment=HESABPAK_GIT_COMMIT=$BUILD_COMMIT
 EnvironmentFile=-$APP_DIR/.env
 UMask=0077
 NoNewPrivileges=true
@@ -120,5 +126,6 @@ systemctl restart nginx
 
 echo
 echo "✅ نصب آفلاین حساب پاک تکمیل شد."
+echo "🔎 Build commit: $BUILD_COMMIT"
 echo "🔐 رمز مدیر اولیه داخل $APP_DIR/.env قرار دارد."
 echo "⚠️ قبل از دسترسی عمومی، HTTPS را فعال کنید و SESSION_COOKIE_SECURE=true بگذارید."

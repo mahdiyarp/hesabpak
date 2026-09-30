@@ -23,6 +23,13 @@ rm -rf "$BUNDLE_DIR/.git" "$BUNDLE_DIR/data" "$BUNDLE_DIR/dist" "$BUNDLE_DIR/ven
 find "$BUNDLE_DIR" -maxdepth 1 -type f -name '.env*' ! -name '.env.example' -delete
 find "$BUNDLE_DIR" -type d -name "__pycache__" -prune -exec rm -rf {} +
 
+BUILD_COMMIT="unknown"
+if git -C "$ROOT_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  BUILD_COMMIT="$(git -C "$ROOT_DIR" rev-parse --short=12 HEAD 2>/dev/null || true)"
+fi
+BUILD_COMMIT="${BUILD_COMMIT:-unknown}"
+printf '%s\n' "$BUILD_COMMIT" > "$BUNDLE_DIR/HESABPAK_BUILD_COMMIT"
+
 echo "⬇️ دریافت wheelهای همه وابستگی‌های runtime..."
 python3 -m pip download \
   --dest "$BUNDLE_DIR/vendor/wheels" \
@@ -31,6 +38,7 @@ python3 -m pip download \
 cat > "$BUNDLE_DIR/OFFLINE_BUNDLE.txt" <<EOF
 حساب پاک — بسته نصب آفلاین
 ساخته‌شده: $STAMP
+Build commit: $BUILD_COMMIT
 
 این بسته باید روی سروری استفاده شود که به اینترنت نیاز ندارد.
 تمام وابستگی‌های Python در vendor/wheels قرار گرفته‌اند.

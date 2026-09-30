@@ -61,6 +61,15 @@ def test_deploy_site_creates_preupdate_full_backup():
     assert 'source "$VENV_DIR/bin/activate"' in deploy
     assert 'DATA_DIR="${DATA_DIR:-$APP_DIR/data}"' in deploy
 
+def test_offline_distribution_preserves_build_identity():
+    build = (ROOT / "build_offline_bundle.sh").read_text(encoding="utf-8")
+    install = (ROOT / "install_offline.sh").read_text(encoding="utf-8")
+
+    assert 'BUILD_COMMIT="$(git -C "$ROOT_DIR" rev-parse --short=12 HEAD' in build
+    assert 'HESABPAK_BUILD_COMMIT' in build
+    assert 'HESABPAK_GIT_COMMIT=$BUILD_COMMIT' in install
+    assert 'echo "🔎 Build commit: $BUILD_COMMIT"' in install
+
 def test_offline_distribution_is_self_contained():
     build = (ROOT / "build_offline_bundle.sh").read_text(encoding="utf-8")
     install = (ROOT / "install_offline.sh").read_text(encoding="utf-8")
