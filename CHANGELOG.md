@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Invoice viewing is now a print-friendly RTL document with browser print / Save-to-PDF support and consistent grouped amounts.
+- Invoice-prefill data in receive/payment forms is now restricted by matching invoice kind and module/report permission.
 - Verification now also checks required runtime files and Bash syntax for all project shell scripts.
 - Cash-document edit forms now use the same grouped amount formatting as other accounting forms.
 - Offline bundles preserve their source commit and expose it through `/healthz` after `.git` removal.
