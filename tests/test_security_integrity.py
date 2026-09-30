@@ -420,6 +420,12 @@ def test_global_search_actions_do_not_use_dynamic_html_sink():
     assert "quickLinks.map" not in source
     assert "actions.innerHTML = quickLinks" not in source
 
+def test_invoice_prefill_scope_is_guarded():
+    source = Path(app_module.__file__).read_text(encoding="utf-8")
+    assert 'expected_invoice_kind = "sales" if kind == "receive" else "purchase"' in source
+    assert 'inv and inv.kind == expected_invoice_kind' in source
+    assert 'has_permission("reports") or has_permission(expected_invoice_kind)' in source
+
 def test_unified_form_routes_authorize_posted_invoice_and_cash_kinds(monkeypatch):
     observed = []
     monkeypatch.setattr(app_module, "ensure_permission", lambda perm: observed.append(perm))
