@@ -3627,7 +3627,7 @@ def cash_edit(doc_id):
     <form method="post">
       <div class="card" style="padding:10px">
         <label class="lbl">مبلغ</label>
-        <input class="inp" name="amount" value="{int(doc.amount)}">
+        <input class="inp" name="amount" inputmode="decimal" data-format-number value="{escape(sep_filter(doc.amount))}">
         <label class="lbl" style="margin-top:8px">روش</label>
         <input class="inp" value="{escape(CASH_METHOD_LABELS.get(current_method, 'نامشخص'))}" disabled>
         <input type="hidden" name="method" value="{escape(current_method)}">
