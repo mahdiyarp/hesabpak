@@ -91,3 +91,20 @@ def test_demo_share_link_preserves_forwarded_https_when_public_base_is_unset(mon
     )
     assert response.status_code == 200
     assert "https://example.com/demo" in response.get_data(as_text=True)
+
+def test_authenticated_navigation_hides_unpermitted_module_links():
+    base = (ROOT / "templates" / "base.html").read_text(encoding="utf-8")
+    assert "{% if 'sales' in perms %}" in base
+    assert "{% if 'purchase' in perms %}" in base
+    assert "{% if 'entities' in perms %}" in base
+    assert "{% if 'receive' in perms %}" in base
+    assert "{% if 'payment' in perms %}" in base
+    assert "{% if 'reports' in perms %}" in base
+
+def test_invoice_and_cash_type_tabs_are_permission_aware():
+    invoice = (ROOT / "templates" / "invoice.html").read_text(encoding="utf-8")
+    cash = (ROOT / "templates" / "cash_doc.html").read_text(encoding="utf-8")
+    assert "{% if has_permission('sales') %}" in invoice
+    assert "{% if has_permission('purchase') %}" in invoice
+    assert "{% if has_permission('receive') %}" in cash
+    assert "{% if has_permission('payment') %}" in cash

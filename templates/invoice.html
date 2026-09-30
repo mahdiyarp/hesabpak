@@ -7,16 +7,20 @@
   {# Kind selector tabs #}
   <div class="kind-selector" style="margin-bottom: 1rem;">
     <div style="display: flex; gap: 1rem; justify-content: center;">
+      {% if has_permission('sales') %}
       <a href="{{ prefix }}/invoice?kind=sales" 
          class="kind-tab {% if invoice_kind == 'sales' %}active{% endif %}"
          style="padding: 0.75rem 2rem; border-radius: 8px; text-decoration: none; font-weight: bold; transition: all 0.2s; {% if invoice_kind == 'sales' %}background: #28a745; color: white;{% else %}background: #f8f9fa; color: #333; border: 2px solid #ddd;{% endif %}">
         🧾 فاکتور فروش
       </a>
+      {% endif %}
+      {% if has_permission('purchase') %}
       <a href="{{ prefix }}/invoice?kind=purchase" 
          class="kind-tab {% if invoice_kind == 'purchase' %}active{% endif %}"
          style="padding: 0.75rem 2rem; border-radius: 8px; text-decoration: none; font-weight: bold; transition: all 0.2s; {% if invoice_kind == 'purchase' %}background: #dc3545; color: white;{% else %}background: #f8f9fa; color: #333; border: 2px solid #ddd;{% endif %}">
         📦 فاکتور خرید
       </a>
+      {% endif %}
     </div>
   </div>
 
