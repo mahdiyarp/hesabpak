@@ -128,8 +128,21 @@
           </td>
           <td class="center">
             <div class="ops">
+              {# Void/delete are destructive: POST forms only, admin only. The
+                 counterparty and the document kind are never carried in a hidden
+                 field, so a tampered form cannot retarget the operation. #}
+              {% if is_admin %}
+                <form class="lifecycle-op" method="post" action="{{ view }}/cancel"
+                      onsubmit="return confirm('ابطال این سند؟ اثر آن بر موجودی/مانده برگردانده می‌شود.');">
+                  <button class="btn-link" type="submit">ابطال</button>
+                </form>
+                <form class="lifecycle-op" method="post" action="{{ view }}/delete"
+                      onsubmit="return confirm('حذف کامل این سند؟ این عمل بازگشت‌ناپذیر است.');">
+                  <button class="btn-link btn-link--danger" type="submit">حذف</button>
+                </form>
+              {% endif %}
               <a href="{{ view }}">مشاهده</a>
-              {% if is_admin and r.kind != 'invoice' %}<a href="{{ edit }}">ویرایش</a>{% endif %}
+              {% if is_admin %}<a href="{{ edit }}">ویرایش</a>{% endif %}
             </div>
           </td>
         </tr>

@@ -1,5 +1,6 @@
-import os
 import json
+import os
+import re
 import tempfile
 from pathlib import Path
 
@@ -149,12 +150,15 @@ def test_record_ledger_serializes_concurrent_appends():
 
     def write_entry(index):
         with app_module.app.app_context():
-            entry = app_module.record_ledger(
-                "concurrency",
-                str(index),
-                "create",
-                {"index": index},
-            )
+            from utils import accounting
+
+            with accounting.atomic():
+                entry = app_module.record_ledger(
+                    "concurrency",
+                    str(index),
+                    "create",
+                    {"index": index},
+                )
             return entry.id, entry.hash, entry.prev_hash
 
     with ThreadPoolExecutor(max_workers=2) as pool:
@@ -350,10 +354,69 @@ def test_amount_formatter_groups_large_values_and_cash_edit_uses_it():
     source = Path(app_module.__file__).read_text(encoding="utf-8")
     assert 'input class="inp" name="amount" inputmode="decimal" data-format-number value="{escape(sep_filter(doc.amount))}"' in source
 
-def test_cash_edit_method_options_are_not_mutable():
-    source = Path(app_module.__file__).read_text(encoding="utf-8")
-    assert "روش سند هنگام ویرایش قابل تغییر نیست" in source
-    assert 'value="{escape(CASH_METHOD_LABELS.get(current_method, \'نامشخص\'))}" disabled' in source
+
+# The old source-grep assertion for method immutability is replaced by the
+# rendered-response test below: grepping the source proves neither that the
+# field is read-only nor that a tampered form is rejected.
+def test_cash_edit_method_is_immutable_and_rendered_read_only(
+    admin_client, make_person, fresh_schema
+):
+    """The payment method of a cash document can never be edited.
+
+    Asserted through the HTTP surface rather than by grepping the source: a
+    source grep breaks on quote normalization and never proves that the field is
+    actually read-only or that a tampered form is rejected.
+    """
+    import datetime
+
+    person = make_person(balance=0.0)
+    with app_module.app.app_context():
+        doc = app_module.CashDoc(
+            doc_type="receive",
+            number="SEC-CASH-1",
+            date=datetime.date(2026, 3, 2),
+            person_id=person.id,
+            amount=100.0,
+            method="cash",
+            note="",
+        )
+        app_module.db.session.add(doc)
+        app_module.db.session.commit()
+        doc_id = doc.id
+
+    # The form shows the method as a disabled control, not an editable one.
+    page = admin_client.get(f"/cash/{doc_id}/edit")
+    assert page.status_code == 200
+    html = page.data.decode("utf-8")
+    assert re.search(r'<input class="inp" value="[^"]+" disabled>', html)
+    # the only control carrying name="method" is a hidden round-trip field
+    method_inputs = re.findall(r'<input[^>]*name="method"[^>]*>', html)
+    assert method_inputs
+    assert all('type="hidden"' in tag for tag in method_inputs)
+
+    # A forged method field is rejected and changes nothing.
+    forged = admin_client.post(
+        f"/cash/{doc_id}/edit",
+        data={
+            "person_token": str(person.id),
+            "person_code": person.code,
+            "amount": "500",
+            "method": "bank",
+            "note": "",
+        },
+        follow_redirects=True,
+    )
+    assert "روش سند هنگام ویرایش قابل تغییر نیست" in forged.data.decode("utf-8")
+
+    with app_module.app.app_context():
+        stored = app_module.db.session.get(app_module.CashDoc, doc_id)
+        assert stored.method == "cash"
+        assert float(stored.amount) == 100.0
+        assert (
+            float(app_module.db.session.get(app_module.Entity, person.id).balance)
+            == 0.0
+        )
+
 
 def test_rate_snapshot_rejects_negative_and_non_numeric_values(monkeypatch, tmp_path):
     import pytest

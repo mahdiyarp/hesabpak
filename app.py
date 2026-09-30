@@ -23,6 +23,10 @@ from extensions import db
 from utils.backup_utils import ensure_dirs, autosave_record, create_full_backup
 from blueprints.backup import backup_bp
 from autobackup import init_autobackup, register_autobackup_for
+# Accounting domain models. They used to be declared inline below; moving them
+# into their own module is what lets utils/accounting.py own apply/reverse/edit
+# semantics without importing the Flask app (which would be circular).
+from models.accounting_models import Account, CashBox, CashDoc, Entity, Invoice, InvoiceLine, LedgerEntry, PriceHistory
 from models.backup_models import Setting, BackupLog, UserSettings
 from utils.num_words_fa import amount_to_toman_words
 from utils.date_utils import (
@@ -36,91 +40,31 @@ from utils.date_utils import (
 from utils import rates as rates_utils
 from utils import bank_utils
 from utils.secret_store import encrypt_secret, decrypt_secret, is_encrypted
+from utils import accounting
+from utils.accounting import (
+    STATUS_ACTIVE,
+    STATUS_VOID,
+    AccountingError,
+    DocumentStateError,
+    DocumentValidationError,
+    InsufficientStockError,
+)
 import hashlib
 import threading
 
-# --- Simple append-only ledger for traceability (blockchain-like) ----------
-class LedgerEntry(db.Model):
-    __tablename__ = "ledger_entries"
-    id = db.Column(db.Integer, primary_key=True)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.utcnow, index=True)
-    object_type = db.Column(db.String(64), nullable=False)
-    object_id = db.Column(db.String(64), nullable=True)
-    action = db.Column(db.String(64), nullable=False)
-    payload = db.Column(db.Text, nullable=True)
-    prev_hash = db.Column(db.String(128), nullable=True)
-    hash = db.Column(db.String(128), nullable=False, unique=True, index=True)
-
-
-def _compute_entry_hash(prev_hash: Optional[str], payload_text: str, ts_iso: str) -> str:
-    m = hashlib.sha256()
-    prev = (prev_hash or "")
-    m.update(prev.encode("utf-8"))
-    m.update(ts_iso.encode("utf-8"))
-    m.update((payload_text or "").encode("utf-8"))
-    return m.hexdigest()
-
-
+# --- Ledger -------------------------------------------------------------------
+# The hash-chained audit trail lives in utils/accounting.py so that an entry is
+# appended *inside* the accounting transaction it describes. `record_ledger` is
+# kept as a thin alias for the read-only/legacy call sites; every mutation path
+# uses `accounting.atomic()` + `accounting.append_ledger()` instead.
 def record_ledger(
     object_type: str,
     object_id: Optional[str],
     action: str,
     payload: Dict[str, Any],
 ) -> LedgerEntry:
-    """Append a tamper-evident ledger entry with a serialized SQLite write."""
-    conn = None
-    try:
-        # SQLite BEGIN IMMEDIATE serializes competing writers before the chain
-        # head is read, preventing two concurrent requests from sharing prev_hash.
-        conn = db.engine.connect()
-        conn.exec_driver_sql("BEGIN IMMEDIATE")
-
-        last = conn.execute(
-            text("SELECT id, hash FROM ledger_entries ORDER BY id DESC LIMIT 1")
-        ).first()
-        prev = last.hash if last else None
-
-        ts = datetime.utcnow().isoformat(timespec="microseconds")
-        payload_text = json.dumps(payload or {}, ensure_ascii=False, sort_keys=True)
-        digest = _compute_entry_hash(prev, payload_text, ts)
-
-        result = conn.execute(
-            text(
-                """
-                INSERT INTO ledger_entries
-                    (created_at, object_type, object_id, action, payload, prev_hash, hash)
-                VALUES
-                    (:created_at, :object_type, :object_id, :action, :payload, :prev_hash, :hash)
-                """
-            ),
-            {
-                "created_at": datetime.utcnow(),
-                "object_type": str(object_type or "unknown"),
-                "object_id": str(object_id) if object_id is not None else None,
-                "action": str(action or "unknown"),
-                "payload": payload_text,
-                "prev_hash": prev,
-                "hash": digest,
-            },
-        )
-        entry_id = result.lastrowid
-        conn.exec_driver_sql("COMMIT")
-
-        entry = db.session.get(LedgerEntry, entry_id)
-        if entry is None:
-            raise RuntimeError("رکورد ledger ایجاد شد اما قابل بازیابی نبود.")
-        return entry
-    except Exception:
-        if conn is not None:
-            try:
-                conn.exec_driver_sql("ROLLBACK")
-            except Exception:
-                pass
-        app.logger.exception("ledger record failed")
-        raise
-    finally:
-        if conn is not None:
-            conn.close()
+    """Append a ledger entry. Prefer utils.accounting.append_ledger directly."""
+    return accounting.append_ledger(object_type, object_id, action, payload)
 
 # ----------------- Config -----------------
 load_dotenv()
@@ -390,6 +334,14 @@ app.config["DATA_DIR"] = str(DB_DIR)
 app.config["DB_FILE"] = DB_PATH.name
 app.config["SQLALCHEMY_DATABASE_URI"] = DB_URI
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+# Accounting mutations serialize on SQLite's single writer lock (see the
+# LedgerChain row). A generous busy timeout turns a competing writer from an
+# immediate "database is locked" error into a short wait, which is what lets the
+# ledger chain lock work instead of failing the request.
+if DB_URI.startswith("sqlite"):
+    app.config["SQLALCHEMY_ENGINE_OPTIONS"] = {
+        "connect_args": {"timeout": 30},
+    }
 db.init_app(app)
 print(f"[DB] Using: {DB_PATH}")
 # Optionally start rates background updater on app startup if enabled via env
@@ -424,107 +376,8 @@ _handler.setFormatter(LocalTimeFormatter("%(asctime)s  %(levelname)s  %(message)
 app.logger.addHandler(_handler)
 
 # ----------------- Models -----------------
-class Account(db.Model):
-    __tablename__ = "accounts"
-    id        = db.Column(db.Integer, primary_key=True)
-    code      = db.Column(db.String(16), nullable=False, unique=True, index=True)
-    name      = db.Column(db.String(255), nullable=False)
-    level     = db.Column(db.Integer, nullable=False, default=1)  # 1:3رقمی, 2:6رقمی, 3:9رقمی
-    parent_id = db.Column(db.Integer, db.ForeignKey("accounts.id"), nullable=True)
-    locked    = db.Column(db.Boolean, nullable=False, default=False)
-    created_at= db.Column(db.DateTime, nullable=False, default=datetime.now)
-    updated_at= db.Column(db.DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
-
-    parent    = db.relationship("Account", remote_side=[id], lazy="joined")
-
-class Entity(db.Model):
-    __tablename__ = "entities"
-    id        = db.Column(db.Integer, primary_key=True)
-    type      = db.Column(db.String(16), nullable=False)     # person / item
-    code      = db.Column(db.String(16), nullable=False, index=True)
-    name      = db.Column(db.String(255), nullable=False, index=True)
-    unit      = db.Column(db.String(64), nullable=True)      # برای person: خانم/آقا/شرکت/...
-    serial_no = db.Column(db.String(255), nullable=True)
-    parent_id = db.Column(db.Integer, db.ForeignKey("entities.id"), nullable=True)
-    level     = db.Column(db.Integer, nullable=False, default=1)
-    created_at= db.Column(db.DateTime, nullable=False, default=datetime.now)
-    updated_at= db.Column(db.DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
-    stock_qty = db.Column(db.Float, nullable=False, default=0.0)   # فقط برای type=item معنی‌دار است
-    balance   = db.Column(db.Float, nullable=False, default=0.0)   # فقط برای type=person
-
-    parent    = db.relationship("Entity", remote_side=[id], lazy="joined")
-    __table_args__ = (UniqueConstraint("type","code", name="uq_entity_type_code"),)
-
-class Invoice(db.Model):
-    __tablename__ = "invoices"
-    id        = db.Column(db.Integer, primary_key=True)
-    number    = db.Column(db.String(32), nullable=False, unique=True)
-    date      = db.Column(db.Date, nullable=False)
-    person_id = db.Column(db.Integer, db.ForeignKey("entities.id"), nullable=False)  # فقط type=person
-    kind      = db.Column(db.String(16), nullable=False, default="sales")  # sales | purchase
-    discount  = db.Column(db.Float, nullable=False, default=0.0)
-    tax       = db.Column(db.Float, nullable=False, default=0.0)
-    total     = db.Column(db.Float, nullable=False, default=0.0)
-    created_at= db.Column(db.DateTime, nullable=False, default=datetime.now)
-
-    person    = db.relationship("Entity", lazy="joined")
-
-class InvoiceLine(db.Model):
-    __tablename__ = "invoice_lines"
-    id         = db.Column(db.Integer, primary_key=True)
-    invoice_id = db.Column(db.Integer, db.ForeignKey("invoices.id"), nullable=False)
-    item_id    = db.Column(db.Integer, db.ForeignKey("entities.id"), nullable=False)  # فقط type=item
-    qty        = db.Column(db.Float,  nullable=False, default=1.0)
-    unit_price = db.Column(db.Float,  nullable=False, default=0.0)
-    line_total = db.Column(db.Float,  nullable=False, default=0.0)
-
-    invoice    = db.relationship("Invoice", backref=db.backref("lines", lazy=True))
-    item       = db.relationship("Entity", lazy="joined")
-
-class PriceHistory(db.Model):
-    __tablename__ = "price_history"
-    id        = db.Column(db.Integer, primary_key=True)
-    person_id = db.Column(db.Integer, db.ForeignKey("entities.id"), nullable=False)
-    item_id   = db.Column(db.Integer, db.ForeignKey("entities.id"), nullable=False)
-    last_price= db.Column(db.Float, nullable=False, default=0.0)
-    updated_at= db.Column(db.DateTime, nullable=False, default=datetime.now, onupdate=datetime.now)
-    __table_args__ = (UniqueConstraint("person_id", "item_id", name="uq_price_person_item"),)
-
-class CashBox(db.Model):
-    __tablename__ = "cash_boxes"
-    id         = db.Column(db.Integer, primary_key=True)
-    name       = db.Column(db.String(128), nullable=False, unique=True)
-    kind       = db.Column(db.String(16), nullable=False, default="cash")  # cash | bank
-    bank_name  = db.Column(db.String(128), nullable=True)
-    account_no = db.Column(db.String(64), nullable=True)
-    iban       = db.Column(db.String(64), nullable=True)
-    description= db.Column(db.String(255), nullable=True)
-    is_active  = db.Column(db.Boolean, nullable=False, default=True)
-    created_at = db.Column(db.DateTime, nullable=False, default=datetime.now)
-
-
-class CashDoc(db.Model):
-    __tablename__ = "cash_docs"
-    id        = db.Column(db.Integer, primary_key=True)
-    doc_type  = db.Column(db.String(16), nullable=False)  # receive | payment
-    number    = db.Column(db.String(32), nullable=False, unique=True)
-    date      = db.Column(db.Date, nullable=False)
-    person_id = db.Column(db.Integer, db.ForeignKey("entities.id"), nullable=False)  # فقط type=person
-    amount    = db.Column(db.Float, nullable=False, default=0.0)
-    method    = db.Column(db.String(64), nullable=True)   # نقد، کارت، حواله...
-    note      = db.Column(db.String(255), nullable=True)
-    cashbox_id= db.Column(db.Integer, db.ForeignKey("cash_boxes.id"), nullable=True)
-    cheque_number = db.Column(db.String(32), nullable=True, index=True)
-    cheque_bank   = db.Column(db.String(128), nullable=True)
-    cheque_branch = db.Column(db.String(128), nullable=True)
-    cheque_account= db.Column(db.String(64), nullable=True)
-    cheque_owner  = db.Column(db.String(128), nullable=True)
-    cheque_due_date = db.Column(db.Date, nullable=True)
-    created_at= db.Column(db.DateTime, nullable=False, default=datetime.now)
-
-    person    = db.relationship("Entity", lazy="joined")
-    cashbox   = db.relationship("CashBox", lazy="joined")
-
+# Accounting models are imported from models.accounting_models (see the
+# import block at the top of this module). AuditEvent is app-local:
 class AuditEvent(db.Model):
     __tablename__ = "audit_events"
     id         = db.Column(db.Integer, primary_key=True)
@@ -853,6 +706,14 @@ def fa_digits_filter(val):
 @app.template_filter('jdate')
 def jdate_filter(val):
     return to_jdate_str(val)
+
+
+@app.template_filter('ternary')
+def ternary_filter(cond, when_true, when_false):
+    # reports.html picks the بستانکار/بدهکار wording off a sign test. The filter
+    # was used by the template but never registered, so the whole page raised and
+    # the view answered with its degraded fallback table instead.
+    return when_true if cond else when_false
 
 # === کمک‌ها ===
 def generate_invoice_number():
@@ -1655,7 +1516,14 @@ def _prepare_cash_plan(cash_data: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _apply_cash_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
-    """Apply a prepared cash plan: create CashDoc and update balances."""
+    """Assistant path for creating a receive/payment document.
+
+    This used to update the party's balance with a Python-level
+    read-modify-write plus a "best effort" fallback that silently *replaced*
+    the balance with +/- amount, discarding the party's entire history. It now
+    goes through utils.accounting.post_cashdoc, the same atomic SQL the web form
+    uses, so concurrent postings cannot lose each other.
+    """
     doc_type = (plan.get("doc_type") or "").strip().lower()
     if doc_type not in ("receive", "payment"):
         raise ValueError("نوع سند دریافت/پرداخت معتبر نیست.")
@@ -1664,17 +1532,16 @@ def _apply_cash_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
     if plan.get("person") and plan["person"].get("entity_id"):
         person_entity = Entity.query.get(int(plan["person"]["entity_id"]))
     if not person_entity:
-        # create or fetch by name/code
         pname = plan.get("person", {}).get("name") or ""
         pcode = plan.get("person", {}).get("code") or ""
         person_info = _resolve_entity("person", {"name": pname, "code": pcode})
         if person_info.get("entity"):
             person_entity = person_info["entity"]
         else:
-            # create person
-            person_entity = _ensure_entity("person", {"name": pname, "code": pcode or None})
+            person_entity = _ensure_entity(
+                "person", {"name": pname, "code": pcode or None}
+            )
 
-    # find matching cashbox by account_no, iban, or bank name
     cb = None
     acct = (plan.get("bank_account") or "")
     bname = (plan.get("bank_name") or "")
@@ -1683,22 +1550,19 @@ def _apply_cash_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
     if not cb and bname:
         cb = CashBox.query.filter(CashBox.bank_name == bname, CashBox.is_active == True).first()
 
-    # if method indicates cheque, set cheque fields
     cheque_number = plan.get("cheque_number")
-    cheque_due = None
     raw_cheque_due = (plan.get("cheque_due") or "").strip()
+    cheque_due = None
     if raw_cheque_due:
         cheque_due = parse_gregorian_date(raw_cheque_due, allow_none=True) or parse_jalali_date(raw_cheque_due, allow_none=True)
         if cheque_due is None:
             raise ValueError("تاریخ سررسید چک معتبر نیست.")
 
-    # generate number if missing
     number = plan.get("number") or None
     if not number:
         number = jalali_reference("RCV" if doc_type=="receive" else "PAY", datetime.utcnow())
 
     raw_date = (plan.get("date") or "").strip()
-    date_val = None
     if raw_date:
         date_val = parse_gregorian_date(raw_date, allow_none=True) or parse_jalali_date(raw_date, allow_none=True)
         if date_val is None:
@@ -1706,57 +1570,23 @@ def _apply_cash_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
     else:
         date_val = datetime.utcnow().date()
 
-    amount = float(plan.get("amount") or 0.0)
-
-    # validate amount must be positive
-    if amount <= 0:
-        raise ValueError("مبلغ باید بزرگ‌تر از صفر باشد.")
-
-    # create doc
-    doc = CashDoc(
-        doc_type=doc_type,
-        number=number,
-        date=date_val,
-        person_id=person_entity.id if person_entity else None,
-        amount=amount,
-        method=plan.get("method"),
-        note=None,
-        cashbox_id=cb.id if cb else None,
-        cheque_number=cheque_number or None,
-        cheque_due_date=cheque_due,
-    )
-    db.session.add(doc)
-
-    # update person's balance same as receive/payment handlers
     try:
-        if doc_type == "receive":
-            person_entity.balance = float(person_entity.balance or 0.0) - float(amount)
-        else:
-            person_entity.balance = float(person_entity.balance or 0.0) + float(amount)
+        doc = accounting.post_cashdoc(
+            doc_type=doc_type,
+            number=number,
+            doc_date=date_val,
+            person=person_entity,
+            amount=plan.get("amount"),
+            method=plan.get("method"),
+            note=plan.get("note"),
+            cashbox=cb,
+            cheque_number=cheque_number,
+            cheque_due_date=cheque_due,
+            ledger_payload={"source": "assistant"},
+        )
     except Exception:
-        # best-effort
-        if doc_type == "receive":
-            person_entity.balance = -float(amount)
-        else:
-            person_entity.balance = float(amount)
-
-    db.session.commit()
-    # record ledger entry for cash doc creation
-    try:
-        ledger_payload = {
-            "doc_id": doc.id,
-            "number": doc.number,
-            "doc_type": doc.doc_type,
-            "amount": float(doc.amount or 0.0),
-            "person_id": person_entity.id if person_entity else None,
-            "cashbox_id": cb.id if cb else None,
-        }
-        try:
-            record_ledger("cashdoc", doc.id, "create", ledger_payload)
-        except Exception:
-            app.logger.exception("failed to write cashdoc ledger entry")
-    except Exception:
-        app.logger.exception("failed to prepare cashdoc ledger payload")
+        db.session.rollback()
+        raise
 
     return {"doc": doc, "person": person_entity, "cashbox": cb}
 
@@ -1791,6 +1621,12 @@ def _ensure_entity(kind: str, data: Dict[str, Any]) -> Entity:
     return ent
 
 def _apply_invoice_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
+    """Assistant path for creating an invoice.
+
+    Resolves entities, then hands the actual posting to
+    utils.accounting.post_invoice -- the same function the web form uses, so the
+    two cannot drift apart in stock/balance/ledger semantics.
+    """
     kind = (plan.get("kind") or "").strip().lower()
     if kind not in ("sales", "purchase"):
         raise ValueError("نوع فاکتور معتبر نیست.")
@@ -1816,7 +1652,7 @@ def _apply_invoice_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
         inv_date = datetime.utcnow().date()
 
     allow_negative = _allow_negative_sales()
-    items_payload = []
+    rows = []
     created_items = []
     for row in plan.get("items") or []:
         qty = _to_float(row.get("qty"), 0.0)
@@ -1824,96 +1660,35 @@ def _apply_invoice_plan(plan: Dict[str, Any]) -> Dict[str, Any]:
             continue
         unit_price = _to_float(row.get("unit_price"), 0.0)
         if unit_price < 0:
-            raise ValueError(f"قیمت واحد کالای «{row.get('name') or 'نامشخص'}» نمی‌تواند منفی باشد.")
-        unit = (row.get("unit") or "عدد").strip() or "عدد"
+            raise ValueError(
+                f"قیمت واحد کالای «{row.get('name') or 'نامشخص'}» نمی‌تواند منفی باشد."
+            )
         item_entity = None
         if row.get("entity_id"):
             item_entity = Entity.query.get(int(row["entity_id"]))
         if not item_entity:
             item_entity = _ensure_entity("item", row)
             created_items.append(item_entity)
+        rows.append({"item": item_entity, "qty": qty, "unit_price": unit_price})
 
-        current_stock = float(item_entity.stock_qty or 0.0)
-        if kind == "sales" and not allow_negative and current_stock - qty < -1e-6:
-            raise ValueError(f"موجودی کالا «{item_entity.name}» کافی نیست.")
-
-        items_payload.append({
-            "entity": item_entity,
-            "qty": qty,
-            "unit_price": unit_price,
-            "unit": unit,
-        })
-
-    if not items_payload:
+    if not rows:
         raise ValueError("هیچ ردیف کالایی معتبر نیست.")
 
-    inv = Invoice(number=number, date=inv_date, person_id=partner_entity.id, kind=kind, discount=0.0, tax=0.0, total=0.0)
-    db.session.add(inv)
-    db.session.flush()
-
-    total = 0.0
-    for payload in items_payload:
-        item = payload["entity"]
-        qty = float(payload["qty"])
-        unit_price = float(payload["unit_price"])
-        line_total = qty * unit_price
-        total += line_total
-
-        db.session.add(
-            InvoiceLine(
-                invoice_id=inv.id,
-                item_id=item.id,
-                qty=qty,
-                unit_price=unit_price,
-                line_total=line_total,
-            )
-        )
-
-        if kind == "sales":
-            _adjust_item_stock_delta(item, -qty, allow_negative=allow_negative)
-            ph = PriceHistory.query.filter_by(person_id=partner_entity.id, item_id=item.id).first()
-            if not ph:
-                db.session.add(PriceHistory(person_id=partner_entity.id, item_id=item.id, last_price=unit_price))
-            else:
-                ph.last_price = unit_price
-        else:
-            _adjust_item_stock_delta(item, qty)
-
-    # total must be positive
-    if float(total) <= 0:
-        db.session.rollback()
-        raise ValueError("جمع کل فاکتور باید بزرگ‌تر از صفر باشد.")
-
-    inv.total = total
-
-    # Update the denormalized person balance atomically in the same transaction.
-    _adjust_person_balance_delta(
-        partner_entity,
-        float(total) if kind == "sales" else -float(total),
-    )
-
-    db.session.commit()
-
-    # record ledger entry for invoice creation (append-only)
+    # Any entities the assistant had to invent are part of the same unit of
+    # work: if the posting is rejected they must not survive either.
     try:
-        ledger_lines = [
-            {"item_id": int(p["entity"].id), "qty": float(p["qty"]), "unit_price": float(p["unit_price"]) }
-            for p in items_payload
-        ]
-        ledger_payload = {
-            "invoice_id": inv.id,
-            "number": inv.number,
-            "kind": inv.kind,
-            "total": float(inv.total or 0.0),
-            "partner_id": partner_entity.id if partner_entity else None,
-            "lines": ledger_lines,
-        }
-        try:
-            record_ledger("invoice", inv.id, "create", ledger_payload)
-        except Exception:
-            app.logger.exception("failed to write invoice ledger entry")
+        inv = accounting.post_invoice(
+            kind=kind,
+            number=number,
+            doc_date=inv_date,
+            person=partner_entity,
+            lines=rows,
+            allow_negative_sales=allow_negative,
+            ledger_payload={"source": "assistant"},
+        )
     except Exception:
-        app.logger.exception("failed to prepare invoice ledger payload")
+        db.session.rollback()
+        raise
 
     return {
         "invoice": inv,
@@ -2023,6 +1798,33 @@ def validate_entity_form(form, for_update_id=None):
     if not code.isdigit():
         errors.append("کد باید فقط عدد باشد.")
 
+    # A person and an item use the *same* row for two different meanings:
+    # `balance` is "what the party owes us", `stock_qty` is "units on hand".
+    # Re-typing an entity that already carries postings would reinterpret those
+    # numbers and make every later atomic update (which filters on
+    # `WHERE type = ...`) silently fail. Re-typing is therefore only allowed for
+    # rows that have never been posted to.
+    if for_update_id:
+        current = Entity.query.get(int(for_update_id))
+        if current is not None and current.type != e_type:
+            posted = bool(
+                Invoice.query.filter_by(person_id=current.id).first()
+                or InvoiceLine.query.filter_by(item_id=current.id).first()
+                or CashDoc.query.filter_by(person_id=current.id).first()
+                or PriceHistory.query.filter(
+                    (PriceHistory.person_id == current.id)
+                    | (PriceHistory.item_id == current.id)
+                ).first()
+            )
+            has_amount = bool(
+                abs(float(current.balance or 0.0)) > 1e-9
+                or abs(float(current.stock_qty or 0.0)) > 1e-9
+            )
+            if posted or has_amount:
+                errors.append(
+                    "تغییر نوع این ردیف مجاز نیست؛ این ردیف در اسناد حسابداری سابقه دارد."
+                )
+
     lvl = _level_by_code(code)
     if lvl == 0:
         errors.append("طول کد باید یکی از 3، 6 یا 9 رقم باشد.")
@@ -2070,33 +1872,48 @@ def index():
     today = now["datetime"].date()
     horizon = today + timedelta(days=3)
 
+    # Every aggregate below is void-aware: a cancelled document must vanish from
+    # the books, not merely be flagged. accounting.apply_void_filter is the one
+    # place that knows how "still effective" is defined.
     inv_stats = (
-        db.session.query(
-            func.count(Invoice.id),
-            func.coalesce(func.sum(Invoice.total), 0.0),
-        )
-        .filter(Invoice.date == today)
-        .first()
+        accounting.apply_void_filter(
+            db.session.query(
+                func.count(Invoice.id),
+                func.coalesce(func.sum(Invoice.total), 0.0),
+            ).filter(Invoice.date == today),
+            Invoice,
+        ).first()
     ) or (0, 0.0)
     today_invoice_count = int(inv_stats[0] or 0)
-    # split today's totals into sales vs purchases using number prefix heuristic
+    # split today's totals into sales vs purchases
     today_invoice_total = float(inv_stats[1] or 0.0)
     today_sales_total = float(
-        db.session.query(func.coalesce(func.sum(Invoice.total), 0.0))
-        .filter(Invoice.date == today, Invoice.kind == 'sales')
-        .scalar() or 0.0
+        accounting.apply_void_filter(
+            db.session.query(func.coalesce(func.sum(Invoice.total), 0.0)).filter(
+                Invoice.date == today, Invoice.kind == "sales"
+            ),
+            Invoice,
+        ).scalar()
+        or 0.0
     )
     today_purchase_total = float(
-        db.session.query(func.coalesce(func.sum(Invoice.total), 0.0))
-        .filter(Invoice.date == today, Invoice.kind == 'purchase')
-        .scalar() or 0.0
+        accounting.apply_void_filter(
+            db.session.query(func.coalesce(func.sum(Invoice.total), 0.0)).filter(
+                Invoice.date == today, Invoice.kind == "purchase"
+            ),
+            Invoice,
+        ).scalar()
+        or 0.0
     )
 
     def _sum_cash(doc_type, dt=today):
         return float(
-            db.session.query(func.coalesce(func.sum(CashDoc.amount), 0.0))
-            .filter(CashDoc.doc_type == doc_type, CashDoc.date == dt)
-            .scalar()
+            accounting.apply_void_filter(
+                db.session.query(func.coalesce(func.sum(CashDoc.amount), 0.0)).filter(
+                    CashDoc.doc_type == doc_type, CashDoc.date == dt
+                ),
+                CashDoc,
+            ).scalar()
             or 0.0
         )
 
@@ -2105,8 +1922,18 @@ def index():
 
     # Dashboard: show a single aggregated row for all active cashboxes (unified view)
     active_ids = [b.id for b in CashBox.query.filter_by(is_active=True).all()]
-    q_recv = db.session.query(func.coalesce(func.sum(CashDoc.amount), 0.0)).filter(CashDoc.doc_type == "receive")
-    q_pay  = db.session.query(func.coalesce(func.sum(CashDoc.amount), 0.0)).filter(CashDoc.doc_type == "payment")
+    q_recv = accounting.apply_void_filter(
+        db.session.query(func.coalesce(func.sum(CashDoc.amount), 0.0)).filter(
+            CashDoc.doc_type == "receive"
+        ),
+        CashDoc,
+    )
+    q_pay = accounting.apply_void_filter(
+        db.session.query(func.coalesce(func.sum(CashDoc.amount), 0.0)).filter(
+            CashDoc.doc_type == "payment"
+        ),
+        CashDoc,
+    )
     if active_ids:
         q_recv = q_recv.filter(CashDoc.cashbox_id.in_(active_ids))
         q_pay  = q_pay.filter(CashDoc.cashbox_id.in_(active_ids))
@@ -2124,7 +1951,8 @@ def index():
 
     due_date_expr = func.coalesce(CashDoc.cheque_due_date, CashDoc.date)
     upcoming_receive_cheques = (
-        CashDoc.query.filter(
+        accounting.active_cashdocs()
+        .filter(
             CashDoc.doc_type == "receive",
             func.lower(func.coalesce(CashDoc.method, "")) == "cheque",
             due_date_expr >= today,
@@ -2135,7 +1963,8 @@ def index():
     )
 
     upcoming_payment_cheques = (
-        CashDoc.query.filter(
+        accounting.active_cashdocs()
+        .filter(
             CashDoc.doc_type == "payment",
             func.lower(func.coalesce(CashDoc.method, "")) == "cheque",
             due_date_expr >= today,
@@ -2160,11 +1989,12 @@ def index():
     chart_labels = [to_jdate_str(d) for d in chart_days]
 
     # build per-day sales and purchase totals and invoice counts
-    inv_rows = (
-        db.session.query(Invoice.date, Invoice.kind, func.coalesce(Invoice.total, 0.0))
-        .filter(Invoice.date >= chart_days[0], Invoice.date <= today)
-        .all()
-    )
+    inv_rows = accounting.apply_void_filter(
+        db.session.query(
+            Invoice.date, Invoice.kind, func.coalesce(Invoice.total, 0.0)
+        ).filter(Invoice.date >= chart_days[0], Invoice.date <= today),
+        Invoice,
+    ).all()
     sales_total_map = {}
     purchase_total_map = {}
     sales_count_map = {}
@@ -2179,7 +2009,7 @@ def index():
         else:
             purchase_total_map[dt] = float(purchase_total_map.get(dt, 0.0) + total_val)
 
-    cash_rows = (
+    cash_rows = accounting.apply_void_filter(
         db.session.query(
             CashDoc.date,
             CashDoc.doc_type,
@@ -2187,9 +2017,9 @@ def index():
         )
         .filter(CashDoc.date >= chart_days[0], CashDoc.date <= today)
         .group_by(CashDoc.date, CashDoc.doc_type)
-        .order_by(CashDoc.date)
-        .all()
-    )
+        .order_by(CashDoc.date),
+        CashDoc,
+    ).all()
     receive_map = {}
     payment_map = {}
     for dt, doc_type, total in cash_rows:
@@ -2470,8 +2300,15 @@ def _run_script_lines(lines:list[str]):
                 if not ent:
                     msgs.append("یافت نشد.")
                 else:
-                    ent.name = new_name
-                    db.session.commit()
+                    with accounting.atomic():
+                        ent.name = new_name
+                        db.session.flush()
+                        record_ledger(
+                            "entity",
+                            ent.id,
+                            "update",
+                            {"type": ent.type, "code": ent.code, "name": ent.name},
+                        )
                     msgs.append("نام تغییر کرد.")
 
             elif cmd == "DELETE":
@@ -2488,21 +2325,15 @@ def _run_script_lines(lines:list[str]):
                             + "، ".join(references)
                         )
                     else:
-                        db.session.delete(ent)
-                        db.session.commit()
-                        try:
-                            record_ledger(
-                                "entity",
-                                ent.id,
-                                "delete",
-                                {
-                                    "type": ent.type,
-                                    "code": ent.code,
-                                    "name": ent.name,
-                                },
-                            )
-                        except Exception:
-                            app.logger.exception("failed to write developer entity delete ledger entry")
+                        with accounting.atomic():
+                            payload = {
+                                "type": ent.type,
+                                "code": ent.code,
+                                "name": ent.name,
+                            }
+                            db.session.delete(ent)
+                            db.session.flush()
+                            record_ledger("entity", ent.id, "delete", payload)
                         msgs.append("حذف شد.")
 
             elif cmd == "SEED_ITEMS":
@@ -2673,53 +2504,37 @@ def unified_invoice():
         if Invoice.query.filter_by(number=number).first():
             number = generate_invoice_number()
 
-        inv = Invoice(
-            number=number,
-            date=inv_date,
-            person_id=person.id,
-            kind=form_kind,
-            discount=discount,
-            tax=tax,
-            total=total,
-        )
-        db.session.add(inv)
-        db.session.flush()
-
-        for r in rows:
-            item = r["item"]
-            qty  = float(r["qty"])
-            up   = float(r["unit_price"])
-            line_total = qty * up
-
-            db.session.add(InvoiceLine(
-                invoice_id=inv.id,
-                item_id=item.id,
-                qty=qty,
-                unit_price=up,
-                line_total=line_total
-            ))
-
-            # Update stock atomically: sales decreases, purchase increases.
-            _adjust_item_stock_delta(
-                item,
-                -qty if form_kind == "sales" else qty,
-                allow_negative=(allow_negative or form_kind == "purchase"),
+        # Posting is delegated to utils.accounting.post_invoice so the UI and
+        # the assistant share one implementation of the sign conventions, the
+        # atomic stock/balance updates and the transactional ledger entry.
+        try:
+            inv = accounting.post_invoice(
+                kind=form_kind,
+                number=number,
+                doc_date=inv_date,
+                person=person,
+                lines=rows,
+                discount=discount,
+                tax=tax,
+                allow_negative_sales=allow_negative,
+                ledger_payload={"source": "web"},
             )
+        except AccountingError as exc:
+            # AccountingError already implies the transaction was rolled back.
+            current_app.logger.info(
+                "invoice posting rejected kind=%s person=%s: %s",
+                form_kind,
+                person.id,
+                exc,
+            )
+            flash(str(exc), "danger")
+            return redirect(URL_PREFIX + f"/invoice?kind={form_kind}")
+        except Exception as exc:
+            current_app.logger.exception("invoice posting failed")
+            flash(f"خطا در ثبت فاکتور: {exc}", "danger")
+            return redirect(URL_PREFIX + f"/invoice?kind={form_kind}")
 
-            ph = PriceHistory.query.filter_by(person_id=person.id, item_id=item.id).first()
-            if not ph:
-                ph = PriceHistory(person_id=person.id, item_id=item.id, last_price=up)
-                db.session.add(ph)
-            else:
-                ph.last_price = up
-
-        # Update person balance atomically inside the same transaction.
-        _adjust_person_balance_delta(
-            person,
-            float(total) if form_kind == "sales" else -float(total),
-        )
-
-        db.session.commit()
+        total = float(inv.total or 0.0)
 
         action_label = "فروش" if form_kind == "sales" else "خرید"
         flash(
@@ -2742,71 +2557,25 @@ def unified_invoice():
         invoice_kind=kind,
     )
 
+
+# --- Accounting primitives ---------------------------------------------------
+# These are deliberately thin delegations. utils/accounting.py is the single
+# owner of the sign conventions and of the atomic SQL used to move stock and
+# balances; nothing in this file may re-implement them, otherwise two code paths
+# could reverse the same document with different semantics.
 def _adjust_item_stock_delta(item, delta: float, allow_negative: bool = False) -> None:
     """Atomically change item stock inside the current transaction."""
-    delta = float(delta or 0.0)
-    if abs(delta) < 1e-12:
-        return
-    item_id = getattr(item, "id", None)
-    if item_id is None:
-        item.stock_qty = float(item.stock_qty or 0.0) + delta
-        return
-
-    if delta < 0 and not allow_negative:
-        result = db.session.execute(
-            text(
-                "UPDATE entities "
-                "SET stock_qty = COALESCE(stock_qty, 0) + :delta "
-                "WHERE id = :id AND type = 'item' "
-                "AND COALESCE(stock_qty, 0) + :delta >= 0"
-            ),
-            {"delta": delta, "id": int(item_id)},
-        )
-    else:
-        result = db.session.execute(
-            text(
-                "UPDATE entities "
-                "SET stock_qty = COALESCE(stock_qty, 0) + :delta "
-                "WHERE id = :id AND type = 'item'"
-            ),
-            {"delta": delta, "id": int(item_id)},
-        )
-
-    if result.rowcount != 1:
-        raise ValueError("موجودی کالای «{}» کافی نیست.".format(getattr(item, "name", "نامشخص")))
-    db.session.refresh(item, attribute_names=["stock_qty"])
+    accounting.adjust_item_stock_delta(item, delta, allow_negative=allow_negative)
 
 
 def _adjust_person_balance_delta(person, delta: float) -> None:
     """Atomically update a person's denormalized balance inside the current transaction."""
-    delta = float(delta or 0.0)
-    if abs(delta) < 1e-12:
-        return
-    person_id = getattr(person, "id", None)
-    if person_id is None:
-        person.balance = float(person.balance or 0.0) + delta
-        return
-
-    result = db.session.execute(
-        text(
-            "UPDATE entities "
-            "SET balance = COALESCE(balance, 0) + :delta "
-            "WHERE id = :id AND type = 'person'"
-        ),
-        {"delta": delta, "id": int(person_id)},
-    )
-    if result.rowcount != 1:
-        raise ValueError("طرف حساب برای به‌روزرسانی مانده پیدا نشد.")
-    db.session.refresh(person, attribute_names=["balance"])
+    accounting.adjust_person_balance_delta(person, delta)
 
 
 def _adjust_cash_person_balance(doc_type: str, person, old_amount: float, new_amount: float) -> None:
     """Adjust a denormalized person balance by the change in a cash document."""
-    delta = float(new_amount or 0.0) - float(old_amount or 0.0)
-    if (doc_type or "").strip().lower() == "receive":
-        _adjust_person_balance_delta(person, -delta)
-    else:
-        _adjust_person_balance_delta(person, delta)
+    accounting.adjust_cash_person_balance(doc_type, person, old_amount, new_amount)
 
 
 # ----------------- Entities CRUD -----------------
@@ -2907,11 +2676,28 @@ def entities_new():
             parent_id=(data["parent"].id if data["parent"] else None),
             level=data["level"]
         )
-        db.session.add(ent); db.session.commit()
+        # Row and audit entry share one transaction: a committed entity must
+        # never be missing from the ledger, and the ledger must never claim an
+        # entity that was rolled back.
         try:
-            record_ledger("entity", ent.id, "create", {"type": ent.type, "code": ent.code, "name": ent.name, "unit": ent.unit, "level": ent.level})
+            with accounting.atomic():
+                db.session.add(ent)
+                db.session.flush()
+                record_ledger(
+                    "entity",
+                    ent.id,
+                    "create",
+                    {
+                        "type": ent.type,
+                        "code": ent.code,
+                        "name": ent.name,
+                        "unit": ent.unit,
+                        "level": ent.level,
+                    },
+                )
         except Exception:
-            pass
+            flash("ثبت نشد.", "danger")
+            return redirect(URL_PREFIX + "/entities/new")
         flash("ثبت شد.", "success")
         return redirect(URL_PREFIX + f"/entities?kind={ent.type}")
 
@@ -2939,15 +2725,36 @@ def entities_edit(eid):
         if errors:
             for e in errors: flash(e, "danger")
             return redirect(URL_PREFIX + f"/entities/{eid}/edit")
-        ent.type = data["e_type"]; ent.code = data["code"]; ent.name = data["name"]
-        ent.unit = data["unit"];   ent.serial_no = data["serial"] or data["code"]
-        ent.parent_id = data["parent"].id if data["parent"] else None
-        ent.level = data["level"]
-        db.session.commit()
         try:
-            record_ledger("entity", ent.id, "update", {"type": ent.type, "code": ent.code, "name": ent.name, "unit": ent.unit, "level": ent.level})
+            # The field assignment and the audit entry share one transaction: a
+            # committed change must never be missing from the ledger, and the
+            # ledger must never claim a change that was rolled back.
+            with accounting.atomic():
+                ent.type = data["e_type"]
+                ent.code = data["code"]
+                ent.name = data["name"]
+                ent.unit = data["unit"]
+                ent.serial_no = data["serial"] or data["code"]
+                ent.parent_id = data["parent"].id if data["parent"] else None
+                ent.level = data["level"]
+                db.session.flush()
+                record_ledger(
+                    "entity",
+                    ent.id,
+                    "update",
+                    {
+                        "type": ent.type,
+                        "code": ent.code,
+                        "name": ent.name,
+                        "unit": ent.unit,
+                        "level": ent.level,
+                    },
+                )
         except Exception:
-            pass
+            db.session.rollback()
+            current_app.logger.exception("entity update failed")
+            flash("ویرایش ثبت نشد.", "danger")
+            return redirect(URL_PREFIX + f"/entities/{eid}/edit")
         flash("ویرایش شد.", "success")
         return redirect(URL_PREFIX + f"/entities?kind={ent.type}")
 
@@ -2991,12 +2798,10 @@ def entities_delete(eid):
         return redirect(URL_PREFIX + f"/entities?kind={t}")
 
     payload = {"id": ent.id, "type": ent.type, "code": ent.code, "name": ent.name}
-    db.session.delete(ent)
-    db.session.commit()
-    try:
+    with accounting.atomic():
+        db.session.delete(ent)
+        db.session.flush()
         record_ledger("entity", eid, "delete", payload)
-    except Exception:
-        pass
     flash("حذف شد.", "success")
     return redirect(URL_PREFIX + f"/entities?kind={t}")
 
@@ -3125,7 +2930,10 @@ def reports():
 
     # Invoices (sales/purchase)
     if typ in ("all", "invoice", "sales", "purchase"):
-        inv_q = db.session.query(Invoice).join(Entity, Invoice.person_id == Entity.id)
+        inv_q = accounting.apply_void_filter(
+            db.session.query(Invoice).join(Entity, Invoice.person_id == Entity.id),
+            Invoice,
+        )
         if q:
             q_filters = [
                 Invoice.number.ilike(f"%{q}%"),
@@ -3167,7 +2975,10 @@ def reports():
 
     # Cash documents
     if typ in ("all", "receive", "payment", "cheque"):
-        cd_q = db.session.query(CashDoc).join(Entity, CashDoc.person_id == Entity.id)
+        cd_q = accounting.apply_void_filter(
+            db.session.query(CashDoc).join(Entity, CashDoc.person_id == Entity.id),
+            CashDoc,
+        )
         if typ in ("receive", "payment"):
             cd_q = cd_q.filter(CashDoc.doc_type == typ)
         if typ == "cheque":
@@ -3245,15 +3056,16 @@ def reports():
             cashboxes=cashboxes,
         )
     except Exception:
+        app.logger.exception("reports: degraded fallback table rendered")
         html = [
             "<h2>گزارشات</h2>",
             "<form method='get' action='' style='display:flex;gap:8px;flex-wrap:wrap;margin:10px 0'>",
             f"<input class='inp' name='q' value='{escape(q)}' placeholder='شماره/نام/کد' style='max-width:240px'>",
             "<select class='inp' name='type' style='max-width:160px'>",
-            f"<option value='all' {'selected' if typ=='all' else ''}>همه</option>",
-            f"<option value='invoice' {'selected' if typ=='invoice' else ''}>فاکتور فروش</option>",
-            f"<option value='receive' {'selected' if typ=='receive' else ''}>دریافت</option>",
-            f"<option value='payment' {'selected' if typ=='payment' else ''}>پرداخت</option>",
+            f"<option value='all' {'selected' if typ == 'all' else ''}>همه</option>",
+            f"<option value='invoice' {'selected' if typ == 'invoice' else ''}>فاکتور فروش</option>",
+            f"<option value='receive' {'selected' if typ == 'receive' else ''}>دریافت</option>",
+            f"<option value='payment' {'selected' if typ == 'payment' else ''}>پرداخت</option>",
             "</select>",
             f"<input class='inp' type='date' name='from' value='{escape(dfrom or '')}' style='max-width:160px'>",
             f"<input class='inp' type='date' name='to'   value='{escape(dto or '')}'   style='max-width:160px'>",
@@ -3291,6 +3103,88 @@ def reports():
         html.append("</tbody></table></div>")
         return render_template("page.html", title="گزارشات", content=Markup("".join(html)), prefix=URL_PREFIX)
 
+# ====== Invoice lifecycle helpers ======
+def _current_username() -> str:
+    """Best-effort actor name for the audit trail; never raises."""
+    try:
+        if current_user.is_authenticated:
+            return str(getattr(current_user, "username", "") or "unknown")
+    except Exception:
+        pass
+    return "system"
+
+
+def _lifecycle_reason(action: str) -> str:
+    """Build a bounded, human-readable reason string for cancel/delete.
+
+    The value is user supplied, so it is length-capped here before it can ever
+    reach the database or be echoed back into a page.
+    """
+    action = (action or "").strip().lower()
+    if action not in ("cancel", "delete"):
+        raise DocumentValidationError("عملیات نامعتبر است.")
+    raw = (request.form.get("reason") or "").strip()
+    reason = f"{action}: {raw}" if raw else action
+    return reason[:255]
+
+
+def _invoice_permission_for_kind(kind: Optional[str]) -> str:
+    normalized = (kind or "sales").strip().lower()
+    return "purchase" if normalized == "purchase" else "sales"
+
+
+def _load_form_person(form) -> Optional[Entity]:
+    """Resolve the counterparty from a submitted form.
+
+    ``person_token``/``person_code`` are attacker-controlled, so the entity type
+    is always re-checked: a hidden field must not be able to post a document
+    against an item or a parent node.
+    """
+    pid = (form.get("person_token") or "").strip()
+    if pid.isdigit():
+        person = Entity.query.get(int(pid))
+        if person is not None and person.type == "person":
+            return person
+    pcode = (form.get("person_code") or "").strip()
+    if pcode:
+        person = Entity.query.filter_by(type="person", code=pcode).first()
+        if person is not None and person.type == "person":
+            return person
+    return None
+
+
+def _load_form_lines(form, max_rows: int = 15) -> List[Dict[str, Any]]:
+    """Parse invoice line items from a submitted form.
+
+    Rows that do not resolve to a real item, or carry a non-positive quantity or
+    a negative price, are dropped. The authoritative stock/balance arithmetic
+    happens later in utils.accounting, so this function only normalises input.
+    """
+    item_ids = form.getlist("item_id[]")
+    item_codes = form.getlist("item_code[]")
+    unit_prices = form.getlist("unit_price[]")
+    qtys = form.getlist("qty[]")
+
+    rows: List[Dict[str, Any]] = []
+    for i in range(min(len(item_ids), len(unit_prices), len(qtys))):
+        iid = (item_ids[i] or "").strip()
+        icode = (item_codes[i] or "").strip()
+        unit_price = _to_float(unit_prices[i], 0.0)
+        qty = _to_float(qtys[i], 0.0)
+
+        item = None
+        if iid.isdigit():
+            item = Entity.query.get(int(iid))
+        if (not item) and icode:
+            item = Entity.query.filter_by(type="item", code=icode).first()
+
+        if item is not None and item.type == "item" and qty > 0 and unit_price >= 0:
+            rows.append({"item": item, "unit_price": unit_price, "qty": qty})
+        if len(rows) >= max_rows:
+            break
+    return rows
+
+
 # ====== Minimal viewers ======
 @app.route(URL_PREFIX + "/invoice/<int:inv_id>")
 @login_required
@@ -3308,7 +3202,158 @@ def invoice_view(inv_id):
         inv=inv,
         lines=lines,
         prefix=URL_PREFIX,
+        lifecycle=accounting.lifecycle_html(inv),
     )
+
+
+# ===================== چرخه عمر فاکتور: ویرایش، ابطال، حذف =====================
+@app.route(URL_PREFIX + "/invoice/<int:inv_id>/edit", methods=["GET", "POST"])
+@login_required
+def invoice_edit(inv_id):
+    """Re-price an invoice as the net difference of its stock/balance effects."""
+    inv = Invoice.query.get_or_404(inv_id)
+    # Authorize against the document's own kind, not a submitted field: a
+    # hidden input must never be able to turn a purchase into a sale (or the
+    # reverse) to slip past the permission check.
+    ensure_permission(_invoice_permission_for_kind(inv.kind))
+    admin_required()
+
+    if accounting.is_void(inv):
+        flash("فاکتور ابطال‌شده قابل ویرایش نیست.", "warning")
+        return redirect(URL_PREFIX + f"/invoice/{inv.id}")
+
+    if request.method == "POST":
+        person = _load_form_person(request.form)
+        if person is None:
+            flash("لطفاً طرف حساب معتبر انتخاب کنید.", "danger")
+            return redirect(URL_PREFIX + f"/invoice/{inv.id}/edit")
+
+        doc_date = parse_gregorian_date(
+            request.form.get("inv_date_greg"), allow_none=True
+        )
+        rows = _load_form_lines(request.form)
+        if not rows:
+            flash("لطفاً حداقل یک ردیف کالای معتبر با تعداد وارد کنید.", "danger")
+            return redirect(URL_PREFIX + f"/invoice/{inv.id}/edit")
+
+        try:
+            accounting.reprice_invoice(
+                inv,
+                lines=rows,
+                person=person,
+                doc_date=doc_date,
+                allow_negative_sales=_allow_negative_sales(),
+                ledger_payload={"source": "web", "actor": _current_username()},
+            )
+        except DocumentStateError as ex:
+            flash(str(ex), "warning")
+        except AccountingError as ex:
+            flash(str(ex), "danger")
+        except Exception as ex:
+            db.session.rollback()
+            current_app.logger.exception("invoice edit failed")
+            flash(f"خطا در ویرایش فاکتور: {ex}", "danger")
+        else:
+            flash("ویرایش فاکتور ثبت شد.", "success")
+        return redirect(URL_PREFIX + f"/invoice/{inv.id}")
+
+    lines = InvoiceLine.query.filter_by(invoice_id=inv.id).all()
+    edit_html = f"""
+    <form method="post">
+      <div class="card" style="padding:10px">
+        <label class="lbl">شماره</label>
+        <input class="inp" value="{escape(inv.number)}" disabled>
+        <label class="lbl" style="margin-top:8px">تاریخ (میلادی)</label>
+        <input class="inp" type="date" name="inv_date_greg" value="{
+        escape(inv.date.isoformat() if inv.date else "")
+    }">
+        <label class="lbl" style="margin-top:8px">طرف حساب</label>
+        <input class="inp" name="person_code" value="{
+        escape((inv.person.code if inv.person else "") or "")
+    }">
+        <input type="hidden" name="person_token" value="{int(inv.person_id)}">
+        <label class="lbl" style="margin-top:8px">نوع فاکتور</label>
+        <input class="inp" value="{
+        escape("فروش" if inv.kind == "sales" else "خرید")
+    }" disabled>
+        <label class="lbl" style="margin-top:8px">ردیف‌ها</label>
+        <div id="edit-lines">
+          {
+        "".join(
+            f'<div class="row">'
+            f'<input type="hidden" name="item_id[]" value="{int(ln.item_id)}">'
+            f'<input type="hidden" name="item_code[]" value="{escape(ln.item.code if ln.item else "")}">'
+            f'<input class="inp" name="qty[]" value="{escape(str(ln.qty))}" style="width:90px">'
+            f'<input class="inp" name="unit_price[]" value="{escape(str(ln.unit_price))}" style="width:120px">'
+            f"</div>"
+            for ln in lines
+        )
+    }
+        </div>
+        <div style="margin-top:10px"><button class="btn">ذخیره</button></div>
+      </div>
+    </form>
+    """
+    return render_template(
+        "page.html",
+        title="ویرایش فاکتور",
+        content=Markup(edit_html),
+        prefix=URL_PREFIX,
+    )
+
+
+@app.route(URL_PREFIX + "/invoice/<int:inv_id>/cancel", methods=["POST"])
+@login_required
+def invoice_cancel(inv_id):
+    """Logical cancel: keep the document for audit, reverse its effects."""
+    inv = Invoice.query.get_or_404(inv_id)
+    ensure_permission(_invoice_permission_for_kind(inv.kind))
+    admin_required()
+    try:
+        accounting.void_invoice(
+            inv,
+            reason=_lifecycle_reason("cancel"),
+            ledger_payload={"source": "web", "actor": _current_username()},
+        )
+        flash(
+            f"فاکتور «{escape(inv.number)}» ابطال شد؛ موجودی و مانده طرف حساب بازگشت.",
+            "success",
+        )
+    except DocumentStateError as ex:
+        flash(str(ex), "warning")
+    except Exception as ex:
+        db.session.rollback()
+        current_app.logger.exception("invoice cancel failed")
+        flash(f"خطا در ابطال فاکتور: {ex}", "danger")
+    return redirect(URL_PREFIX + f"/invoice/{inv.id}")
+
+
+@app.route(URL_PREFIX + "/invoice/<int:inv_id>/delete", methods=["POST"])
+@login_required
+def invoice_delete(inv_id):
+    """Hard delete: reverse the effects, then purge the invoice and its lines."""
+    inv = Invoice.query.get_or_404(inv_id)
+    ensure_permission(_invoice_permission_for_kind(inv.kind))
+    admin_required()
+    number = inv.number
+    try:
+        accounting.delete_invoice(
+            inv,
+            reason=_lifecycle_reason("delete"),
+            ledger_payload={"source": "web", "actor": _current_username()},
+        )
+        flash(
+            f"فاکتور «{escape(number)}» حذف شد؛ موجودی و مانده طرف حساب بازگشت.",
+            "success",
+        )
+    except DocumentStateError as ex:
+        flash(str(ex), "warning")
+    except Exception as ex:
+        db.session.rollback()
+        current_app.logger.exception("invoice delete failed")
+        flash(f"خطا در حذف فاکتور: {ex}", "danger")
+    return redirect(URL_PREFIX + "/reports?type=all")
+
 
 @app.route(URL_PREFIX + "/cash/<int:doc_id>")
 @login_required
@@ -3327,6 +3372,7 @@ def cash_view(doc_id):
         kind=kind,
         method_label=method_label,
         prefix=URL_PREFIX,
+        lifecycle=accounting.lifecycle_html(doc),
     )
 
 # ===================== دریافت وجه =====================
@@ -3374,7 +3420,9 @@ def unified_cash():
             expected_invoice_kind = "sales" if kind == "receive" else "purchase"
             # An invoice-derived prefill is itself a visibility surface: require
             # access to the referenced invoice kind and never prefill a mismatched kind.
-            if inv and inv.kind == expected_invoice_kind and (
+            # A cancelled invoice no longer represents a receivable/payable, so
+            # it must not pre-fill a new cash document either.
+            if inv and inv.kind == expected_invoice_kind and not accounting.is_void(inv) and (
                 has_permission("reports") or has_permission(expected_invoice_kind)
             ):
                 prefill_amount = float(inv.total or 0.0)
@@ -3423,10 +3471,11 @@ def unified_cash():
         if amount <= 0:
             flash("مبلغ باید بزرگ‌تر از صفر باشد.", "danger")
             return redirect(URL_PREFIX + f"/cash_doc?kind={form_kind}")
-        
-        method = (request.form.get("method") or "").strip().lower()
-        if method not in ("pos", "cash", "bank", "cheque"):
-            method = "cash"
+
+        # Method / cheque / cashbox normalisation is owned by the accounting
+        # core so the assistant cannot post a cheque without a bank cashbox while
+        # the web form can (or vice versa).
+        method = accounting.normalize_cash_method(request.form.get("method"))
         note = (request.form.get("note") or "").strip() or None
 
         cashbox = None
@@ -3436,11 +3485,6 @@ def unified_cash():
             if cashbox and not cashbox.is_active:
                 cashbox = None
 
-        cheque_number = "".join(ch for ch in (request.form.get("cheque_number") or "") if ch.isdigit())
-        cheque_bank = (request.form.get("cheque_bank") or "").strip() or None
-        cheque_branch = (request.form.get("cheque_branch") or "").strip() or None
-        cheque_account = (request.form.get("cheque_account") or "").strip() or None
-        cheque_owner = (request.form.get("cheque_owner") or "").strip() or None
         cheque_due_date = parse_gregorian_date(
             request.form.get("cheque_due_date"), allow_none=True
         )
@@ -3448,83 +3492,50 @@ def unified_cash():
             cheque_due_date = parse_jalali_date(
                 request.form.get("cheque_due_date_fa"), allow_none=True
             )
+        cheque = accounting.normalize_cheque_fields(
+            method,
+            cheque_number=request.form.get("cheque_number"),
+            cheque_bank=request.form.get("cheque_bank"),
+            cheque_branch=request.form.get("cheque_branch"),
+            cheque_account=request.form.get("cheque_account"),
+            cheque_owner=request.form.get("cheque_owner"),
+            cheque_due_date=cheque_due_date,
+        )
 
-        # فقط برای چک نیاز به صندوق داریم
         if method == "cheque":
             if not cashbox or cashbox.kind != "bank":
                 flash("برای ثبت چک، یک حساب بانکی فعال انتخاب کنید.", "danger")
                 return redirect(URL_PREFIX + f"/cash_doc?kind={form_kind}")
+            cheque_number = cheque.get("cheque_number") or ""
             if len(cheque_number) != 16:
                 flash("شماره صیادی چک باید ۱۶ رقم باشد.", "danger")
                 return redirect(URL_PREFIX + f"/cash_doc?kind={form_kind}")
-        elif method in ("cash", "bank"):
-            # اگر صندوق انتخاب شده، نوعش را بررسی کن
-            if cashbox:
-                required_kind = "cash" if method == "cash" else "bank"
-                if cashbox.kind != required_kind:
-                    flash("نوع صندوق با روش پرداخت مطابقت ندارد.", "warning")
-        else:
-            # برای POS و سایر روش‌ها چک را پاک کن
-            cheque_number = None
-            cheque_bank = None
-            cheque_branch = None
-            cheque_account = None
-            cheque_owner = None
-            cheque_due_date = None
+        elif method in ("cash", "bank") and cashbox:
+            required_kind = "cash" if method == "cash" else "bank"
+            if cashbox.kind != required_kind:
+                flash("نوع صندوق با روش پرداخت مطابقت ندارد.", "warning")
 
-        # اگر چک نیست، مقادیر چک را null کن
-        if method != "cheque":
-            cheque_number = None
-            cheque_bank = None
-            cheque_branch = None
-            cheque_account = None
-            cheque_owner = None
-            cheque_due_date = None
-
-        doc = CashDoc(
-            doc_type=form_kind,
-            number=number,
-            date=doc_date,
-            person_id=person.id,
-            amount=amount,
-            method=method,
-            note=note,
-            cashbox_id=cashbox.id if cashbox else None,
-            cheque_number=cheque_number or None,
-            cheque_bank=cheque_bank,
-            cheque_branch=cheque_branch,
-            cheque_account=cheque_account,
-            cheque_owner=cheque_owner,
-            cheque_due_date=cheque_due_date,
-        )
-        db.session.add(doc)
-
-        # ثبت سند و تغییر مانده باید اتمیک باشند.
         try:
-            _adjust_cash_person_balance(form_kind, person, 0.0, amount)
-            db.session.commit()
+            doc = accounting.post_cashdoc(
+                doc_type=form_kind,
+                number=number,
+                doc_date=doc_date,
+                person=person,
+                amount=amount,
+                method=method,
+                note=note,
+                cashbox=cashbox,
+                ledger_payload={"source": "web"},
+                **cheque,
+            )
+        except AccountingError as exc:
+            current_app.logger.info("cash document rejected: %s", exc)
+            flash(str(exc), "danger")
+            return redirect(URL_PREFIX + f"/cash_doc?kind={form_kind}")
         except Exception as exc:
-            db.session.rollback()
             current_app.logger.exception("cash document posting failed")
             flash(f"خطا در ثبت سند: {exc}", "danger")
             return redirect(URL_PREFIX + f"/cash_doc?kind={form_kind}")
-
-        try:
-            record_ledger(
-                "cashdoc",
-                doc.id,
-                "create",
-                {
-                    "doc_type": form_kind,
-                    "number": number,
-                    "amount": float(amount),
-                    "person_id": person.id,
-                    "cashbox_id": cashbox.id if cashbox else None,
-                    "method": method,
-                },
-            )
-        except Exception:
-            current_app.logger.exception("failed to write unified cashdoc ledger entry")
 
         action_label = "دریافت" if form_kind == "receive" else "پرداخت"
         flash(
@@ -3555,56 +3566,103 @@ def receive_old():
     ensure_permission("receive")
     return redirect(URL_PREFIX + "/receive")
 # ===================== ویرایش سند نقدی =====================
-@app.route(URL_PREFIX + "/cash/<int:doc_id>/edit", methods=["GET","POST"])
+# ===================== ویرایش سند نقدی =====================
+# The payment method, counterparty, date and cashbox of a posted cash document
+# are deliberately NOT editable: each of those changes what the document means
+# for the books. Changing one means voiding the document and posting a new one,
+# which keeps reversal semantics unambiguous.
+@app.route(URL_PREFIX + "/cash/<int:doc_id>/edit", methods=["GET", "POST"])
 @login_required
 def cash_edit(doc_id):
     admin_required()
     doc = CashDoc.query.get_or_404(doc_id)
+    # Defence in depth: the document's own kind must be permitted too, so a
+    # future change to admin_required() can never open up payment editing to a
+    # user who lacks the payment permission.
+    ensure_permission(doc.doc_type)
+
     if request.method == "POST":
+        current_method = (doc.method or "").strip().lower()
+        m = (request.form.get("method") or "").strip().lower()
+        # Validate the immutability guard BEFORE any accounting mutation, so a
+        # rejected edit cannot leave a partially applied balance behind.
+        if m and m != current_method:
+            flash(
+                "روش سند هنگام ویرایش قابل تغییر نیست؛ برای روش دیگر سند جدید ثبت کنید.",
+                "warning",
+            )
+            return redirect(URL_PREFIX + f"/cash/{doc.id}/edit")
+
+        if accounting.is_void(doc):
+            flash("سند ابطال‌شده قابل ویرایش نیست.", "warning")
+            return redirect(URL_PREFIX + f"/cash/{doc.id}")
+
+        old_amount = float(doc.amount or 0.0)
+        new_amount = _to_float(request.form.get("amount"), old_amount)
+        if new_amount <= 0:
+            flash("مبلغ سند باید بزرگ‌تر از صفر باشد.", "danger")
+            return redirect(URL_PREFIX + f"/cash/{doc.id}/edit")
+
+        # The counterparty is re-resolved through the shared loader, so a forged
+        # hidden field can only ever select a real person.
+        new_person = _load_form_person(request.form)
+        if new_person is None:
+            flash("لطفاً طرف حساب معتبر انتخاب کنید.", "danger")
+            return redirect(URL_PREFIX + f"/cash/{doc.id}/edit")
+
+        new_date = (
+            parse_gregorian_date(request.form.get("doc_date_greg"), allow_none=True)
+            or doc.date
+        )
+
         try:
-            old_amount = float(doc.amount or 0.0)
-            new_amount = _to_float(request.form.get("amount"), old_amount)
-            if new_amount <= 0:
-                flash("مبلغ سند باید بزرگ‌تر از صفر باشد.", "danger")
-                return redirect(URL_PREFIX + f"/cash/{doc.id}/edit")
-            _adjust_cash_person_balance(doc.doc_type, doc.person, old_amount, new_amount)
-            doc.amount = new_amount
-            doc.note = (request.form.get("note") or "").strip() or None
-            m = (request.form.get("method") or "").strip().lower()
-            current_method = (doc.method or "").strip().lower()
-            if m and m != current_method:
-                db.session.rollback()
-                flash("روش سند هنگام ویرایش قابل تغییر نیست؛ برای روش دیگر سند جدید ثبت کنید.", "warning")
-                return redirect(URL_PREFIX + f"/cash/{doc.id}/edit")
-            db.session.commit()
-            try:
-                record_ledger(
-                    "cashdoc",
-                    doc.id,
-                    "update",
-                    {
-                        "before_amount": old_amount,
-                        "after_amount": new_amount,
-                        "person_id": doc.person_id,
-                        "doc_type": doc.doc_type,
-                        "method": doc.method,
-                    },
-                )
-            except Exception:
-                app.logger.exception("failed to write cashdoc update ledger entry")
-            flash("ویرایش شد.", "success")
+            accounting.reprice_cashdoc(
+                doc,
+                amount=new_amount,
+                person=new_person,
+                doc_date=new_date,
+                note=(request.form.get("note") or "").strip() or None,
+                ledger_payload={"source": "web", "actor": _current_username()},
+            )
+        except DocumentStateError as ex:
+            flash(str(ex), "warning")
+        except AccountingError as ex:
+            flash(str(ex), "danger")
         except Exception as ex:
             db.session.rollback()
+            current_app.logger.exception("cash document edit failed")
             flash(f"خطا: {ex}", "danger")
+        else:
+            flash("ویرایش شد.", "success")
         return redirect(URL_PREFIX + f"/cash/{doc.id}")
+
+    if accounting.is_void(doc):
+        flash("این سند ابطال شده است.", "warning")
+        return redirect(URL_PREFIX + f"/cash/{doc.id}")
+
     current_method = (doc.method or "").lower()
+    person_options = "\n".join(
+        f'<option value="{p.id}"{" selected" if p.id == doc.person_id else ""}>'
+        f"{escape(p.name)} — {escape(p.code)}</option>"
+        for p in Entity.query.filter_by(type="person")
+        .order_by(Entity.name)
+        .limit(500)
+        .all()
+    )
     edit_html = f"""
     <form method="post">
       <div class="card" style="padding:10px">
         <label class="lbl">مبلغ</label>
         <input class="inp" name="amount" inputmode="decimal" data-format-number value="{escape(sep_filter(doc.amount))}">
+        <label class="lbl" style="margin-top:8px">طرف حساب</label>
+        <select class="inp" name="person_token">
+          {person_options}
+        </select>
+        <input type="hidden" name="person_code" value="{escape(doc.person.code if doc.person else "")}">
+        <label class="lbl" style="margin-top:8px">تاریخ سند (شمسی)</label>
+        <input class="inp" name="doc_date_greg" value="{escape(to_jdate_str(doc.date))}">
         <label class="lbl" style="margin-top:8px">روش</label>
-        <input class="inp" value="{escape(CASH_METHOD_LABELS.get(current_method, 'نامشخص'))}" disabled>
+        <input class="inp" value="{escape(CASH_METHOD_LABELS.get(current_method, "نامشخص"))}" disabled>
         <input type="hidden" name="method" value="{escape(current_method)}">
         <label class="lbl" style="margin-top:8px">یادداشت</label>
         <textarea class="inp" name="note">{escape(doc.note or "")}</textarea>
@@ -3613,6 +3671,60 @@ def cash_edit(doc_id):
     </form>
     """
     return render_template("page.html", title="ویرایش سند دریافت/پرداخت", content=Markup(edit_html), prefix=URL_PREFIX)
+
+# ===================== چرخه عمر سند نقدی: ابطال و حذف =====================
+@app.route(URL_PREFIX + "/cash/<int:doc_id>/cancel", methods=["POST"])
+@login_required
+def cash_cancel(doc_id):
+    """Logical cancel: the row survives for audit, its balance effect does not."""
+    admin_required()
+    doc = CashDoc.query.get_or_404(doc_id)
+    ensure_permission(doc.doc_type)
+    try:
+        accounting.void_cashdoc(
+            doc,
+            reason=_lifecycle_reason("cancel"),
+            ledger_payload={"source": "web", "actor": _current_username()},
+        )
+        flash(
+            f"سند «{escape(doc.number)}» ابطال شد و اثر آن بر مانده طرف حساب برگشت.",
+            "success",
+        )
+    except DocumentStateError as ex:
+        flash(str(ex), "warning")
+    except Exception as ex:
+        db.session.rollback()
+        current_app.logger.exception("cash document cancel failed")
+        flash(f"خطا در ابطال سند: {ex}", "danger")
+    return redirect(URL_PREFIX + f"/cash/{doc.id}")
+
+
+@app.route(URL_PREFIX + "/cash/<int:doc_id>/delete", methods=["POST"])
+@login_required
+def cash_delete(doc_id):
+    """Hard delete: reverse the balance effect, then purge the document."""
+    admin_required()
+    doc = CashDoc.query.get_or_404(doc_id)
+    ensure_permission(doc.doc_type)
+    number = doc.number
+    try:
+        accounting.delete_cashdoc(
+            doc,
+            reason=_lifecycle_reason("delete"),
+            ledger_payload={"source": "web", "actor": _current_username()},
+        )
+        flash(
+            f"سند «{escape(number)}» حذف شد و اثر آن بر مانده طرف حساب برگشت.",
+            "success",
+        )
+    except DocumentStateError as ex:
+        flash(str(ex), "warning")
+    except Exception as ex:
+        db.session.rollback()
+        current_app.logger.exception("cash document delete failed")
+        flash(f"خطا در حذف سند: {ex}", "danger")
+    return redirect(URL_PREFIX + "/reports?type=all")
+
 
 # ----------------- Settings/Admin stubs -----------------
 @app.route(URL_PREFIX + "/settings", methods=["GET", "POST"])
@@ -4577,20 +4689,19 @@ def admin_cashboxes():
                 flash("صندوق جدید ثبت شد.", "success")
         return redirect(URL_PREFIX + "/admin/cashboxes")
 
-    boxes = (
-        CashBox.query.order_by(CashBox.kind.desc(), CashBox.is_active.desc(), CashBox.name.asc())
-        .all()
-    )
-    totals_rows = (
+    boxes = CashBox.query.order_by(
+        CashBox.kind.desc(), CashBox.is_active.desc(), CashBox.name.asc()
+    ).all()
+    totals_rows = accounting.apply_void_filter(
         db.session.query(
             CashDoc.cashbox_id,
             CashDoc.doc_type,
             func.coalesce(func.sum(CashDoc.amount), 0.0),
         )
         .filter(CashDoc.cashbox_id.isnot(None))
-        .group_by(CashDoc.cashbox_id, CashDoc.doc_type)
-        .all()
-    )
+        .group_by(CashDoc.cashbox_id, CashDoc.doc_type),
+        CashDoc,
+    ).all()
     totals_map = {}
     for box_id, doc_type, total in totals_rows:
         if box_id not in totals_map:
@@ -5131,6 +5242,26 @@ def _migrate_ai_credentials_to_encrypted():
         app.logger.exception("AI credential encryption migration failed")
 
 
+def _backfill_document_lifecycle_status() -> int:
+    """Give documents written before the lifecycle column existed a status.
+
+    Only NULL / empty values are touched, and the function is idempotent. A
+    document that is already ``void`` must stay void: re-activating it would
+    re-admit it into every aggregate even though its stock, balance and cashbox
+    effects have already been reversed -- the books would silently double-count
+    it on the next application start.
+    """
+    backfilled = 0
+    for model in (Invoice, CashDoc):
+        changed = model.query.filter(
+            or_(model.status.is_(None), func.trim(model.status) == "")
+        ).update({model.status: STATUS_ACTIVE}, synchronize_session=False)
+        backfilled += int(changed or 0)
+    if backfilled:
+        db.session.commit()
+    return backfilled
+
+
 with app.app_context():
     db.create_all()
     _ensure_column_sqlite("entities", "stock_qty", "REAL", "0")
@@ -5143,9 +5274,18 @@ with app.app_context():
     _ensure_column_sqlite("cash_docs", "cheque_owner", "TEXT", "NULL")
     _ensure_column_sqlite("cash_docs", "cheque_due_date", "TEXT", "NULL")
     _migrate_ai_credentials_to_encrypted()
-    # Existing installations may not have invoices.kind. Add it as NULL so the
-    # backfill below can determine the historical kind instead of defaulting all
+    # Existing installations may not have invoices.kind. Add it as NULL (below) so
+    # the backfill can determine the historical kind instead of defaulting all
     # legacy invoices to sales.
+    # Lifecycle columns for invoice/cash-document cancel. Existing rows must be
+    # 'active': they are already posted into stock, balances and cashbox totals,
+    # so any other backfill value would silently un-post historical documents.
+    _ensure_column_sqlite("invoices", "status", "TEXT", "'active'")
+    _ensure_column_sqlite("invoices", "voided_at", "DATETIME", "NULL")
+    _ensure_column_sqlite("invoices", "void_reason", "TEXT", "NULL")
+    _ensure_column_sqlite("cash_docs", "status", "TEXT", "'active'")
+    _ensure_column_sqlite("cash_docs", "voided_at", "DATETIME", "NULL")
+    _ensure_column_sqlite("cash_docs", "void_reason", "TEXT", "NULL")
     _ensure_column_sqlite("invoices", "kind", "TEXT", "NULL")
 
     # Backfill invoice.kind for all existing invoices using the number prefix
@@ -5164,6 +5304,49 @@ with app.app_context():
             app.logger.info(f"Backfilled invoice.kind for {changed} invoices")
     except Exception as ex:
         app.logger.error(f"backfill invoice.kind failed: {ex}")
+
+    # Backfill the lifecycle status. Pre-existing documents are already posted
+    # into stock / balances / cashbox totals, so they MUST come back as
+    # 'active'; a NULL/other value would drop them out of every aggregate and
+    # silently under-report the books.
+    try:
+        backfilled = _backfill_document_lifecycle_status()
+        if backfilled:
+            app.logger.info(
+                "Backfilled document lifecycle status for %s rows", backfilled
+            )
+    except Exception as ex:
+        db.session.rollback()
+        app.logger.error("backfill document lifecycle status failed: %s", ex)
+
+    # Older databases may predate the status index; keep lookups on the void
+    # filter cheap. Failure here is harmless (indexes are an optimisation).
+    try:
+        db.session.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_invoices_status ON invoices (status)")
+        )
+        db.session.execute(
+            text("CREATE INDEX IF NOT EXISTS ix_cash_docs_status ON cash_docs (status)")
+        )
+        db.session.commit()
+    except Exception as ex:
+        db.session.rollback()
+        app.logger.warning("could not ensure lifecycle status indexes: %s", ex)
+
+    # The single-row chain lock that serialises ledger appends. utils.accounting
+    # also creates it on demand, but seeding it here keeps the very first append
+    # free of an extra insert.
+    try:
+        db.session.execute(
+            text(
+                "INSERT INTO ledger_chain (id, generation) VALUES (1, 0) "
+                "ON CONFLICT(id) DO NOTHING"
+            )
+        )
+        db.session.commit()
+    except Exception as ex:
+        db.session.rollback()
+        app.logger.warning("could not seed ledger chain lock row: %s", ex)
 
 if __name__ == "__main__":
     if URL_PREFIX:

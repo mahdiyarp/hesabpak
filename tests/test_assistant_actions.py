@@ -136,7 +136,7 @@ def test_prepare_cash_plan_rejects_unknown_type_and_invalid_dates():
         })
 
 
-def test_assistant_model_migrates_deprecated_alias():
+def test_assistant_model_migrates_deprecated_alias(fresh_schema):
     with app_module.app.app_context():
         original = app_module.Setting.get("openai_model")
         try:
@@ -154,7 +154,7 @@ def test_reasoning_model_is_marked_for_temperature_omission():
     assert "o4-mini" not in {key for key, _ in app_module.ASSISTANT_MODEL_CHOICES}
 
 
-def test_current_assistant_default_is_gpt56_luna():
+def test_current_assistant_default_is_gpt56_luna(fresh_schema):
     with app_module.app.app_context():
         original = app_module.Setting.get("openai_model")
         try:

@@ -19,6 +19,8 @@
       </div>
     </header>
 
+    {{ lifecycle }}
+
     <section class="invoice-parties">
       <div><span class="label">طرف حساب</span><strong>{{ inv.person.name }}</strong></div>
       <div><span class="label">نوع</span><strong>{{ "فروش" if inv.kind == "sales" else "خرید" }}</strong></div>
