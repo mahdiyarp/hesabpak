@@ -43,6 +43,17 @@ sudo bash deploy_site.sh
 ```
 
 
+## اعتبارسنجی محلی
+
+برای اجرای همان compile و pytest مورد انتظار CI روی سرور یا سیستم توسعه:
+
+```bash
+chmod +x scripts/verify.sh
+./scripts/verify.sh
+```
+
+این مسیر به GitHub Actions وابسته نیست و برای زمانی که runner گیت‌هاب در دسترس نباشد به‌عنوان verification محلی استفاده می‌شود.
+
 ## Paki و محیط آزمایشی
 
 نسخه اصلی رابط کاربری از هویت تعاملی Paki با لوگوی hp استفاده می‌کند و برای نصب شدن روی دستگاه، manifest و service worker محلی دارد.
