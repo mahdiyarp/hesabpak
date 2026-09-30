@@ -420,6 +420,11 @@ def test_global_search_actions_do_not_use_dynamic_html_sink():
     assert "quickLinks.map" not in source
     assert "actions.innerHTML = quickLinks" not in source
 
+def test_document_viewers_no_longer_build_legacy_raw_html():
+    source = Path(app_module.__file__).read_text(encoding="utf-8")
+    assert 'html = [' not in source[source.index('@app.route(URL_PREFIX + "/invoice/<int:inv_id>")'):source.index('# ===================== دریافت وجه =====================')]
+    assert 'cheque_meta = ""' not in source[source.index('@app.route(URL_PREFIX + "/cash/<int:doc_id>")'):source.index('# ===================== دریافت وجه =====================')]
+
 def test_cash_view_uses_printable_template():
     source = Path(app_module.__file__).read_text(encoding="utf-8")
     template = (Path(app_module.__file__).resolve().parent / "templates" / "cash_view.html").read_text(encoding="utf-8")
