@@ -5185,11 +5185,10 @@ with app.app_context():
     _ensure_column_sqlite("cash_docs", "cheque_account", "TEXT", "NULL")
     _ensure_column_sqlite("cash_docs", "cheque_owner", "TEXT", "NULL")
     _ensure_column_sqlite("cash_docs", "cheque_due_date", "TEXT", "NULL")
-    _ensure_column_sqlite("invoices", "kind", "TEXT", "'sales'")
     _migrate_ai_credentials_to_encrypted()
-    # ensure invoices.kind column exists; do NOT force a 'sales' default that would
-    # incorrectly mark existing purchase invoices as sales. Use NULL as default so
-    # we can run a reliable backfill below.
+    # Existing installations may not have invoices.kind. Add it as NULL so the
+    # backfill below can determine the historical kind instead of defaulting all
+    # legacy invoices to sales.
     _ensure_column_sqlite("invoices", "kind", "TEXT", "NULL")
 
     # Backfill invoice.kind for all existing invoices using the number prefix
