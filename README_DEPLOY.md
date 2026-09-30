@@ -1,22 +1,36 @@
-Installation notes for deploying hesabpak
+# استقرار حساب‌پاک
 
-This repository includes a helper script `deploy_site.sh` to automate a basic
-installation on an Ubuntu server. The script assumes you run it with sudo and
-have a domain name pointing to the machine (e.g. hesabpak.com).
+مسیر production اصلی deploy_site.sh است و مسیر هاست Python/Passenger از deploy_host.sh استفاده می‌کند.
 
-What the script does
-- Installs system packages (python3, pip, git, nginx)
-- Clones the repository into /var/www/hesabpak (or updates it)
-- Creates a Python virtualenv and installs `requirements.txt`
-- Creates a simple systemd service using gunicorn
-- Writes a basic nginx site to reverse-proxy to the gunicorn port
+## Ubuntu / systemd
+نصب جدید:
 
-Notes & manual steps
-- The script is a convenient starting point. In production you should:
-  - Run under a dedicated user instead of `www-data` or customize permissions
-  - Use a process manager and proper Gunicorn config (workers, timeouts)
-  - Add TLS via Certbot / Let's Encrypt
-  - Harden Nginx and systemd settings
+    curl -fsSL https://raw.githubusercontent.com/mahdiyarp/hesabpak/main/deploy_site.sh | sudo bash
 
-If you want I can refine the script to add TLS and more robust process
-management (supervised workers, log rotation, env file).
+بررسی:
+
+    sudo systemctl status hesabpak --no-pager
+    sudo journalctl -u hesabpak -n 100 --no-pager
+    sudo nginx -t
+
+قبل از دسترسی عمومی HTTPS را فعال کنید و در .env مقدار SESSION_COOKIE_SECURE=true قرار دهید.
+
+## Passenger / هاست Python
+نصب اولیه:
+
+    chmod +x host_setup.sh deploy_host.sh
+    ./host_setup.sh install --repo-url https://github.com/mahdiyarp/hesabpak.git --branch main
+
+بروزرسانی:
+
+    ./host_setup.sh update --repo-url https://github.com/mahdiyarp/hesabpak.git --branch main
+
+مسیر بروزرسانی امن قبل از تغییر کد، وضعیت مخزن و remote رسمی را بررسی می‌کند، بکاپ کامل می‌سازد، فقط fast-forward را قبول می‌کند، وابستگی‌ها را نصب می‌کند و Passenger را restart می‌کند.
+
+deploy_update_with_backup.sh فقط wrapper سازگار است و منطق مستقل ندارد؛ بنابراین خطاهای نسخه قدیمی دیگر نمی‌توانند باعث ادامه استقرار پس از شکست dependency یا restart شوند.
+
+## صحت نسخه لایو
+پس از استقرار endpoint /healthz باید در دسترس باشد. پاسخ شامل status، version و commit است تا نسخه واقعی کد در حال اجرا قابل تشخیص باشد.
+
+## بکاپ و دمو
+قبل از بروزرسانی production بکاپ کامل ساخته می‌شود. دمو فقط روی instance و DATA_DIR جدا اجرا شود. جزئیات در OFFLINE_INSTALL.md و DEPLOY_QUICK.md آمده است.
