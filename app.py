@@ -3401,7 +3401,12 @@ def unified_cash():
         invoice_id = (request.args.get("invoice_id") or "").strip()
         if invoice_id.isdigit():
             inv = Invoice.query.get(int(invoice_id))
-            if inv:
+            expected_invoice_kind = "sales" if kind == "receive" else "purchase"
+            # An invoice-derived prefill is itself a visibility surface: require
+            # access to the referenced invoice kind and never prefill a mismatched kind.
+            if inv and inv.kind == expected_invoice_kind and (
+                has_permission("reports") or has_permission(expected_invoice_kind)
+            ):
                 prefill_amount = float(inv.total or 0.0)
                 if inv.person:
                     prefill_person = inv.person
