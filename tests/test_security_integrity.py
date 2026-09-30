@@ -511,3 +511,13 @@ def test_document_view_requires_actual_module_permission(monkeypatch):
         with app_module.app.test_request_context(f"/cash/{payment.id}"):
             response = app_module.cash_view.__wrapped__(payment.id)
         assert getattr(response, "status_code", None) == 403
+
+
+def test_healthz_reports_runtime_git_commit(monkeypatch):
+    monkeypatch.setattr(app_module, "RUNTIME_GIT_COMMIT", "abc123def456")
+    response = app_module.app.test_client().get("/healthz")
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["status"] == "ok"
+    assert payload["version"] == app_module.APP_VERSION
+    assert payload["commit"] == "abc123def456"
