@@ -1,0 +1,90 @@
+{% extends "base.html" %}
+{% block head_extra %}
+<style>
+.tx-page{display:grid;gap:18px}
+.tx-hero{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(240px,.65fr);gap:16px;padding:22px;border-radius:22px;background:linear-gradient(135deg,#101d30,#172b46);color:#f4f8ff;box-shadow:0 18px 42px rgba(5,12,24,.14)}
+.tx-hero h1{margin:0 0 7px;font-size:28px}.tx-hero p{margin:0;opacity:.78;line-height:1.8;font-size:13px}
+.tx-search{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;margin-top:18px}.tx-actions{display:flex;gap:7px;flex-wrap:wrap;margin-top:10px}.tx-actions a{display:inline-flex;align-items:center;min-height:34px;padding:0 11px;border-radius:999px;border:1px solid rgba(255,255,255,.14);background:rgba(255,255,255,.05);color:#eaf5ff;text-decoration:none;font-size:11px}.tx-actions a:hover{text-decoration:none;background:rgba(255,255,255,.1)}.tx-search input{height:48px;border-radius:13px;border:1px solid rgba(255,255,255,.18);background:rgba(255,255,255,.08);color:#fff;padding:0 14px;outline:none}.tx-search input::placeholder{color:rgba(255,255,255,.6)}.tx-search button{height:48px;padding:0 18px;border-radius:13px;border:1px solid rgba(130,204,255,.35);background:rgba(94,178,255,.18);color:#fff;font:inherit;cursor:pointer}
+.tx-hero-side{display:grid;place-items:center}.tx-hero-side img{width:170px;filter:drop-shadow(0 0 24px rgba(100,184,255,.2))}
+.tx-tabs{display:flex;gap:8px;flex-wrap:wrap}.tx-tab{display:inline-flex;align-items:center;justify-content:center;min-height:40px;padding:0 13px;border-radius:999px;border:1px solid #dce4eb;background:#fff;color:#334456;text-decoration:none;font-size:12px}.tx-tab:hover{text-decoration:none;border-color:#9db4ca}.tx-tab.active{background:#172b46;color:#fff;border-color:#172b46}
+.tx-stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.tx-stat{padding:16px;border-radius:17px;border:1px solid #e4eaf0;background:#fff}.tx-stat small{display:block;color:#6b7c8e;font-size:11px;margin-bottom:7px}.tx-stat strong{font-size:18px}.tx-stat .unit{font-size:11px;color:#708195}
+.tx-section{padding:17px;border-radius:18px;border:1px solid #e4eaf0;background:#fff}.tx-section-head{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:12px}.tx-section-head h2{margin:0;font-size:17px}.tx-section-head a{font-size:12px}
+.tx-table-wrap{overflow:auto}.tx-table{width:100%;border-collapse:collapse;min-width:680px}.tx-table th,.tx-table td{padding:11px 9px;border-bottom:1px solid #edf1f5;text-align:right;font-size:12px}.tx-table th{color:#667789;font-weight:700;background:#f9fbfc}.tx-kind{display:inline-flex;align-items:center;gap:5px;padding:4px 8px;border-radius:999px;font-size:11px;background:#f0f4f8}.tx-amount{font-weight:800}.tx-empty{padding:24px;text-align:center;color:#738397;background:#f9fbfc;border-radius:14px}
+@media(max-width:820px){.tx-hero{grid-template-columns:1fr}.tx-hero-side{display:none}.tx-stats{grid-template-columns:repeat(2,minmax(0,1fr))}.tx-search{grid-template-columns:1fr}.tx-search button{width:100%}}
+@media(max-width:480px){.tx-stats{grid-template-columns:1fr}.tx-hero h1{font-size:23px}}
+</style>
+{% endblock %}
+{% block content %}
+<div class="tx-page">
+  <section class="tx-hero">
+    <div>
+      <div style="font-size:12px;opacity:.68;margin-bottom:6px">مرکز تراکنش‌های حساب پاک</div>
+      <h1>جستجو و مرور تراکنش‌ها</h1>
+      <p>از یک ورودی سریع شروع کنید یا جستجوی پیشرفته را برای فیلتر دقیق اسناد باز کنید.</p>
+      <form class="tx-search" method="get" action="{{ prefix }}/reports">
+        <input name="q" placeholder="شماره سند، نام یا کد طرف حساب، شماره چک..." autocomplete="off">
+        <input type="hidden" name="type" value="all">
+        <button type="submit">جستجو در تراکنش‌ها</button>
+      </form>
+      <div class="tx-actions">
+        {% if has_permission('sales') %}<a href="{{ prefix }}/invoice?kind=sales">+ فروش جدید</a>{% endif %}
+        {% if has_permission('purchase') %}<a href="{{ prefix }}/invoice?kind=purchase">+ خرید جدید</a>{% endif %}
+        {% if has_permission('receive') %}<a href="{{ prefix }}/cash_doc?kind=receive">+ دریافت</a>{% endif %}
+        {% if has_permission('payment') %}<a href="{{ prefix }}/cash_doc?kind=payment">+ پرداخت</a>{% endif %}
+      </div>
+    </div>
+    <div class="tx-hero-side">
+      <img src="{{ prefix }}/static/icons/paki.svg" alt="پکی" width="170" height="128">
+    </div>
+  </section>
+
+  <nav class="tx-tabs" aria-label="نوع تراکنش">
+    <a class="tx-tab active" href="{{ prefix }}/reports?type=all">همه تراکنش‌ها</a>
+    <a class="tx-tab" href="{{ prefix }}/reports?type=sales">فروش</a>
+    <a class="tx-tab" href="{{ prefix }}/reports?type=purchase">خرید</a>
+    <a class="tx-tab" href="{{ prefix }}/reports?type=receive">دریافت</a>
+    <a class="tx-tab" href="{{ prefix }}/reports?type=payment">پرداخت</a>
+    <a class="tx-tab" href="{{ prefix }}/reports?type=cheque">چک‌ها</a>
+    <a class="tx-tab" href="{{ prefix }}/reports">جستجوی پیشرفته ⚙️</a>
+  </nav>
+
+  <section class="tx-stats" aria-label="خلاصه امروز">
+    <div class="tx-stat"><small>فروش امروز</small><strong>{{ stats.sales|sep }}</strong> <span class="unit">تومان</span></div>
+    <div class="tx-stat"><small>خرید امروز</small><strong>{{ stats.purchase|sep }}</strong> <span class="unit">تومان</span></div>
+    <div class="tx-stat"><small>دریافت امروز</small><strong>{{ stats.receive|sep }}</strong> <span class="unit">تومان</span></div>
+    <div class="tx-stat"><small>پرداخت امروز</small><strong>{{ stats.payment|sep }}</strong> <span class="unit">تومان</span></div>
+  </section>
+
+  <section class="tx-section">
+    <div class="tx-section-head">
+      <div>
+        <h2>آخرین تراکنش‌ها</h2>
+        <div class="muted" style="font-size:11px;margin-top:4px">آخرین اسناد ثبت‌شده تا {{ today_label|fa_digits }}</div>
+      </div>
+      <a href="{{ prefix }}/reports">باز کردن جستجوی کامل ←</a>
+    </div>
+
+    {% if recent %}
+    <div class="tx-table-wrap">
+      <table class="tx-table">
+        <thead><tr><th>نوع</th><th>شماره</th><th>تاریخ</th><th>طرف حساب</th><th>مبلغ</th><th>عملیات</th></tr></thead>
+        <tbody>
+        {% for row in recent %}
+          <tr>
+            <td><span class="tx-kind">{{ row.label }}</span></td>
+            <td><code>{{ row.number|fa_digits }}</code></td>
+            <td>{{ row.date|fa_digits }}</td>
+            <td>{{ row.person }}</td>
+            <td class="tx-amount">{{ row.amount|sep }} تومان</td>
+            <td><a href="{{ row.url }}">مشاهده</a></td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+    {% else %}
+      <div class="tx-empty">هنوز تراکنشی ثبت نشده است.</div>
+    {% endif %}
+  </section>
+</div>
+{% endblock %}

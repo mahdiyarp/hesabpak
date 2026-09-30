@@ -3,13 +3,24 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>ورود | hesab pak</title>
+  <title>ورود | حساب پاک</title>
+  <link rel="icon" href="{{ prefix }}/static/favicon.svg" type="image/svg+xml">
+  <meta name="theme-color" content="#0d1728">
+  <link rel="manifest" href="{{ prefix }}/static/manifest.webmanifest">
   <link rel="stylesheet" href="{{ prefix }}/static/style.css">
+  <link rel="stylesheet" href="{{ prefix }}/static/paki.css">
+  <script>
+    window.APP_PREFIX = {{ (prefix or "")|tojson|safe }};
+  </script>
 </head>
 <body class="login">
   <div class="login-wrap">
     <div class="login-card">
-      <div class="brand">حساب‌پَک</div>
+      <div class="paki-login-brand">
+  <img src="{{ prefix }}/static/icons/paki.svg" alt="پکی" width="112" height="84">
+  <div class="paki-login-title">حساب‌پَک</div>
+  <div class="paki-login-sub">HesabPak · Paki</div>
+</div>
       <h1 class="login-title">ورود</h1>
       <form method="post" class="login-form" autocomplete="on">
         <label class="lbl">نام کاربری</label>
@@ -19,6 +30,13 @@
         <input class="inp" name="password" type="password" placeholder="رمز عبور" required>
 
         <button class="btn-primary" type="submit">ورود</button>
+      {% if demo_mode %}
+      <div class="paki-login-demo-note" role="note">
+        <strong>محیط آزمایشی حساب پاک</strong>
+        <span>داده‌های دمو موقتی هستند و برای ورود سریع، بدون حساب واقعی قابل استفاده‌اند.</span>
+      </div>
+      <a class="paki-demo-button" href="{{ prefix }}/demo">مشاهده و شروع دمو با پکی</a>
+      {% endif %}
       </form>
 
       {% with messages = get_flashed_messages(with_categories=true) %}
@@ -32,5 +50,6 @@
       {% endwith %}
     </div>
   </div>
+<script defer src="{{ prefix }}/static/paki.js?v=1"></script>
 </body>
 </html>

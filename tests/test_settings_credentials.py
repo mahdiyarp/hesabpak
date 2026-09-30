@@ -38,3 +38,26 @@ def test_explicit_global_ai_key_clear_removes_value():
         else:
             resulting = Setting.get("openai_api_key", "") or ""
         assert resulting == ""
+
+
+def test_ai_credentials_are_encrypted_at_rest_and_readable():
+    with app_module.app.app_context():
+        original_key = app_module.app.config.get("CREDENTIAL_ENCRYPTION_KEY")
+        try:
+            app_module.app.config["CREDENTIAL_ENCRYPTION_KEY"] = "test-stable-key"
+            Setting.set("openai_api_key", app_module.encrypt_secret(app_module.current_app, "sk-test"))
+            stored = Setting.get("openai_api_key", "") or ""
+            assert stored != "sk-test"
+            assert app_module._openai_api_key() == "sk-test"
+
+            user_settings = app_module.UserSettings.get_for_user("encrypted-user")
+            user_settings.openai_api_key = app_module.encrypt_secret(app_module.current_app, "sk-user-test")
+            app_module.db.session.commit()
+            assert app_module._user_openai_api_key(user_settings) == "sk-user-test"
+        finally:
+            Setting.set("openai_api_key", "")
+            cleanup = app_module.UserSettings.query.filter_by(username="encrypted-user").first()
+            if cleanup:
+                app_module.db.session.delete(cleanup)
+            app_module.db.session.commit()
+            app_module.app.config["CREDENTIAL_ENCRYPTION_KEY"] = original_key

@@ -1,6 +1,19 @@
 {% extends 'base.html' %}
 {% block content %}
 <div class="dashboard">
+  <div class="paki-welcome card" aria-label="پکی">
+    <div class="paki-welcome-art">
+      <img src="{{ prefix }}/static/icons/paki.svg" alt="پکی" loading="eager" width="150" height="112">
+    </div>
+    <div class="paki-welcome-copy">
+      <strong>سلام! من پکی هستم 👋</strong>
+      <span>کنارت هستم تا کارهای حسابداری را راحت‌تر انجام بدهی.</span>
+      {% if 'assistant' in user_permissions %}
+      <a href="{{ prefix }}/assistant">گفت‌وگو با پکی</a>
+      {% endif %}
+    </div>
+  </div>
+
   {% if 'hero' in dashboard_widgets %}
   <div class="dashboard-hero">
     <div class="hero-info">
@@ -145,7 +158,7 @@
   {# Cheque lists removed from dashboard per request #}
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+{# نمودارها در حالت فعلی از CDN لود نمی‌شوند تا رابط بدون وابستگی خارجی هم باز شود. #}
 <script>
 (function(){
   const chartData = {{ chart_data|tojson }};

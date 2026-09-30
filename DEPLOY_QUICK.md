@@ -41,3 +41,23 @@ sudo certbot --nginx -d your-domain.com
 cd /var/www/hesabpak
 sudo bash deploy_site.sh
 ```
+
+
+## Paki و محیط آزمایشی
+
+نسخه اصلی رابط کاربری از هویت تعاملی Paki با لوگوی hp استفاده می‌کند و برای نصب شدن روی دستگاه، manifest و service worker محلی دارد.
+
+برای یک **سرور دمو جداگانه**، فایل `.env` را از نمونه کپی کنید و این مقادیر را تنظیم کنید:
+
+```env
+FLASK_ENV=production
+DEMO_MODE=true
+DEMO_USERNAME=demo
+DEMO_PASSWORD=demo123
+DATA_DIR=data-demo
+CREDENTIAL_ENCRYPTION_KEY=<stable-random-secret>
+```
+
+در این حالت ورود آزمایشی از `/demo/start` انجام می‌شود. فضای دمو قبل از هر شروع دوباره پاک و seed می‌شود و با خروج از دمو نیز تمام داده‌های محیط آزمایشی، بکاپ‌ها و آپلودها پاک می‌شوند. **دمو را هرگز روی DATA_DIR نسخه واقعی حساب پاک قرار ندهید.**
+
+کلید `CREDENTIAL_ENCRYPTION_KEY` باید در مهاجرت و restore حفظ شود؛ کلیدهای AI جدید در SQLite به‌صورت رمزنگاری‌شده ذخیره می‌شوند.

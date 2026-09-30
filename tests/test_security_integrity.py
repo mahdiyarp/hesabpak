@@ -205,7 +205,7 @@ def test_security_headers_include_compatible_csp():
 
     csp = response.headers["Content-Security-Policy"]
     assert "default-src 'self'" in csp
-    assert "https://cdn.jsdelivr.net" in csp
+    assert "https://cdn.jsdelivr.net" not in csp
     assert "object-src 'none'" in csp
     assert "frame-ancestors 'self'" in csp
 

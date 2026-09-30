@@ -4,14 +4,15 @@ from pathlib import Path
 from datetime import datetime, timedelta, date
 from typing import Any, Dict, List, Optional
 
-from flask import Flask, render_template, redirect, request, flash, session, jsonify, abort, current_app
+from flask import Flask, render_template, redirect, request, flash, session, jsonify, abort, current_app, send_from_directory
 import subprocess, shlex, traceback
 import shutil
 from flask_login import LoginManager, login_user, logout_user, login_required, UserMixin, current_user
 from dotenv import load_dotenv
 from markupsafe import Markup, escape
 from werkzeug.security import check_password_hash, generate_password_hash
-from sqlalchemy import func, or_, UniqueConstraint, text   # <- مهم
+from werkzeug.middleware.proxy_fix import ProxyFix
+from sqlalchemy import func, or_, UniqueConstraint, text
 
 try:
     from openai import OpenAI
@@ -34,7 +35,9 @@ from utils.date_utils import (
 )
 from utils import rates as rates_utils
 from utils import bank_utils
+from utils.secret_store import encrypt_secret, decrypt_secret, is_encrypted
 import hashlib
+import threading
 
 # --- Simple append-only ledger for traceability (blockchain-like) ----------
 class LedgerEntry(db.Model):
@@ -122,6 +125,8 @@ def record_ledger(
 # ----------------- Config -----------------
 load_dotenv()
 PROJECT_ROOT = Path(__file__).resolve().parent
+VERSION_FILE = PROJECT_ROOT / "VERSION"
+APP_VERSION = VERSION_FILE.read_text(encoding="utf-8").strip() if VERSION_FILE.exists() else "0.9.0"
 PORT = int(os.environ.get("PORT", "8000"))
 FLASK_ENV = os.environ.get("FLASK_ENV", "development").strip().lower()
 SECRET_KEY = os.environ.get("SECRET_KEY", "").strip()
@@ -129,6 +134,15 @@ URL_PREFIX = os.environ.get("URL_PREFIX", "") or ""   # مثلا: /hesabpak
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin").strip() or "admin"
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "").strip()
 DATA_DIR = os.environ.get("DATA_DIR", "data")
+CREDENTIAL_ENCRYPTION_KEY = os.environ.get("CREDENTIAL_ENCRYPTION_KEY", "").strip()
+DEMO_MODE = os.environ.get("DEMO_MODE", "").strip().lower() in {"1", "true", "yes", "on"}
+DEMO_USERNAME = os.environ.get("DEMO_USERNAME", "demo").strip() or "demo"
+DEMO_PASSWORD = os.environ.get("DEMO_PASSWORD", "demo123") or "demo123"
+PUBLIC_BASE_URL = os.environ.get("PUBLIC_BASE_URL", "").strip().rstrip("/")
+DEMO_RESET_LOCK = threading.Lock()
+
+if DEMO_MODE and Path(DATA_DIR).name.strip().lower() in {"data", "production", "prod"}:
+    raise RuntimeError("DEMO_MODE باید روی DATA_DIR جدا از داده واقعی اجرا شود (مثلاً data-demo).")
 
 # Development may start with ephemeral credentials for local testing. Production
 # must always receive explicit credentials from the environment/configuration.
@@ -264,6 +278,10 @@ def _permissions_for_role(role: str, requested) -> list:
 # ----------------- Flask & DB -----------------
 app = Flask(__name__, static_url_path=(URL_PREFIX + "/static") if URL_PREFIX else "/static")
 
+# The production deployment sits behind one trusted reverse proxy (Nginx).
+# Trust only the forwarded scheme so generated share links preserve HTTPS.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_proto=1)
+
 
 def _request_origin_is_trusted():
     """Allow same-origin requests and reject definite cross-origin state changes."""
@@ -303,6 +321,9 @@ def _csrf_origin_guard():
         abort(403)
     return None
 app.config["SECRET_KEY"] = SECRET_KEY
+app.config["CREDENTIAL_ENCRYPTION_KEY"] = CREDENTIAL_ENCRYPTION_KEY
+app.config["DEMO_MODE"] = DEMO_MODE
+app.config["APP_VERSION"] = APP_VERSION
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SESSION_COOKIE_SECURE", "").strip().lower() in {"1", "true", "yes", "on"}
@@ -322,7 +343,7 @@ def _security_headers(response):
     response.headers.setdefault(
         "Content-Security-Policy",
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "script-src 'self' 'unsafe-inline'; "
         "style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data: blob:; "
         "font-src 'self' data:; "
@@ -788,6 +809,8 @@ def inject_ctx():
         "dashboard_widgets": _dashboard_widgets(),
         "dashboard_widget_choices": DASHBOARD_WIDGET_CHOICES,
         "allow_negative_sales": _allow_negative_sales(),
+        "demo_mode": DEMO_MODE,
+        "demo_landing_url": (URL_PREFIX + "/demo") if DEMO_MODE else "",
     }
 
 # === فیلتر جینجا برای جداکننده هزارگان ===
@@ -894,10 +917,16 @@ def _assistant_model() -> str:
     return key
 
 def _openai_api_key() -> str:
-    key = (Setting.get("openai_api_key", "") or "").strip()
+    stored = (Setting.get("openai_api_key", "") or "").strip()
+    key = decrypt_secret(current_app, stored) if stored else ""
     if not key:
         key = (os.environ.get("OPENAI_API_KEY") or "").strip()
     return key
+
+
+def _user_openai_api_key(user_settings) -> str:
+    stored = (getattr(user_settings, "openai_api_key", "") or "").strip()
+    return decrypt_secret(current_app, stored) if stored else ""
 
 
 def _assistant_api_ready() -> bool:
@@ -912,7 +941,7 @@ def _assistant_api_ready() -> bool:
     if not username:
         return False
     user_settings = UserSettings.query.filter_by(username=username).first()
-    return bool(user_settings and (user_settings.openai_api_key or "").strip())
+    return bool(user_settings and _user_openai_api_key(user_settings))
 
 def _csv_safe_cell(value: Any) -> str:
     """Prevent spreadsheet formula injection in exported text cells."""
@@ -1237,7 +1266,7 @@ def _call_openai_assistant(messages: List[Dict[str, Any]]) -> Dict[str, Any]:
     user_settings = UserSettings.get_for_user(username)
     
     # استفاده از کلید API شخصی یا سراسری
-    api_key = user_settings.openai_api_key if user_settings.openai_api_key else _openai_api_key()
+    api_key = _user_openai_api_key(user_settings) or _openai_api_key()
     if not api_key:
         raise RuntimeError("کلید API تنظیم نشده است.")
     if OpenAI is None:
@@ -2188,6 +2217,23 @@ def index():
         api_ready=_assistant_api_ready(),
     )
 
+@app.route(URL_PREFIX + "/sw.js", methods=["GET"])
+def service_worker():
+    """Serve the PWA worker from app root so it can control the whole app scope."""
+    return send_from_directory(PROJECT_ROOT, "sw.js", mimetype="application/javascript")
+
+
+@app.route(URL_PREFIX + "/healthz", methods=["GET"])
+def healthz():
+    """Lightweight deployment health probe; never exposes application data."""
+    try:
+        db.session.execute(text("SELECT 1"))
+        return jsonify({"status": "ok", "version": APP_VERSION}), 200
+    except Exception:
+        db.session.rollback()
+        return jsonify({"status": "error", "version": APP_VERSION}), 503
+
+
 @app.route(URL_PREFIX + "/login", methods=["GET", "POST"])
 def login():
     if current_user.is_authenticated:
@@ -2230,12 +2276,126 @@ def login():
         app.logger.warning(f"LOGIN_FAIL  USER={username}  IP={request.remote_addr}")
     return render_template("login.html", prefix=URL_PREFIX)
 
+def _reset_activity_log_file() -> None:
+    """Truncate the demo log without leaving the old file descriptor active."""
+    global _handler
+    log_target = str(Path(LOG_FILE).resolve())
+    for handler in list(app.logger.handlers):
+        if isinstance(handler, logging.FileHandler):
+            try:
+                if str(Path(handler.baseFilename).resolve()) == log_target:
+                    app.logger.removeHandler(handler)
+                    handler.close()
+            except (OSError, ValueError):
+                pass
+    Path(LOG_FILE).parent.mkdir(parents=True, exist_ok=True)
+    Path(LOG_FILE).write_text("", encoding="utf-8")
+    _handler = logging.FileHandler(LOG_FILE, encoding="utf-8")
+    _handler.setFormatter(LocalTimeFormatter("%(asctime)s  %(levelname)s  %(message)s"))
+    app.logger.addHandler(_handler)
+
+
+def _seed_demo_data():
+    if not DEMO_MODE:
+        return
+    if Entity.query.filter_by(type="person", code="D001").first():
+        return
+    db.session.add_all([
+        Entity(type="person", code="D001", name="فروشگاه نمونه", unit="شرکت", level=1),
+        Entity(type="person", code="D002", name="مشتری نمونه", unit="فروشگاه", level=1),
+        Entity(type="item", code="I001", name="لپ‌تاپ نمونه", unit="عدد", level=1, stock_qty=8),
+        Entity(type="item", code="I002", name="ماوس بی‌سیم نمونه", unit="عدد", level=1, stock_qty=25),
+        Entity(type="item", code="I003", name="کیبورد نمونه", unit="عدد", level=1, stock_qty=14),
+        CashBox(name="صندوق اصلی", kind="cash", description="صندوق نمونه حساب پاک", is_active=True),
+    ])
+    Setting.set("ui_theme", "dark")
+    Setting.set("dashboard_widgets", json.dumps([k for k, _ in DASHBOARD_WIDGET_CHOICES], ensure_ascii=False))
+    Setting.set("price_display_mode", "last")
+    Setting.set("search_sort", "recent")
+    db.session.commit()
+
+
+def _reset_demo_workspace():
+    if not DEMO_MODE:
+        return
+    with DEMO_RESET_LOCK:
+        try:
+            db.session.remove()
+            db.drop_all()
+            db.create_all()
+            for path in (DB_DIR / "backups", DB_DIR / "fiscal_cases", DB_DIR / "uploads"):
+                shutil.rmtree(path, ignore_errors=True)
+            (DB_DIR / "backups").mkdir(parents=True, exist_ok=True)
+            (DB_DIR / "fiscal_cases").mkdir(parents=True, exist_ok=True)
+            ASSISTANT_UPLOAD_DIR.mkdir(parents=True, exist_ok=True)
+            _reset_activity_log_file()
+            save_users_catalog({
+                DEMO_USERNAME: {
+                    "password": DEMO_PASSWORD,
+                    "role": "staff",
+                    "permissions": DEFAULT_PERMISSIONS,
+                    "is_active": True,
+                    "email": "",
+                }
+            })
+            _seed_demo_data()
+            db.session.commit()
+        except Exception:
+            db.session.rollback()
+            app.logger.exception("demo workspace reset failed")
+            raise
+
+
+@app.route(URL_PREFIX + "/demo", methods=["GET"])
+def demo_landing():
+    if not DEMO_MODE:
+        abort(404)
+    base_url = PUBLIC_BASE_URL or request.url_root.rstrip("/")
+    share_url = base_url + URL_PREFIX + "/demo"
+    return render_template(
+        "demo_landing.html",
+        prefix=URL_PREFIX,
+        share_url=share_url,
+        title="دموی حساب پاک | Paki",
+    )
+
+
+@app.route(URL_PREFIX + "/demo/start", methods=["GET", "POST"])
+def demo_start():
+    if not DEMO_MODE:
+        abort(404)
+    # Old shared links can safely land on the demo page without mutating state.
+    if request.method == "GET":
+        return redirect(URL_PREFIX + "/demo")
+    if current_user.is_authenticated:
+        logout_user()
+        session.clear()
+    _reset_demo_workspace()
+    catalog = load_users_catalog()
+    entry = catalog.get(DEMO_USERNAME) or {}
+    login_user(
+        User(
+            DEMO_USERNAME,
+            role=entry.get("role", "staff"),
+            permissions=entry.get("permissions", DEFAULT_PERMISSIONS),
+            is_active=True,
+        )
+    )
+    session["login_at_utc"] = datetime.utcnow().isoformat()
+    session["demo_session"] = True
+    flash("وارد محیط آزمایشی شدید؛ داده‌ها موقتی هستند و با خروج از دمو پاک می‌شوند.", "success")
+    return redirect(URL_PREFIX + "/")
+
+
 @app.route(URL_PREFIX + "/logout", methods=["POST"])
 def logout():
+    is_demo = bool(DEMO_MODE and session.get("demo_session"))
     if current_user.is_authenticated:
         app.logger.info(f"LOGOUT USER={current_user.username} IP={request.remote_addr}")
     logout_user()
-    session.pop("login_at_utc", None)
+    session.clear()
+    if is_demo:
+        _reset_demo_workspace()
     return redirect(URL_PREFIX + "/login")
 
 # ----------------- Developer console -----------------
@@ -2823,6 +2983,77 @@ def entities_delete(eid):
     flash("حذف شد.", "success")
     return redirect(URL_PREFIX + f"/entities?kind={t}")
 
+# ----------------- Transactions landing -----------------
+@app.route(URL_PREFIX + "/transactions")
+@login_required
+def transactions_landing():
+    ensure_permission("reports")
+
+    now = _now_info()
+    today = now["datetime"].date()
+
+    sales_today = float(
+        db.session.query(func.coalesce(func.sum(Invoice.total), 0.0))
+        .filter(Invoice.kind == "sales", Invoice.date == today)
+        .scalar() or 0.0
+    )
+    purchase_today = float(
+        db.session.query(func.coalesce(func.sum(Invoice.total), 0.0))
+        .filter(Invoice.kind == "purchase", Invoice.date == today)
+        .scalar() or 0.0
+    )
+    receive_today = float(
+        db.session.query(func.coalesce(func.sum(CashDoc.amount), 0.0))
+        .filter(CashDoc.doc_type == "receive", CashDoc.date == today)
+        .scalar() or 0.0
+    )
+    payment_today = float(
+        db.session.query(func.coalesce(func.sum(CashDoc.amount), 0.0))
+        .filter(CashDoc.doc_type == "payment", CashDoc.date == today)
+        .scalar() or 0.0
+    )
+
+    recent = []
+    for inv in Invoice.query.order_by(Invoice.id.desc()).limit(10).all():
+        recent.append({
+            "kind": "sales" if (inv.kind or "").lower() == "sales" else "purchase",
+            "label": "فروش" if (inv.kind or "").lower() == "sales" else "خرید",
+            "id": inv.id,
+            "number": inv.number or "—",
+            "date": to_jdate_str(inv.date),
+            "date_key": inv.date,
+            "person": inv.person.name if inv.person else "—",
+            "amount": float(inv.total or 0.0),
+            "url": URL_PREFIX + f"/invoice/{inv.id}",
+        })
+    for doc in CashDoc.query.order_by(CashDoc.id.desc()).limit(10).all():
+        recent.append({
+            "kind": "receive" if doc.doc_type == "receive" else "payment",
+            "label": "دریافت" if doc.doc_type == "receive" else "پرداخت",
+            "id": doc.id,
+            "number": doc.number or "—",
+            "date": to_jdate_str(doc.date),
+            "date_key": doc.date,
+            "person": doc.person.name if doc.person else "—",
+            "amount": float(doc.amount or 0.0),
+            "url": URL_PREFIX + f"/cash/{doc.id}",
+        })
+    recent.sort(key=lambda row: (row.get("date_key") or date.min, row.get("id", 0)), reverse=True)
+    recent = recent[:12]
+
+    return render_template(
+        "transactions.html",
+        prefix=URL_PREFIX,
+        today_label=to_jdate_str(today),
+        stats={
+            "sales": sales_today,
+            "purchase": purchase_today,
+            "receive": receive_today,
+            "payment": payment_today,
+        },
+        recent=recent,
+    )
+
 # ----------------- Reports -----------------
 @app.route(URL_PREFIX + "/reports")
 @login_required
@@ -2867,21 +3098,34 @@ def reports():
     rows = []
     totals = {"sales": 0.0, "purchase": 0.0, "receive": 0.0, "payment": 0.0}
 
+    # A plain numeric query is also treated as an exact amount search.
+    q_amount = None
+    if q:
+        try:
+            q_amount = _to_float(q, None)
+        except Exception:
+            q_amount = None
+
     # Invoices (sales/purchase)
     if typ in ("all", "invoice", "sales", "purchase"):
         inv_q = db.session.query(Invoice).join(Entity, Invoice.person_id == Entity.id)
         if q:
-            inv_q = inv_q.filter(or_(
+            q_filters = [
                 Invoice.number.ilike(f"%{q}%"),
                 Entity.name.ilike(f"%{q}%"),
                 Entity.code.ilike(f"%{q}%"),
-            ))
+            ]
+            if q_amount is not None:
+                q_filters.append(Invoice.total == q_amount)
+            inv_q = inv_q.filter(or_(*q_filters))
         if person_filter and person_filter.isdigit():
             inv_q = inv_q.filter(Invoice.person_id == int(person_filter))
         if item_filter and item_filter.isdigit():
             inv_q = inv_q.join(InvoiceLine, Invoice.id == InvoiceLine.invoice_id).filter(InvoiceLine.item_id == int(item_filter))
         if df: inv_q = inv_q.filter(Invoice.date >= df)
         if dt: inv_q = inv_q.filter(Invoice.date <= dt)
+        if amount_min is not None: inv_q = inv_q.filter(Invoice.total >= amount_min)
+        if amount_max is not None: inv_q = inv_q.filter(Invoice.total <= amount_max)
         # Use explicit kind when available
         if typ == "sales":
             inv_q = inv_q.filter(Invoice.kind == 'sales')
@@ -2891,10 +3135,6 @@ def reports():
         for inv in inv_q.order_by(Invoice.id.desc()).all():
             kind = inv.kind or ("sales" if (inv.number or "").upper().startswith("INV-") else "purchase")
             amt = float(inv.total or 0.0)
-            if amount_min is not None and amt < amount_min: 
-                continue
-            if amount_max is not None and amt > amount_max:
-                continue
             totals[kind] += amt
             rows.append({
                 "kind": "invoice",
@@ -2916,14 +3156,19 @@ def reports():
         if typ == "cheque":
             cd_q = cd_q.filter(func.lower(func.coalesce(CashDoc.method, "")) == "cheque")
         if q:
-            cd_q = cd_q.filter(or_(
+            q_filters = [
                 CashDoc.number.ilike(f"%{q}%"),
                 Entity.name.ilike(f"%{q}%"),
                 Entity.code.ilike(f"%{q}%"),
                 CashDoc.cheque_number.ilike(f"%{q}%"),
-            ))
+            ]
+            if q_amount is not None:
+                q_filters.append(CashDoc.amount == q_amount)
+            cd_q = cd_q.filter(or_(*q_filters))
         if df: cd_q = cd_q.filter(CashDoc.date >= df)
         if dt: cd_q = cd_q.filter(CashDoc.date <= dt)
+        if amount_min is not None: cd_q = cd_q.filter(CashDoc.amount >= amount_min)
+        if amount_max is not None: cd_q = cd_q.filter(CashDoc.amount <= amount_max)
         if method:
             cd_q = cd_q.filter(func.lower(func.coalesce(CashDoc.method, "")) == method)
         if cashbox_id and cashbox_id.isdigit():
@@ -3012,7 +3257,8 @@ def reports():
             label = {"invoice": "فاکتور فروش","receive": "دریافت","payment": "پرداخت"}.get(r["kind"], str(r["kind"]))
             view = f"{URL_PREFIX}/invoice/{int(r['id'])}" if r["kind"] == "invoice" else f"{URL_PREFIX}/cash/{int(r['id'])}"
             ops_str = f'<a href="{escape(view)}">مشاهده</a>'
-            jdate = to_jdate_str(r["date"])
+            # The row already contains a Jalali display string here.
+            jdate = r["date"] or ""
             row_html = (
                 "<tr>"
                 f"<td style='padding:8px;border-bottom:1px solid #f3f3f3'>{escape(label)}</td>"
@@ -3427,18 +3673,18 @@ def settings_stub():
             admin_required()
             api_key = (request.form.get("openai_api_key") or "").strip()
             clear_api_key = request.form.get("clear_openai_api_key") == "1"
-            current_api_key = Setting.get("openai_api_key", "") or ""
+            current_api_key = _openai_api_key()
             model = (request.form.get("openai_model") or _assistant_model()).strip()
             valid_models = {k for k, _ in ASSISTANT_MODEL_CHOICES}
             if model not in valid_models:
                 model = _assistant_model()
             if api_key:
-                Setting.set("openai_api_key", api_key)
+                Setting.set("openai_api_key", encrypt_secret(current_app, api_key))
             elif clear_api_key:
                 Setting.set("openai_api_key", "")
             else:
                 # Empty credential input means "leave unchanged", not "delete".
-                Setting.set("openai_api_key", current_api_key)
+                Setting.set("openai_api_key", encrypt_secret(current_app, current_api_key) if current_api_key else "")
             Setting.set("openai_model", model)
             db.session.commit()
             if clear_api_key:
@@ -3452,7 +3698,7 @@ def settings_stub():
             user_api_key = (request.form.get("user_openai_api_key") or "").strip()
             clear_user_api_key = request.form.get("clear_user_openai_api_key") == "1"
             if user_api_key:
-                user_settings.openai_api_key = user_api_key
+                user_settings.openai_api_key = encrypt_secret(current_app, user_api_key)
             elif clear_user_api_key:
                 user_settings.openai_api_key = None
             # Empty credential input otherwise leaves the existing key unchanged.
@@ -3495,8 +3741,8 @@ def settings_stub():
         assistant_model_choices=ASSISTANT_MODEL_CHOICES,
         assistant_api_mask=_mask_secret(_openai_api_key()),
         assistant_api_has=bool(_openai_api_key()),
-        user_api_mask=_mask_secret(user_settings.openai_api_key),
-        user_api_has=bool(user_settings.openai_api_key),
+        user_api_mask=_mask_secret(_user_openai_api_key(user_settings)),
+        user_api_has=bool(_user_openai_api_key(user_settings)),
         user_settings=user_settings,
     )
 
@@ -4003,11 +4249,10 @@ def admin_assistant_tokens():
         if action == "update_global":
             key = (request.form.get("global_api_key") or "").strip()
             if key:
-                Setting.set("openai_api_key", key)
+                Setting.set("openai_api_key", encrypt_secret(current_app, key))
                 db.session.commit()
                 flash("کلید سراسری API ذخیره شد.", "success")
             else:
-                # clear
                 Setting.set("openai_api_key", "")
                 db.session.commit()
                 flash("کلید سراسری API حذف شد.", "success")
@@ -4020,7 +4265,7 @@ def admin_assistant_tokens():
                 flash("کاربر نامعتبر است.", "danger")
                 return redirect(URL_PREFIX + "/admin/assistant-tokens")
             us = UserSettings.get_for_user(username)
-            us.openai_api_key = user_key or None
+            us.openai_api_key = encrypt_secret(current_app, user_key) if user_key else None
             db.session.commit()
             flash(f"کلید کاربر «{username}» به‌روزرسانی شد.", "success")
             return redirect(URL_PREFIX + "/admin/assistant-tokens")
@@ -4037,15 +4282,16 @@ def admin_assistant_tokens():
             return redirect(URL_PREFIX + "/admin/assistant-tokens")
 
     # GET: show current keys (masked)
-    global_key = Setting.get("openai_api_key", "") or ""
+    global_key = _openai_api_key()
     users = []
     for username, meta in sorted(catalog.items(), key=lambda kv: kv[0].lower()):
         us = UserSettings.get_for_user(username)
+        user_key = _user_openai_api_key(us)
         users.append({
             "username": username,
             "role": meta.get("role"),
-            "api_key_masked": _mask_secret(us.openai_api_key or ""),
-            "has_key": bool(us.openai_api_key),
+            "api_key_masked": _mask_secret(user_key),
+            "has_key": bool(user_key),
         })
 
     return render_template("admin/assistant_tokens.html", prefix=URL_PREFIX, global_key_masked=_mask_secret(global_key), users=users)
@@ -4867,6 +5113,26 @@ def _ensure_column_sqlite(table:str, col:str, coltype:str, default_val:str="0"):
     except Exception as ex:
         app.logger.error(f"ALTER TABLE failed for {table}.{col}: {ex}")
 
+def _migrate_ai_credentials_to_encrypted():
+    """Encrypt legacy plaintext AI keys without breaking existing installs."""
+    try:
+        changed = False
+        global_key = (Setting.get("openai_api_key", "") or "").strip()
+        if global_key and not is_encrypted(global_key):
+            Setting.set("openai_api_key", encrypt_secret(current_app, global_key))
+            changed = True
+        for item in UserSettings.query.all():
+            raw = (item.openai_api_key or "").strip()
+            if raw and not is_encrypted(raw):
+                item.openai_api_key = encrypt_secret(current_app, raw)
+                changed = True
+        if changed:
+            db.session.commit()
+    except Exception:
+        db.session.rollback()
+        app.logger.exception("AI credential encryption migration failed")
+
+
 with app.app_context():
     db.create_all()
     _ensure_column_sqlite("entities", "stock_qty", "REAL", "0")
@@ -4879,6 +5145,7 @@ with app.app_context():
     _ensure_column_sqlite("cash_docs", "cheque_owner", "TEXT", "NULL")
     _ensure_column_sqlite("cash_docs", "cheque_due_date", "TEXT", "NULL")
     _ensure_column_sqlite("invoices", "kind", "TEXT", "'sales'")
+    _migrate_ai_credentials_to_encrypted()
     # ensure invoices.kind column exists; do NOT force a 'sales' default that would
     # incorrectly mark existing purchase invoices as sales. Use NULL as default so
     # we can run a reliable backfill below.
