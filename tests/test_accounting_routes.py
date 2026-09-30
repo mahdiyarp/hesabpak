@@ -1279,3 +1279,79 @@ def test_cancelling_twice_does_not_reverse_a_cash_document_twice(
             .count()
         )
         assert voids == 1
+
+
+def test_two_lines_of_the_same_item_are_checked_in_total(
+    admin_client, make_item, make_person
+):
+    """A per-line stock check would let one invoice overdraw the same item.
+
+    5 + 5 units of an item that has 7 is not sellable, but every individual line
+    looks fine. Both the form pre-check and the authoritative check in
+    ``post_invoice`` have to accumulate across the lines of one document.
+    """
+    item = make_item(stock=7.0)
+    person = make_person(balance=0.0)
+    form = {
+        "invoice_kind": "sales",
+        "inv_number": "SAME-1",
+        "inv_date_greg": "2026-04-03",
+        "person_token": str(person.id),
+        "item_id[]": [str(item.id), str(item.id)],
+        "item_code[]": ["101", "101"],
+        "qty[]": ["5", "5"],
+        "unit_price[]": ["100", "100"],
+    }
+    response = admin_client.post("/sales", data=form, follow_redirects=True)
+    assert "کافی نیست" in response.data.decode()
+    with books():
+        assert db.session.query(app_module.Invoice).count() == 0
+        assert stock_of(item) == pytest.approx(7.0)
+
+    # the assistant path has no form pre-check at all, so the shared check in
+    # utils.accounting.post_invoice is the only thing standing between it and
+    # the same overdraft
+    with books():
+        with pytest.raises(ValueError) as excinfo:
+            app_module._apply_invoice_plan(
+                {
+                    "kind": "sales",
+                    "number": "SAME-2",
+                    "date": "2026-04-03",
+                    "partner": {"entity_id": person.id, "name": "مشتری", "code": "201"},
+                    "items": [
+                        {"entity_id": item.id, "name": "کالا", "qty": 5, "unit_price": 100},
+                        {"entity_id": item.id, "name": "کالا", "qty": 5, "unit_price": 100},
+                    ],
+                }
+            )
+        assert "کافی نیست" in str(excinfo.value)
+        assert stock_of(item) == pytest.approx(7.0)
+
+
+def test_the_negative_stock_setting_is_honoured_on_both_paths(
+    admin_client, make_item, make_person
+):
+    """The documented escape hatch must work, and only when it is switched on."""
+    item = make_item(stock=1.0)
+    person = make_person(balance=0.0)
+    plan = {
+        "kind": "sales",
+        "number": "NEG-1",
+        "date": "2026-04-03",
+        "partner": {"entity_id": person.id, "name": "مشتری", "code": "201"},
+        "items": [{"entity_id": item.id, "name": "کالا", "qty": 5, "unit_price": 100}],
+    }
+    with books():
+        with pytest.raises(ValueError):
+            app_module._apply_invoice_plan(dict(plan))
+
+    with books():
+        app_module.Setting.set("allow_negative_sales", "on")
+        try:
+            out = app_module._apply_invoice_plan(dict(plan))
+            assert out["invoice"].number == "NEG-1"
+            assert stock_of(item) == pytest.approx(-4.0)
+        finally:
+            app_module.Setting.set("allow_negative_sales", "off")
+            db.session.rollback()
