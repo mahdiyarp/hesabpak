@@ -420,6 +420,14 @@ def test_global_search_actions_do_not_use_dynamic_html_sink():
     assert "quickLinks.map" not in source
     assert "actions.innerHTML = quickLinks" not in source
 
+def test_cash_view_uses_printable_template():
+    source = Path(app_module.__file__).read_text(encoding="utf-8")
+    template = (Path(app_module.__file__).resolve().parent / "templates" / "cash_view.html").read_text(encoding="utf-8")
+    assert 'render_template(\n        "cash_view.html"' in source
+    assert "window.print()" in template
+    assert "doc.amount|sep|fa_digits" in template
+    assert "doc.cheque_due_date|jdate|fa_digits" in template
+
 def test_invoice_view_uses_printable_template_and_grouped_amounts():
     source = Path(app_module.__file__).read_text(encoding="utf-8")
     template = (Path(app_module.__file__).resolve().parent / "templates" / "invoice_view.html").read_text(encoding="utf-8")
